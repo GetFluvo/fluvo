@@ -1,18 +1,20 @@
 """
     Mapper
 """
-from internal.tools import to_m2m, to_m2o
-from internal.exceptions import SkippingException
+from . internal.tools import to_m2m, to_m2o
+from . internal.io import is_string
+from . internal.exceptions import SkippingException
 import base64
 import os
+import requests
 
 def str_to_mapper(field):
-    if isinstance(field, basestring):
+    if is_string(field):
         return val(field)
     return field
 
 def list_to_mapper(args):
-    return [val(f) if isinstance(f, basestring) else f for f in args]
+    return [val(f) if is_string(f) else f for f in args]
 
 
 def field(col):
@@ -117,9 +119,6 @@ def m2m_map(PREFIX, mapper):
         return to_m2m(PREFIX, mapper(line))
     return m2m_fun
 
-
-
-
 def bool_val(field, true_vals=[], false_vals=[]):
     def bool_val_fun(line):
         if line[field] in true_vals:
@@ -129,23 +128,47 @@ def bool_val(field, true_vals=[], false_vals=[]):
         return '1' if line[field] else '0'
     return bool_val_fun
 
-def binary(field, path_prefix, skip=False):
+def binary_map(mapper, path_prefix, skip=False, encoding="utf-8"):
     def binary_val(line):
-        path = path_prefix + (line[field] or '')
-        if not os.path.exists(path) or not line[field]:
+        field = mapper(line)
+        path = path_prefix + (mapper(line) or '')
+        if not os.path.exists(path) or not field:
             if skip:
                 raise SkippingException("Missing File %s for field %s" % (path, field))
             return ''
 
         with open(path, "rb") as image_file:
-                encoded_string = base64.b64encode(image_file.read())
+                encoded_string = base64.b64encode(image_file.read()).decode(encoding)
                 image_file.close()
         return encoded_string
     return binary_val
 
+def binary(field, path_prefix, skip=False, encoding="utf-8"):
+    return binary_map(val(field), path_prefix, skip=skip, encoding=encoding)
+
+
+
+def binary_url_map(mapper, skip=False, verbose=False, encoding="utf-8"):
+    def binary_url_fun(line):
+        url = mapper(line)
+        if verbose:
+            print("Fetch %s" % url)
+        res = requests.get(url)
+        if not res.status_code == 200:
+            if skip:
+                raise SkippingException("Cannot fetch file at url %s" % url)
+            return ''
+
+        return base64.b64encode(res.content).decode(encoding)
+    return binary_url_fun
+
+def binary_url(field, skip=False, verbose=False):
+    return binary_url_map(val(field), skip=skip, verbose=verbose)
+
+
+
 """
     Specific to attribute mapper for V9 product.attribute_import
-
 """
 
 def val_att(att_list):
@@ -209,7 +232,6 @@ def database_id_mapper_fallback_create(connection, model, *fields_mapper, **kwar
             if rec and rec[0]['res_id']:
                 return str(rec[0]['res_id'])
             else:
-                print "import"
                 connection.get_model(model).load(['id', 'name'], [[res, res]], context={'tracking_disable' : True, 'create_product_variant' : True,})
                 return database_id_mapper_fun(line)
         if skip:
@@ -255,6 +277,17 @@ def m2m_value_list(*args, **kwargs):
                 s.append(val)
         return s
     return split_m2m_value_fun
+
+def remove_sep_mapper(f):
+    """
+        @param f: field that will have the starting folder separator removed
+    """
+    def remove_sep_mapper_fun(line):
+        if line[f].startswith(os.sep):
+            return line[f][len(os.sep):]
+        else:
+            return line[f]
+    return remove_sep_mapper_fun
 
 
 ##############################
