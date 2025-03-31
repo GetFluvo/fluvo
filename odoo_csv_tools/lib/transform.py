@@ -122,7 +122,7 @@ class Processor(object):
             B      A          A           Blue
             C      B          B           Red
             D      B          B           Red
-            E      C                               
+            E      C
         """
         header, data = self.__read_file(filename, delimiter, encoding)
         child_key_pos = header.index(child_key)
@@ -246,6 +246,6 @@ class ProductProcessorV9(Processor):
 
 class ProductProcessorV10(Processor):
     def process_attribute_data(self, attributes_list, ATTRIBUTE_PREFIX, filename_out, import_args):
-        attr_header = ['id', 'name']
-        attr_data = [[mapper.to_m2o(ATTRIBUTE_PREFIX, att), att] for att in attributes_list]
+        attr_header = ['id', 'name', 'create_variant']
+        attr_data = [[mapper.to_m2o(ATTRIBUTE_PREFIX, att), att, 'Dynamically'] for att in attributes_list]
         self._add_data(attr_header, attr_data, filename_out, import_args)
