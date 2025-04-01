@@ -52,6 +52,7 @@ It also provide a framework to manipulate data from CSV.
         - [Adding a column](#adding-a-column)
         - [Removing Lines](#removing-lines)
       - [Updating Records With Database IDs](#updating-records-with-database-ids)
+      - [XML Processing](#XML-Processing)
   - [A Real Life Example](#a-real-life-example)
   - [Performances Considerations](#performances-considerations)
     - [Importing Related or Computed Fields](#importing-related-or-computed-fields)
@@ -1349,6 +1350,129 @@ my_mapping = {
     ...
 }
 ```
+
+#### XML Processing
+
+The `XMLProcessor` class allows you to transform data from XML files into a format suitable for Odoo import, providing an alternative to the `Processor` class for XML-based data sources.
+
+```python
+# -*- coding: utf-8 -*-
+from odoo_csv_tools.lib import mapper
+from odoo_csv_tools.lib.transform import Processor
+from lxml import etree
+
+processor = XMLProcessor(filename, root_node_path)
+```
+
+The XMLProcessor is initialized with the XML file to process and an XPath expression to identify the data records.
+
+`XMLProcessor.__init__(filename, root_node_path, conf_file=False)`
+Constructor for the XMLProcessor class.
+
+*Args:*
+
+`filename` (str): The path to the XML file to be processed.
+
+`root_node_path` (str): An XPath expression specifying the root node(s) within the XML file to iterate over. Each node found by this XPath will be treated as a data record.
+
+`conf_file` (str, optional): The path to a configuration file. Inherited from the Processor class but may not be used in the same way by XMLProcessor. Defaults to False.
+
+`XMLProcessor.process(mapping, filename_out, import_args, t='list', null_values=['NULL', False], verbose=True, m2m=False)`
+Transforms data from the XML file based on the provided mapping.
+
+*Args:*
+
+`mapping` (dict): A dictionary that defines how data from the XML file should be mapped to fields in the output format (e.g., CSV). The keys of the dictionary are the target field names, and the values are XPath expressions to extract the corresponding data from the XML.
+
+`filename_out` (str): The name of the output file where the transformed data will be written.
+
+`import_args` (dict): A dictionary containing arguments that will be passed to the odoo_import_thread.py script (e.g., `{'model': 'res.partner', 'context': "{'tracking_disable': True}"}`).
+
+`t (str, optional)`: This argument is kept for compatibility but is not used in XMLProcessor. Defaults to 'list'.
+
+`null_values` (list, optional): This argument is kept for compatibility but is not used in XMLProcessor. Defaults to `['NULL', False]`.
+
+`verbose` (bool, optional): This argument is kept for compatibility but is not used in XMLProcessor. Defaults to True.
+
+`m2m (bool, optional)`: This argument is kept for compatibility but is not used in XMLProcessor. Defaults to False.
+
+*Returns:*
+
+`tuple`: A tuple containing the header (list of field names) and the transformed data (list of lists).
+
+> **Important Notes:**
+The t, null_values, verbose, and m2m arguments are present for compatibility with the Processor class but are not actually used by the XMLProcessor.
+The mapping dictionary values should be XPath expressions that select the desired data from the XML nodes.
+
+`XMLProcessor.split(split_fun)`
+Raises a NotImplementedError because the split functionality is not supported for XMLProcessor.
+
+*Args:*
+
+`split_fun`: This argument is not used.
+
+*Raises:*
+
+`NotImplementedError`: Indicates that the split method is not available for XML processing.
+
+##### Example of XML to CSV Transformation
+
+Let's say you have the following XML data:
+
+```XML
+<?xml version="1.0"?>
+<data>
+    <country name="Liechtenstein">
+        <rank>1</rank>
+        <year>2008</year>
+        <gdppc>141100</gdppc>
+        <neighbor name="Austria" direction="E"/>
+        <neighbor name="Switzerland" direction="W"/>
+    </country>
+    <country name="Singapore">
+        <rank>4</rank>
+        <year>2011</year>
+        <gdppc>59900</gdppc>
+        <neighbor name="Malaysia" direction="N"/>
+    </country>
+    <country name="Panama">
+        <rank>68</rank>
+        <year>2011</year>
+        <gdppc>13600</gdppc>
+        <neighbor name="Costa Rica" direction="W"/>
+        <neighbor name="Colombia" direction="E"/>
+    </country>
+</data>
+```
+
+To transform this into a CSV file with columns "name", "gdp", "year", and "neighbor", you would use the following Python script and mapping:
+
+```Python
+from odoo_csv_tools.lib import mapper
+from odoo_csv_tools.lib.transform import XMLProcessor
+
+processor = XMLProcessor('countries.xml', '/data/country')
+
+mapping = {
+    'name': '/data/country/@name',
+    'gdp': '/data/country/gdppc/text()',
+    'year': '/data/country/year/text()',
+    'neighbor': '/data/country/neighbor/@name'
+}
+
+processor.process(mapping, 'countries.csv', {})
+```
+
+This would generate a CSV file like this:
+
+```CSV
+"name";"gdp";"year";"neighbor"
+"Liechtenstein";"141100";"2008";"Austria"
+"Singapore";"59900";"2011";"Malaysia"
+"Panama";"13600";"2011";"Costa Rica"
+```
+
+
 ## A Real Life Example
 A complete import project (transformation and load) is available in the repo [odoo_import_example](https://github.com/tfrancoi/odoo_import_example). It demonstrates use cases such as:
 - importing partners with multiple categories
