@@ -1,6 +1,6 @@
 [project]
 name = "odoo-data-flow"
-version = "0.0.0"
+version = "0.0.1"
 description = "Odoo Data Flow"
 readme = "README.md"
 requires-python = ">=3.9"
