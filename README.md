@@ -9,15 +9,15 @@
 [![Python Version](https://img.shields.io/pypi/pyversions/odoo-data-flow)][pypi status]
 [![License](https://img.shields.io/pypi/l/odoo-data-flow)][license]
 
-[![Read the documentation at https://odoo-data-flow.readthedocs.io/](https://img.shields.io/readthedocs/odoo-data-flow/latest.svg?label=Read%20the%20Docs)][read the docs]
+[![Read the documentation at https://odoodataflow.readthedocs.io/](https://img.shields.io/readthedocs/odoodataflow/latest.svg?label=Read%20the%20Docs)][read the docs]
 [![Tests](https://github.com/OdooDataFlow/odoo-data-flow/workflows/Tests/badge.svg)][tests]
-[![Codecov](https://codecov.io/gh/OdooDataFlow/odoo-data-flow/branch/main/graph/badge.svg)][codecov]
+[![Codecov](https://codecov.io/gh/OdooDataFlow/odoo-data-flow/branch/master/graph/badge.svg)][codecov]
 
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)][pre-commit]
 [![Ruff codestyle][ruff badge]][ruff project]
 
 [pypi status]: https://pypi.org/project/odoo-data-flow/
-[read the docs]: https://odoo-data-flow.readthedocs.io/
+[read the docs]: https://odoodataflow.readthedocs.io/
 [tests]: https://github.com/OdooDataFlow/odoo-data-flow/actions?workflow=Tests
 [codecov]: https://app.codecov.io/gh/OdooDataFlow/odoo-data-flow
 [pre-commit]: https://github.com/pre-commit/pre-commit
