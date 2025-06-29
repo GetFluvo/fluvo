@@ -1,4 +1,13 @@
 *.pyc
 .project
 .pydevproject
-
+.cache
+node_modules
+*.egg-info
+.ruff_cache
+.nox
+.venv
+__pycache__
+_build
+docs/_build
+coverage.xml
