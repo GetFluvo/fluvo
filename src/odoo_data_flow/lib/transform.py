@@ -54,6 +54,7 @@ class Processor:
         encoding: str = "utf-8",
         dataframe: Optional[pl.DataFrame] = None,
         preprocess: Callable[[pl.DataFrame], pl.DataFrame] = lambda df: df,
+        schema_overrides: Optional[dict[str, pl.DataType]] = None,
         **kwargs: Any,
     ) -> None:
         """Initializes the Processor."""
@@ -61,7 +62,9 @@ class Processor:
         self.dataframe: pl.DataFrame
 
         if filename:
-            self.dataframe = self._read_file(filename, separator, encoding, **kwargs)
+            self.dataframe = self._read_file(
+                filename, separator, encoding, schema_overrides, **kwargs
+            )
         elif dataframe is not None:
             self.dataframe = dataframe
         else:
@@ -73,7 +76,12 @@ class Processor:
         self.dataframe = preprocess(self.dataframe)
 
     def _read_file(
-        self, filename: str, separator: str, encoding: str, **kwargs: Any
+        self,
+        filename: str,
+        separator: str,
+        encoding: str,
+        schema_overrides: Optional[dict[str, pl.DataType]] = None,
+        **kwargs: Any,
     ) -> pl.DataFrame:
         """Reads a CSV or XML file and returns its content as a DataFrame."""
         _, file_extension = os.path.splitext(filename)
@@ -82,7 +90,12 @@ class Processor:
         if file_extension == ".csv":
             log.info(f"Reading CSV file: {filename}")
             try:
-                return pl.read_csv(filename, separator=separator, encoding=encoding)
+                return pl.read_csv(
+                    filename,
+                    separator=separator,
+                    encoding=encoding,
+                    schema_overrides=schema_overrides,
+                )
             except Exception as e:
                 log.error(f"Failed to read CSV file {filename}: {e}")
                 return pl.DataFrame()
@@ -267,6 +280,7 @@ class Processor:
         header_prefix: str = "child",
         separator: str = ";",
         encoding: str = "utf-8",
+        schema_overrides: Optional[dict[str, pl.DataType]] = None,
         dry_run: bool = False,
     ) -> None:
         """Joins data from a secondary file into the processor's main data.
@@ -278,17 +292,23 @@ class Processor:
             header_prefix: A prefix to add to the headers from the child file.
             separator: The column separator for the child CSV file.
             encoding: The character encoding of the child file.
+            schema_overrides: A dictionary to override Polars' inferred data
+                types for the joined file.
             dry_run: If True, prints a sample of the joined data to the
                 console without modifying the processor's state.
         """
-        child_df = self._read_file(filename, separator, encoding)
+        child_df = self._read_file(
+            filename, separator, encoding, schema_overrides=schema_overrides
+        )
         child_df = child_df.rename(
             {col: f"{header_prefix}_{col}" for col in child_df.columns}
         )
 
         if dry_run:
             joined_df = self.dataframe.join(
-                child_df, left_on=master_key, right_on=f"{header_prefix}_{child_key}"
+                child_df,
+                left_on=master_key,
+                right_on=f"{header_prefix}_{child_key}",
             )
             log.info("--- DRY RUN MODE (Outputting sample of joined data) ---")
             console = Console()
@@ -305,7 +325,9 @@ class Processor:
             log.info(f"Total rows that would be generated: {len(joined_df)}")
         else:
             self.dataframe = self.dataframe.join(
-                child_df, left_on=master_key, right_on=f"{header_prefix}_{child_key}"
+                child_df,
+                left_on=master_key,
+                right_on=f"{header_prefix}_{child_key}",
             )
 
     def _add_data(
@@ -414,7 +436,9 @@ class ProductProcessorV10(Processor):
         ]
         # Corrected: Use the 'schema' argument to enforce column order.
         self._add_data(
-            pl.DataFrame(attr_data, schema=attr_header), filename_out, import_args
+            pl.DataFrame(attr_data, schema=attr_header),
+            filename_out,
+            import_args,
         )
 
     # NEW METHOD for product.attribute.value.csv
