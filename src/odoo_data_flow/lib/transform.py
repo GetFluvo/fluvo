@@ -2,6 +2,7 @@
 
 import inspect
 import os
+import sys
 from collections import OrderedDict
 from collections.abc import Mapping
 from typing import (
@@ -10,6 +11,16 @@ from typing import (
     Optional,
     Union,
 )
+
+if sys.version_info < (3, 10):
+    from typing import Union as TypeUnion
+else:
+    TypeUnion = Union
+
+if sys.version_info < (3, 10):
+    from typing import Union as TypeUnion
+else:
+    TypeUnion = Union
 
 import polars as pl
 from lxml import etree  # type: ignore[import-untyped]
@@ -52,16 +63,27 @@ class Processor:
         filename: Optional[str] = None,
         separator: str = ";",
         encoding: str = "utf-8",
+        model: Optional[str] = None,
         dataframe: Optional[pl.DataFrame] = None,
         preprocess: Callable[[pl.DataFrame], pl.DataFrame] = lambda df: df,
+        schema_overrides: Optional[dict[str, pl.DataType]] = None,
+        connection: Optional[Any] = None,
+        mapping: Optional[Mapping[str, Any]] = None,
         **kwargs: Any,
     ) -> None:
         """Initializes the Processor."""
         self.file_to_write: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.dataframe: pl.DataFrame
 
+        # NEW: Parse the mapping to separate logic from type hints
+        self.schema_overrides, self.logic_mapping = self._parse_mapping(
+            mapping if mapping is not None else {}
+        )
+
         if filename:
-            self.dataframe = self._read_file(filename, separator, encoding, **kwargs)
+            self.dataframe = self._read_file(
+                filename, separator, encoding, schema_overrides, **kwargs
+            )
         elif dataframe is not None:
             self.dataframe = dataframe
         else:
@@ -69,11 +91,36 @@ class Processor:
                 "Processor must be initialized with either "
                 "a 'filename' or a 'dataframe'."
             )
-
         self.dataframe = preprocess(self.dataframe)
 
+    def _parse_mapping(
+        self, mapping: Mapping[str, Any]
+    ) -> tuple[dict[str, pl.DataType], dict[str, Any]]:
+        """Parses a mapping dict to separate Polars types from mapper functions."""
+        schema_overrides: dict[str, pl.DataType] = {}
+        logic_mapping: dict[str, Any] = {}
+        for key, value in mapping.items():
+            if (
+                isinstance(value, tuple)
+                and len(value) == 2
+                and isinstance(value[0], pl.DataType)
+            ):
+                # It's a typed mapping: (pl.DataType, function)
+                schema_overrides[key] = value[0]
+                logic_mapping[key] = value[1]
+            else:
+                # It's a standard mapping: function
+                logic_mapping[key] = value
+        return schema_overrides, logic_mapping
+
+    # MODIFIED: _read_file now takes schema_overrides from __init__
     def _read_file(
-        self, filename: str, separator: str, encoding: str, **kwargs: Any
+        self,
+        filename: str,
+        separator: str,
+        encoding: str,
+        schema_overrides: Optional[dict[str, pl.DataType]] = None,
+        **kwargs: Any,
     ) -> pl.DataFrame:
         """Reads a CSV or XML file and returns its content as a DataFrame."""
         _, file_extension = os.path.splitext(filename)
@@ -82,7 +129,12 @@ class Processor:
         if file_extension == ".csv":
             log.info(f"Reading CSV file: {filename}")
             try:
-                return pl.read_csv(filename, separator=separator, encoding=encoding)
+                return pl.read_csv(
+                    filename,
+                    separator=separator,
+                    encoding=encoding,
+                    schema_overrides=schema_overrides,
+                )
             except Exception as e:
                 log.error(f"Failed to read CSV file {filename}: {e}")
                 return pl.DataFrame()
@@ -155,7 +207,10 @@ class Processor:
                 lambda row: split_fun(row, 0), return_dtype=pl.Int64
             )
         )
-        return {key: Processor(dataframe=group) for key, group in grouped}
+        return {
+            key: Processor(dataframe=group, mapping=self.logic_mapping)
+            for key, group in grouped
+        }
 
     def get_o2o_mapping(self) -> dict[str, MapperRepr]:
         """Generates a direct 1-to-1 mapping dictionary."""
@@ -267,6 +322,7 @@ class Processor:
         header_prefix: str = "child",
         separator: str = ";",
         encoding: str = "utf-8",
+        schema_overrides: Optional[dict[str, pl.DataType]] = None,
         dry_run: bool = False,
     ) -> None:
         """Joins data from a secondary file into the processor's main data.
@@ -278,17 +334,23 @@ class Processor:
             header_prefix: A prefix to add to the headers from the child file.
             separator: The column separator for the child CSV file.
             encoding: The character encoding of the child file.
+            schema_overrides: A dictionary to override Polars' inferred data
+                types for the joined file.
             dry_run: If True, prints a sample of the joined data to the
                 console without modifying the processor's state.
         """
-        child_df = self._read_file(filename, separator, encoding)
+        child_df = self._read_file(
+            filename, separator, encoding, schema_overrides=schema_overrides
+        )
         child_df = child_df.rename(
             {col: f"{header_prefix}_{col}" for col in child_df.columns}
         )
 
         if dry_run:
             joined_df = self.dataframe.join(
-                child_df, left_on=master_key, right_on=f"{header_prefix}_{child_key}"
+                child_df,
+                left_on=master_key,
+                right_on=f"{header_prefix}_{child_key}",
             )
             log.info("--- DRY RUN MODE (Outputting sample of joined data) ---")
             console = Console()
@@ -305,7 +367,9 @@ class Processor:
             log.info(f"Total rows that would be generated: {len(joined_df)}")
         else:
             self.dataframe = self.dataframe.join(
-                child_df, left_on=master_key, right_on=f"{header_prefix}_{child_key}"
+                child_df,
+                left_on=master_key,
+                right_on=f"{header_prefix}_{child_key}",
             )
 
     def _add_data(
@@ -414,7 +478,9 @@ class ProductProcessorV10(Processor):
         ]
         # Corrected: Use the 'schema' argument to enforce column order.
         self._add_data(
-            pl.DataFrame(attr_data, schema=attr_header), filename_out, import_args
+            pl.DataFrame(attr_data, schema=attr_header),
+            filename_out,
+            import_args,
         )
 
     # NEW METHOD for product.attribute.value.csv
@@ -497,7 +563,7 @@ class ProductProcessorV9(Processor):
         ).filter(pl.col("attribute_value_name").is_not_null())
 
         # Create a temporary processor to reuse the robust mapping logic
-        temp_processor = Processor(dataframe=unpivoted)
+        temp_processor = Processor(dataframe=unpivoted, mapping=mapping)
         result_df = temp_processor._process_mapping(mapping, null_values=[])
         return result_df.unique()
 
