@@ -67,15 +67,40 @@ class Processor:
         dataframe: Optional[pl.DataFrame] = None,
         connection: Optional[Any] = None,
         model: Optional[str] = None,
+        config_file: Optional[str] = None,  # Added for fallback
+
         separator: str = ";",
         preprocess: Callable[[pl.DataFrame], pl.DataFrame] = lambda df: df,
         **kwargs: Any,
     ) -> None:
-        """Initializes the Processor."""
+
+        """Initializes the Processor.
+
+        The Processor can be initialized either by providing a `source_filename` to read
+        from disk, or by providing a `dataframe` to work with in-memory data.
+
+        Args:
+            source_filename: The path to the source CSV or XML file.
+            config_file: Path to the Odoo connection configuration file. Used as a
+                           fallback for operations that require a DB connection if
+                           no specific config is provided later.
+            separator: The column delimiter for CSV files.
+            encoding: The character encoding of the source file.
+            model: The Odoo model name (e.g., 'product.template').
+            dataframe: A Polars DataFrame to initialize the Processor with.
+            preprocess: A function to modify the raw data (Polars DataFrame)
+                before mapping begins.
+            schema_overrides: A dictionary to override Polars' inferred data types.
+            connection: An optional Odoo connection object.
+            mapping: A dictionary defining the transformation rules, potentially
+                including schema overrides.
+            **kwargs: Catches other arguments, primarily for XML processing.
+        """    
         self.file_to_write: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.dataframe: pl.DataFrame
 
         parsed_overrides, self.logic_mapping = self._parse_mapping(mapping)
+        self.config_file = config_file
 
         final_schema = parsed_overrides
         if connection and model:
@@ -368,6 +393,9 @@ class Processor:
         init = not append
         for _, info in self.file_to_write.items():
             info_copy = info.copy()
+            # NEW: Use the config from params if available,
+            #  otherwise use the processor's default
+            info_copy["conf_file"] = str(info.get("config")) or self.config_file
             info_copy.update(
                 {
                     "model": info.get("model", "auto"),
