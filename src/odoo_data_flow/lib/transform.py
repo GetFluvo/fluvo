@@ -82,13 +82,14 @@ class Processor:
             config_file: Path to the Odoo connection configuration file. Used as a
                            fallback for operations that require a DB connection if
                            no specific config is provided later.
-            separator: The column delimiter for CSV files.
-            encoding: The character encoding of the source file.
             model: The Odoo model name (e.g., 'product.template').
             dataframe: A Polars DataFrame to initialize the Processor with.
+            connection: An optional Odoo connection object for schema fetching.
+            model: The Odoo model name (e.g., 'product.template').
+            config_file: Path to the Odoo connection configuration file.
+            separator: The column delimiter for CSV files.
             preprocess: A function to modify the raw data (Polars DataFrame)
                 before mapping begins.
-            schema_overrides: A dictionary to override Polars' inferred data types.
             connection: An optional Odoo connection object.
             mapping: A dictionary defining the transformation rules, potentially
                 including schema overrides.
@@ -96,14 +97,14 @@ class Processor:
         """
         self.file_to_write: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.dataframe: pl.DataFrame
-
-        parsed_overrides, self.logic_mapping = self._parse_mapping(mapping)
         self.config_file = config_file
 
-        final_schema = parsed_overrides
+        schema_overrides, self.logic_mapping = self._parse_mapping(mapping)
+
+        final_schema = schema_overrides
         if connection and model:
             base_schema = build_polars_schema(connection, model)
-            final_schema = {**base_schema, **parsed_overrides}
+            final_schema = {**base_schema, **schema_overrides}
 
         self.schema_overrides = final_schema
 
@@ -163,6 +164,7 @@ class Processor:
                     separator=separator,
                     encoding="utf-8",
                     schema_overrides=schema_overrides,
+                    try_parse_dates=True,
                 )
             except Exception as e:
                 log.error(f"Failed to read CSV file {filename}: {e}")
@@ -191,7 +193,12 @@ class Processor:
             except etree.XMLSyntaxError as e:
                 log.error(f"Failed to parse XML file {filename}: {e}")
                 return pl.DataFrame()
-
+            except Exception as e:
+                log.error(
+                    f"An unexpected error occurred while reading XML file "
+                    f"{filename}: {e}"
+                )
+                return pl.DataFrame()
         return pl.DataFrame()
 
     def check(
@@ -269,7 +276,7 @@ class Processor:
         t: str = "list",
         null_values: Optional[list[Any]] = None,
         m2m: bool = False,
-        m2m_columns: Optional[list[str]] = None,  # <-- Add this new parameter
+        m2m_columns: Optional[list[str]] = None,
         dry_run: bool = False,
     ) -> pl.DataFrame:
         """Processes the data using a mapping and prepares it for writing.
@@ -414,7 +421,6 @@ class Processor:
         child_key: str,
         header_prefix: str = "child",
         separator: str = ";",
-        encoding: str = "utf-8",
         schema_overrides: Optional[dict[str, type[pl.DataType]]] = None,
         dry_run: bool = False,
     ) -> None:
@@ -426,7 +432,6 @@ class Processor:
             child_key: The column name in the secondary data to join on.
             header_prefix: A prefix to add to the headers from the child file.
             separator: The column separator for the child CSV file.
-            encoding: The character encoding of the child file.
             schema_overrides: A dictionary to override Polars' inferred data
                 types for the joined file.
             dry_run: If True, prints a sample of the joined data to the
