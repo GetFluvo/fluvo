@@ -67,46 +67,71 @@ class Processor:
         dataframe: Optional[pl.DataFrame] = None,
         connection: Optional[Any] = None,
         model: Optional[str] = None,
-        config_file: Optional[str] = None,  # Added for fallback
+        config_file: Optional[str] = None,
         separator: str = ";",
         preprocess: Callable[[pl.DataFrame], pl.DataFrame] = lambda df: df,
+        schema_overrides: Optional[dict[str, pl.DataType]] = None,
         **kwargs: Any,
     ) -> None:
         """Initializes the Processor.
 
-        The Processor can be initialized either by providing a `source_filename` to read
-        from disk, or by providing a `dataframe` to work with in-memory data.
+        The Processor can be initialized either by providing a `source_filename`
+        to read from disk, or by providing a `dataframe` to work with in-memory
+        data.
 
         Args:
             source_filename: The path to the source CSV or XML file.
-            config_file: Path to the Odoo connection configuration file. Used as a
-                           fallback for operations that require a DB connection if
-                           no specific config is provided later.
+            config_file: Path to the Odoo connection configuration file. Used as
+                           a fallback for operations that require a DB
+                           connection if no specific config is provided later.
             model: The Odoo model name (e.g., 'product.template').
             dataframe: A Polars DataFrame to initialize the Processor with.
             connection: An optional Odoo connection object for schema fetching.
-            model: The Odoo model name (e.g., 'product.template').
+            model: The Odoo model name (e.g., 'product.template'). If provided
+                   with a connection, a base schema will be pre-fetched.
             config_file: Path to the Odoo connection configuration file.
             separator: The column delimiter for CSV files.
             preprocess: A function to modify the raw data (Polars DataFrame)
                 before mapping begins.
             connection: An optional Odoo connection object.
-            mapping: A dictionary defining the transformation rules, potentially
-                including schema overrides.
+            mapping: A dictionary defining the transformation rules. Can also,
+                     include Polars data types as tuples for manual schema
+                     overrides e.g. `'field': (pl.Utf8, mapper_function)`.
+            schema_overrides: A dictionary mapping column names to Polars data
+                              types to optimize CSV reading performance. This is
+                              the recommended way to provide a schema for
+                              offline processing.
             **kwargs: Catches other arguments, primarily for XML processing.
         """
         self.file_to_write: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.dataframe: pl.DataFrame
         self.config_file = config_file
 
-        schema_overrides, self.logic_mapping = self._parse_mapping(mapping)
+        manual_overrides, self.logic_mapping = self._parse_mapping(mapping)
 
-        final_schema = schema_overrides
+        final_schema: dict[str, pl.DataType] = {}
         if connection and model:
-            base_schema = build_polars_schema(connection, model)
-            final_schema = {**base_schema, **schema_overrides}
+            schema_from_odoo = build_polars_schema(connection, model)
+            final_schema.update({k: v() for k, v in schema_from_odoo.items()})
+        if schema_overrides:
+            final_schema.update(schema_overrides)
+        if manual_overrides:
+            final_schema.update(manual_overrides)
 
-        self.schema_overrides = final_schema
+        self.schema_overrides = final_schema if final_schema else None
+
+        if source_filename:
+            self.dataframe = self._read_file(
+                source_filename, separator, self.schema_overrides, **kwargs
+            )
+        elif dataframe is not None:
+            self.dataframe = dataframe
+        else:
+            raise ValueError(
+                "Processor must be initialized with either "
+                "a 'source_filename' or a 'dataframe'."
+            )
+        self.dataframe = preprocess(self.dataframe)
 
         if source_filename:
             self.dataframe = self._read_file(
@@ -123,9 +148,9 @@ class Processor:
 
     def _parse_mapping(
         self, mapping: Optional[Mapping[str, Any]]
-    ) -> tuple[dict[str, type[pl.DataType]], dict[str, Any]]:
+    ) -> tuple[dict[str, pl.DataType], dict[str, Any]]:
         """Parses a mapping dict to separate Polars types from mapper functions."""
-        schema_overrides: dict[str, type[pl.DataType]] = {}
+        schema_overrides: dict[str, pl.DataType] = {}
         logic_mapping: dict[str, Any] = {}
         if not mapping:
             return schema_overrides, logic_mapping
@@ -137,8 +162,7 @@ class Processor:
                 and isinstance(value[0], type)
                 and issubclass(value[0], pl.DataType)
             ):
-                # It's a typed mapping: (pl.DataType, function)
-                schema_overrides[key] = value[0]
+                schema_overrides[key] = value[0]()  # Instantiate the type
                 logic_mapping[key] = value[1]
             else:
                 # It's a standard mapping: function
@@ -149,7 +173,7 @@ class Processor:
         self,
         filename: str,
         separator: str,
-        schema_overrides: Optional[dict[str, type[pl.DataType]]] = None,
+        schema_overrides: Optional[dict[str, pl.DataType]] = None,
         **kwargs: Any,
     ) -> pl.DataFrame:
         """Reads a CSV or XML file and returns its content as a DataFrame."""
@@ -237,17 +261,16 @@ class Processor:
 
         grouped = df_with_index.group_by(
             pl.struct(pl.all()).map_elements(
-                # FIX: Cast the result to a string and specify the return dtype
                 lambda row: str(split_fun(row, row.get("index"))),
                 return_dtype=pl.String,
             )
         )
-
+        schema_items = (self.schema_overrides or {}).items()
         new_mapping = {
             **{k: v for k, v in self.logic_mapping.items()},
             **{
                 k: (v, self.logic_mapping.get(k))
-                for k, v in self.schema_overrides.items()
+                for k, v in schema_items
                 if self.logic_mapping.get(k)
             },
         }
@@ -421,7 +444,7 @@ class Processor:
         child_key: str,
         header_prefix: str = "child",
         separator: str = ";",
-        schema_overrides: Optional[dict[str, type[pl.DataType]]] = None,
+        schema_overrides: Optional[dict[str, pl.DataType]] = None,
         dry_run: bool = False,
     ) -> None:
         """Joins data from a secondary file into the processor's main data.

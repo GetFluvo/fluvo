@@ -60,7 +60,7 @@ def test_processor_init_with_typed_mapping() -> None:
         "city": mapper.val("city"),
     }
     processor = Processor(mapping=typed_mapping, dataframe=pl.DataFrame())
-    assert processor.schema_overrides == {"active": pl.Boolean}
+    assert processor.schema_overrides == {"active": pl.Boolean()}
     assert "active" in processor.logic_mapping
     assert "city" in processor.logic_mapping
     assert callable(processor.logic_mapping["active"])
