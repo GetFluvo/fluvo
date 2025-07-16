@@ -42,7 +42,7 @@ The command is configured using a set of options. Here are the most essential on
 | `--config`          | **Required**. Path to your `connection.conf` file containing the Odoo credentials.                                                                                                                       |
 | `--model`           | **Required**. The technical name of the Odoo model you want to export records from (e.g., `res.partner`).                                                                                                |
 | `--fields`          | **Required**. A comma-separated list of the technical field names you want to include in the export file.                                                                                                |
-| `--file`            | **Required**. The path and filename for the output CSV file (e.g., `data/exported_partners.csv`).                                                                                                        |
+| `--output`            | **Required**. The path and filename for the output CSV file (e.g., `data/exported_partners.csv`).                                                                                                        |
 | `--domain`          | A filter to select which records to export, written as a string. Defaults to `[]` (export all records).                                                                                                  |
 | `--worker`          | The number of parallel processes to use for the export. Defaults to `1`.                                                                                                                                 |
 | `--size`            | The number of records to fetch in a single batch. Defaults to `10`.                                                                                                                                      |
@@ -85,7 +85,7 @@ odoo-data-flow export \
     --model "res.partner" \
     --domain "[('is_company', '=', False), ('country_id.code', '=', 'BE')]" \
     --fields "name,email,city,country_id/name" \
-    --file "data/belgian_contacts.csv"
+    --output "data/belgian_contacts.csv"
 ```
 
 ### Result
