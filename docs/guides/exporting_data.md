@@ -25,21 +25,29 @@ flowchart TD
 
 The export process is handled by the `export` sub-command of the main `odoo-data-flow` tool. Unlike the import workflow, exporting is a single-step operation where you execute one command with the right parameters to pull data from your Odoo database.
 
+## High-Performance, Streaming Exports
+
+The `export` command is built for performance and scalability. To handle massive datasets with millions of records, the export process uses a streaming pipeline:
+
+* **Low Memory Usage:** Instead of loading the entire dataset into memory, records are fetched from Odoo in batches, processed, and written directly to the output file. This ensures that even very large exports can run on machines with limited RAM.
+* **Type-Aware Cleaning:** The export process automatically cleans the data before writing. It intelligently inspects the field types on your Odoo model and corrects common data inconsistencies, such as converting Odoo's `False` values to empty strings for non-boolean fields (like `phone` or `website`), while preserving `False` for actual boolean fields.
+* **High-Speed Writer:** The tool uses the high-performance, multi-threaded CSV writer from the `Polars` library, making the file writing process significantly faster than standard Python libraries.
+
 ### Command-Line Options
 
 The command is configured using a set of options. Here are the most essential ones:
 
-| Option     | Description                                                                                               |
-| ---------- | --------------------------------------------------------------------------------------------------------- |
-| `--config` | **Required**. Path to your `connection.conf` file containing the Odoo credentials.                        |
-| `--model`  | **Required**. The technical name of the Odoo model you want to export records from (e.g., `res.partner`). |
-| `--fields` | **Required**. A comma-separated list of the technical field names you want to include in the export file. |
-| `--file`   | **Required**. The path and filename for the output CSV file (e.g., `data/exported_partners.csv`).         |
-| `--domain` | A filter to select which records to export, written as a string. Defaults to `[]` (export all records).   |
-| `--worker` | The number of parallel processes to use for the export. Defaults to `1`.                                  |
-| `--size`   | The number of records to fetch in a single batch. Defaults to `10`.                                       |
-| `--sep`    | The character separating columns. Defaults to a semicolon (`;`).                                          |
-| `--technical-names` | A flag that, when present, exports the raw technical values for `Selection` fields (e.g., `delivery`) instead of the human-readable labels (e.g., `Shipping Address`). This is highly recommended for data migrations. |
+| Option              | Description                                                                                                                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--config`          | **Required**. Path to your `connection.conf` file containing the Odoo credentials.                                                                                                                       |
+| `--model`           | **Required**. The technical name of the Odoo model you want to export records from (e.g., `res.partner`).                                                                                                |
+| `--fields`          | **Required**. A comma-separated list of the technical field names you want to include in the export file.                                                                                                |
+| `--file`            | **Required**. The path and filename for the output CSV file (e.g., `data/exported_partners.csv`).                                                                                                        |
+| `--domain`          | A filter to select which records to export, written as a string. Defaults to `[]` (export all records).                                                                                                  |
+| `--worker`          | The number of parallel processes to use for the export. Defaults to `1`.                                                                                                                                 |
+| `--size`            | The number of records to fetch in a single batch. Defaults to `10`.                                                                                                                                      |
+| `--sep`             | The character separating columns. Defaults to a semicolon (`;`).                                                                                                                                         |
+| `--technical-names` | A flag that, when present, exports the raw technical values for fields (e.g., `draft` for a selection field, `False` for a boolean). This is highly recommended for data migrations and is type-aware. |
 
 
 ### Understanding the `--domain` Filter
