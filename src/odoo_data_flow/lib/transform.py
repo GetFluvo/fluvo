@@ -68,12 +68,10 @@ class Processor:
         connection: Optional[Any] = None,
         model: Optional[str] = None,
         config_file: Optional[str] = None,  # Added for fallback
-
         separator: str = ";",
         preprocess: Callable[[pl.DataFrame], pl.DataFrame] = lambda df: df,
         **kwargs: Any,
     ) -> None:
-
         """Initializes the Processor.
 
         The Processor can be initialized either by providing a `source_filename` to read
@@ -95,7 +93,7 @@ class Processor:
             mapping: A dictionary defining the transformation rules, potentially
                 including schema overrides.
             **kwargs: Catches other arguments, primarily for XML processing.
-        """    
+        """
         self.file_to_write: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.dataframe: pl.DataFrame
 
