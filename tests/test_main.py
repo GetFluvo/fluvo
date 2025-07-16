@@ -79,7 +79,7 @@ def test_export_command_calls_runner(
             "export",
             "--config",
             "my.conf",
-            "--file",
+            "--output",
             "my.csv",
             "--model",
             "res.partner",

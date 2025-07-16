@@ -1,6 +1,7 @@
 """Command-line interface for odoo-data-flow."""
 
 import ast
+from importlib.metadata import version as get_version
 from typing import Any, Optional
 
 import click
@@ -23,7 +24,7 @@ from .workflow_runner import run_invoice_v9_workflow
     context_settings=dict(help_option_names=["-h", "--help"]),
     invoke_without_command=True,
 )
-@click.version_option()
+@click.version_option(version=get_version("odoo-data-flow"))
 @click.option(
     "-v", "--verbose", is_flag=True, help="Enable verbose, debug-level logging."
 )
@@ -222,6 +223,8 @@ def invoice_v9_cmd(**kwargs: Any) -> None:
 )
 @click.option(
     "--headless",
+    is_flag=True,
+    default=False,
     help="Run in headless mode, auto-confirming any prompts "
     "(e.g., installing languages).",
 )
@@ -267,7 +270,7 @@ def import_cmd(**kwargs: Any) -> None:
     show_default=True,
     help="Configuration file for connection parameters.",
 )
-@click.option("--file", "filename", required=True, help="Output file path.")
+@click.option("--output", required=True, help="Output file path.")
 @click.option("--model", required=True, help="Odoo model to export from.")
 @click.option(
     "--fields", required=True, help="Comma-separated list of fields to export."
