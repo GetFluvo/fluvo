@@ -74,7 +74,8 @@ def mock_mapper_dependencies(mocker: MagicMock) -> None:
     """Fixture to mock external dependencies in mapper.py."""
     mocker.patch("odoo_data_flow.lib.mapper.to_m2o", side_effect=_mock_to_m2o)
     mocker.patch(
-        "odoo_data_flow.lib.mapper._get_field_value", side_effect=_mock_get_field_value
+        "odoo_data_flow.lib.mapper._get_field_value",
+        side_effect=_mock_get_field_value,
     )
     mocker.patch("odoo_data_flow.lib.mapper.concat", side_effect=_mock_concat)
     # Patch log to prevent actual logging during tests if desired,
@@ -141,7 +142,7 @@ def test_concat_skip_on_empty() -> None:
 def test_num_mapper() -> None:
     """Tests the num mapper for comma replacement."""
     mapper_func = mapper.num("price")
-    assert mapper_func(LINE_NUMERIC, {}) == "12.50"
+    assert mapper_func(LINE_NUMERIC, {}) == 12.5
 
 
 def test_m2o_map_success() -> None:
@@ -248,7 +249,7 @@ def test_record_mapper() -> None:
     result = record_mapper(LINE_HIERARCHY, {})
     assert isinstance(result, dict)
     assert result.get("product_id/id") == "prod_.PROD-A"
-    assert result.get("product_uom_qty") == "5"
+    assert result.get("product_uom_qty") == 5
 
 
 def test_binary_empty_path() -> None:
@@ -324,7 +325,11 @@ def test_legacy_mappers() -> None:
 def test_modern_template_attribute_mapper() -> None:
     """Tests the m2m_template_attribute_value mapper for modern Odoo versions."""
     # Case 1: template_id exists, should return concatenated values
-    line_with_template: LineDict = {"template_id": "TPL1", "Color": "Blue", "Size": "L"}
+    line_with_template: LineDict = {
+        "template_id": "TPL1",
+        "Color": "Blue",
+        "Size": "L",
+    }
     mapper_func = mapper.m2m_template_attribute_value("PREFIX", "Color", "Size")
     assert mapper_func(line_with_template, {}) == "Blue,L"
 
@@ -347,7 +352,12 @@ def test_split_mappers() -> None:
 
 def test_bool_val_mapper() -> None:
     """Tests the bool_val mapper with various configurations."""
-    line = {"is_active": "yes", "is_vip": "no", "is_member": "true", "is_guest": ""}
+    line = {
+        "is_active": "yes",
+        "is_vip": "no",
+        "is_member": "true",
+        "is_guest": "",
+    }
 
     # Test with true_values
     mapper_true = mapper.bool_val("is_active", true_values=["yes", "true"])
@@ -454,7 +464,8 @@ def test_m2o_fun_state_present_but_unused(mocker: MagicMock) -> None:
         mocker: The pytest-mock fixture for patching.
     """
     mock_get_field_value = mocker.patch(
-        "odoo_data_flow.lib.mapper._get_field_value", side_effect=_mock_get_field_value
+        "odoo_data_flow.lib.mapper._get_field_value",
+        side_effect=_mock_get_field_value,
     )
     mock_to_m2o = mocker.patch(
         "odoo_data_flow.lib.mapper.to_m2o", side_effect=_mock_to_m2o
@@ -472,14 +483,17 @@ def test_m2o_fun_state_present_but_unused(mocker: MagicMock) -> None:
     assert state == {"some_key": "some_value", "another_key": 123}
 
 
-def test_m2o_fun_with_skip_and_empty_value_state_unused(mocker: MagicMock) -> None:
+def test_m2o_fun_with_skip_and_empty_value_state_unused(
+    mocker: MagicMock,
+) -> None:
     """Tests m2o_fun with 'skip' when value is empty, confirming state is unused.
 
     Args:
         mocker: The pytest-mock fixture for patching.
     """
     mock_get_field_value = mocker.patch(
-        "odoo_data_flow.lib.mapper._get_field_value", side_effect=_mock_get_field_value
+        "odoo_data_flow.lib.mapper._get_field_value",
+        side_effect=_mock_get_field_value,
     )
     mock_to_m2o = mocker.patch(
         "odoo_data_flow.lib.mapper.to_m2o", side_effect=_mock_to_m2o

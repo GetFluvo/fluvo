@@ -10,6 +10,7 @@ from typing import (
     Callable,
     Optional,
     Union,
+    cast,
 )
 
 from .odoo_lib import build_polars_schema
@@ -82,25 +83,25 @@ class Processor:
         Args:
             source_filename: The path to the source CSV or XML file.
             config_file: Path to the Odoo connection configuration file. Used as
-                           a fallback for operations that require a DB
-                           connection if no specific config is provided later.
+                        a fallback for operations that require a DB
+                        connection if no specific config is provided later.
             model: The Odoo model name (e.g., 'product.template').
             dataframe: A Polars DataFrame to initialize the Processor with.
             connection: An optional Odoo connection object for schema fetching.
             model: The Odoo model name (e.g., 'product.template'). If provided
-                   with a connection, a base schema will be pre-fetched.
+                with a connection, a base schema will be pre-fetched.
             config_file: Path to the Odoo connection configuration file.
             separator: The column delimiter for CSV files.
             preprocess: A function to modify the raw data (Polars DataFrame)
                 before mapping begins.
             connection: An optional Odoo connection object.
             mapping: A dictionary defining the transformation rules. Can also,
-                     include Polars data types as tuples for manual schema
-                     overrides e.g. `'field': (pl.Utf8, mapper_function)`.
+                    include Polars data types as tuples for manual schema
+                    overrides e.g. `'field': (pl.Utf8, mapper_function)`.
             schema_overrides: A dictionary mapping column names to Polars data
-                              types to optimize CSV reading performance. This is
-                              the recommended way to provide a schema for
-                              offline processing.
+                            types to optimize CSV reading performance. This is
+                            the recommended way to provide a schema for
+                            offline processing.
             **kwargs: Catches other arguments, primarily for XML processing.
         """
         self.file_to_write: OrderedDict[str, dict[str, Any]] = OrderedDict()
@@ -118,6 +119,18 @@ class Processor:
         if manual_overrides:
             final_schema.update(manual_overrides)
 
+        # --- FINAL NORMALIZATION STEP ---
+        # Ensure all values in the final schema are instances, not classes.
+        # This resolves all mypy/typeguard errors downstream.
+        if final_schema:
+            final_schema = {
+                k: v()
+                if inspect.isclass(v) and issubclass(v, pl.DataType)  # type: ignore[unreachable]
+                else v
+                for k, v in final_schema.items()
+            }
+        # --- END FINAL NORMALIZATION STEP ---
+
         self.schema_overrides = final_schema if final_schema else None
 
         if source_filename:
@@ -131,19 +144,7 @@ class Processor:
                 "Processor must be initialized with either "
                 "a 'source_filename' or a 'dataframe'."
             )
-        self.dataframe = preprocess(self.dataframe)
 
-        if source_filename:
-            self.dataframe = self._read_file(
-                source_filename, separator, self.schema_overrides, **kwargs
-            )
-        elif dataframe is not None:
-            self.dataframe = dataframe
-        else:
-            raise ValueError(
-                "Processor must be initialized with either "
-                "a 'source_filename' or a 'dataframe'."
-            )
         self.dataframe = preprocess(self.dataframe)
 
     def _parse_mapping(
@@ -209,10 +210,14 @@ class Processor:
                     nodes = tree.xpath(xml_root_path)
 
                 if not nodes:
-                    log.warning(f"No nodes found for root path '{xml_root_path}'")
+                    log.warning(
+                        f"No nodes found for root path '{xml_root_path}'"
+                    )
                     return pl.DataFrame()
 
-                data = [{elem.tag: elem.text for elem in node} for node in nodes]
+                data = [
+                    {elem.tag: elem.text for elem in node} for node in nodes
+                ]
                 return pl.DataFrame(data)
             except etree.XMLSyntaxError as e:
                 log.error(f"Failed to parse XML file {filename}: {e}")
@@ -287,7 +292,9 @@ class Processor:
     def get_o2o_mapping(self) -> dict[str, MapperRepr]:
         """Generates a direct 1-to-1 mapping dictionary."""
         return {
-            str(column): MapperRepr(f"mapper.val('{column}')", mapper.val(column))
+            str(column): MapperRepr(
+                f"mapper.val('{column}')", mapper.val(column)
+            )
             for column in self.dataframe.columns
             if column
         }
@@ -342,7 +349,9 @@ class Processor:
 
         if dry_run:
             console = Console()
-            log.info("--- DRY RUN MODE (Outputting sample of first 10 rows) ---")
+            log.info(
+                "--- DRY RUN MODE (Outputting sample of first 10 rows) ---"
+            )
             log.info("No files will be written.")
 
             table = Table(title="Dry Run Output Sample")
@@ -393,7 +402,9 @@ class Processor:
         exploded_df = df_with_lists.explode(m2m_columns)
 
         # 3. Create a new processor with this "tidy" data and the stored mapping
-        m2m_processor = Processor(mapping=self.logic_mapping, dataframe=exploded_df)
+        m2m_processor = Processor(
+            mapping=self.logic_mapping, dataframe=exploded_df
+        )
 
         # 4. Process the data (no m2m=True flag needed) and add to write queue
         result_df = m2m_processor.process(
@@ -523,48 +534,61 @@ class Processor:
 
         for key, func in mapping.items():
             if isinstance(func, pl.Expr):
+                # This branch handles Polars expressions. It's now self-contained.
                 expr = func.alias(key)
+                exprs.append(expr)
             else:
+                # This branch handles callable functions.
+                # All its logic is now inside the 'else'.
                 sig = inspect.signature(func)
+                target_dtype = (
+                    self.schema_overrides.get(key, pl.String)
+                    if self.schema_overrides
+                    else pl.String()
+                )
 
                 def _create_wrapper(
-                    f: Callable[..., Any], signature: inspect.Signature
+                    f: Callable[..., Any],
+                    signature: inspect.Signature,
+                    dtype: pl.DataType,
                 ) -> Callable[[dict[str, Any]], Any]:
                     def wrapper(row_struct: dict[str, Any]) -> Any:
                         try:
-                            # First, try calling with both the row and state,
-                            # as this is the richer interface.
-                            if len(signature.parameters) > 1:
-                                return f(row_struct, state)
-                            return f(row_struct)
-                        except TypeError as e:
-                            # If that fails, check if it's a signature mismatch
-                            # and fall back to calling with just the row.
-                            if "takes 1 positional argument but 2 were given" in str(
-                                e
-                            ) or "missing 1 required positional argument" in str(e):
-                                return f(row_struct)
-                            # If it's a different TypeError, re-raise it.
-                            raise e
+                            result = (
+                                f(row_struct, state)
+                                if len(signature.parameters) > 1
+                                else f(row_struct)
+                            )
+                            if result is None:
+                                return None
+                            if dtype == pl.String:
+                                return str(result)
+                            return result
                         except SkippingError:
-                            # This is a controlled way to skip a row.
                             return None
 
                     return wrapper
 
-                wrapper_func = _create_wrapper(func, sig)
+                if isinstance(target_dtype, type) and issubclass(
+                    target_dtype, pl.DataType
+                ):
+                    resolved_target_dtype = target_dtype()
+                else:
+                    resolved_target_dtype = cast(pl.DataType, target_dtype)
+
+                wrapper_func = _create_wrapper(func, sig, resolved_target_dtype)
+                unique_cols = list(dict.fromkeys(self.dataframe.columns))
 
                 expr = (
-                    pl.struct(pl.all())
+                    pl.struct(unique_cols)
                     .map_elements(
                         wrapper_func,
-                        return_dtype=list_return_dtype or pl.Object,
+                        return_dtype=resolved_target_dtype,
                     )
                     .alias(key)
                 )
-            exprs.append(expr)
+                exprs.append(expr)
 
-        # This correctly handles cases where all columns are being transformed.
         if not exprs:
             return pl.DataFrame()
 
@@ -587,7 +611,9 @@ class Processor:
             )
 
         # 1. Unpivot the specified columns to create a robust long-format DataFrame
-        id_vars = [col for col in self.dataframe.columns if col not in m2m_columns]
+        id_vars = [
+            col for col in self.dataframe.columns if col not in m2m_columns
+        ]
         unpivoted_df = self.dataframe.unpivot(
             index=id_vars,
             on=m2m_columns,
@@ -658,7 +684,11 @@ class ProductProcessorV10(Processor):
             import_args: Import parameters for the script.
         """
         melted_df = self.dataframe.unpivot(
-            index=[col for col in self.dataframe.columns if col not in attribute_list],
+            index=[
+                col
+                for col in self.dataframe.columns
+                if col not in attribute_list
+            ],
             on=attribute_list,
             variable_name="attribute_name",
             value_name="value",
@@ -707,7 +737,9 @@ class ProductProcessorV9(Processor):
         attributes_list: list[str],
     ) -> pl.DataFrame:
         """Extracts and transforms data for 'product.attribute.value.csv'."""
-        id_cols = [col for col in self.dataframe.columns if col not in attributes_list]
+        id_cols = [
+            col for col in self.dataframe.columns if col not in attributes_list
+        ]
         unpivoted = self.dataframe.unpivot(
             index=id_cols,
             on=attributes_list,
@@ -731,14 +763,20 @@ class ProductProcessorV9(Processor):
     ) -> None:
         """Orchestrates the processing of legacy product attributes."""
         # 1. Generate product.attribute.csv
-        attr_df = self._generate_attribute_file_data(attributes_list, attribute_prefix)
+        attr_df = self._generate_attribute_file_data(
+            attributes_list, attribute_prefix
+        )
         self._add_data(attr_df, path + "product.attribute.csv", import_args)
 
         # 2. Generate product.attribute.value.csv
         values_df = self._extract_attribute_value_data(mapping, attributes_list)
-        self._add_data(values_df, path + "product.attribute.value.csv", import_args)
+        self._add_data(
+            values_df, path + "product.attribute.value.csv", import_args
+        )
 
         # 3. Generate product.attribute.line.csv
         line_df = self._process_mapping(line_mapping, null_values=[])
         line_import_args = dict(import_args, groupby="product_tmpl_id/id")
-        self._add_data(line_df, path + "product.attribute.line.csv", line_import_args)
+        self._add_data(
+            line_df, path + "product.attribute.line.csv", line_import_args
+        )

@@ -335,7 +335,7 @@ def test_process_m2m_method() -> None:
     assert "out.csv" in processor.file_to_write
     result_df = processor.file_to_write["out.csv"]["dataframe"]
     assert result_df.shape == (3, 2)
-    assert result_df["tag"].to_list() == ["a", "b", "c"]
+    assert sorted(result_df["tag"].to_list()) == ["a", "b", "c"]
 
 
 def test_product_processor_v10() -> None:

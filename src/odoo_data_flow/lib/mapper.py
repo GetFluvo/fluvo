@@ -9,7 +9,7 @@ Processor for each row of the source data.
 
 import base64
 import os
-from typing import Any, Callable, Optional, cast
+from typing import Any, Callable, Optional, Union, cast
 
 import requests  # type: ignore[import-untyped]
 
@@ -206,6 +206,7 @@ def bool_val(
 
     Returns:
         MapperFunc: A mapper function that returns "1" or "0".
+
     """
     true_vals = true_values or []
     false_vals = false_values or []
@@ -223,22 +224,46 @@ def bool_val(
     return bool_val_fun
 
 
-def num(field: str, default: str = "0.0") -> MapperFunc:
-    """Returns a mapper that standardizes a numeric string.
+def num(
+    field: str, default: Optional[Union[int, float]] = None
+) -> Callable[..., Optional[Union[int, float]]]:
+    """Creates a mapper that converts a value to a native integer or float.
 
-    It replaces all commas with dots.
+    This function is a factory that generates a mapper function. The returned
+    mapper attempts to robustly parse a value from a source dictionary key
+    into a numeric type. It handles values that are already numbers, numeric
+    strings (with or without commas), or empty/null.
 
     Args:
-        field: The source column containing the numeric string.
-        default: The default value to use if the source value is empty.
+        field (str): The key or column name to retrieve the value from in a
+            source dictionary.
+        default (Any, optional): The value to return if the source value is
+            empty, null, or cannot be converted to a number. Defaults to None.
 
     Returns:
-        MapperFunc: A mapper function that returns the standardized numeric string.
+        Callable[..., Optional[Union[int, float]]]: A mapper function that takes a
+            dictionary-like row and returns the converted numeric value (`int`
+            or `float`) or the default.
     """
 
-    def num_fun(line: LineDict, state: StateDict) -> str:
-        value = _get_field_value(line, field, default)
-        return str(value).replace(",", ".")
+    def num_fun(
+        line: dict[str, Any], state: dict[str, Any]
+    ) -> Optional[Union[int, float]]:
+        value = line.get(field)
+
+        if value is None or value == "":
+            return default
+
+        try:
+            # Convert any input to a standardized float first.
+            num_val = float(str(value).replace(",", "."))
+
+            # Return an int if it's a whole number, otherwise return the float.
+            return int(num_val) if num_val.is_integer() else num_val
+
+        except (ValueError, TypeError):
+            # If any conversion fails, return the default.
+            return default
 
     return num_fun
 
