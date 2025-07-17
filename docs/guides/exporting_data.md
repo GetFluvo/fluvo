@@ -29,7 +29,7 @@ The export process is handled by the `export` sub-command of the main `odoo-data
 
 The `export` command is built for performance and scalability. To handle massive datasets with millions of records, the export process uses a streaming pipeline:
 
-* **Low Memory Usage:** Instead of loading the entire dataset into memory, records are fetched from Odoo in batches, processed, and written directly to the output file. This ensures that even very large exports can run on machines with limited RAM.
+* **Streaming mode - Low Memory Usage:** Instead of loading the entire dataset into memory, records are fetched from Odoo in batches, processed, and written directly to the output file. This ensures that even very large exports can run on machines with limited RAM or on very large datasets.
 * **Type-Aware Cleaning:** The export process automatically cleans the data before writing. It intelligently inspects the field types on your Odoo model and corrects common data inconsistencies, such as converting Odoo's `False` values to empty strings for non-boolean fields (like `phone` or `website`), while preserving `False` for actual boolean fields.
 * **High-Speed Writer:** The tool uses the high-performance, multi-threaded CSV writer from the `Polars` library, making the file writing process significantly faster than standard Python libraries.
 
@@ -48,7 +48,7 @@ The command is configured using a set of options. Here are the most essential on
 | `--size`            | The number of records to fetch in a single batch. Defaults to `10`.                                                                                                                                      |
 | `--sep`             | The character separating columns. Defaults to a semicolon (`;`).                                                                                                                                         |
 | `--technical-names` | A flag that, when present, exports the raw technical values for fields (e.g., `draft` for a selection field, `False` for a boolean). This is highly recommended for data migrations and is type-aware. |
-
+| `--streaming`       | A flag that enables the streaming mode, This mode writes data to the output file in batches, ensuring a low and constant memory footprint. It is slower due to higher I/O overhead but is necessary for huge exports. |
 
 ### Understanding the `--domain` Filter
 

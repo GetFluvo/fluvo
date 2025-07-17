@@ -40,6 +40,7 @@ def run_export(
     separator: str = ";",
     encoding: str = "utf-8",
     technical_names: bool = False,
+    streaming: bool = False,
 ) -> None:
     """Orchestrates the data export process."""
     log.info(f"Starting export for model '{model}'...")
@@ -79,6 +80,7 @@ def run_export(
         encoding=encoding,
         separator=separator,
         technical_names=technical_names,
+        streaming=streaming,
     )
 
     if result_df is not None:

@@ -210,7 +210,7 @@ def invoice_v9_cmd(**kwargs: Any) -> None:
 @click.option(
     "--size",
     "batch_size",
-    default=10,
+    default=500,
     type=int,
     help="Number of lines to import per connection.",
 )
@@ -282,9 +282,14 @@ def import_cmd(**kwargs: Any) -> None:
 @click.option(
     "--size",
     "batch_size",
-    default=10,
+    default=4000,
     type=int,
     help="Number of records to process per batch.",
+)
+@click.option(  # Add this new option decorator
+    "--streaming",
+    is_flag=True,
+    help="Enable streaming to write data batch-by-batch. Use for very large datasets.",
 )
 @click.option("-s", "--sep", "separator", default=";", help="CSV separator character.")
 @click.option(
@@ -371,7 +376,7 @@ def url_to_image_cmd(**kwargs: Any) -> None:
 )
 @click.option(
     "--export-batch-size",
-    default=100,
+    default=2000,
     type=int,
     help="Batch size for the export phase.",
 )
@@ -383,7 +388,7 @@ def url_to_image_cmd(**kwargs: Any) -> None:
 )
 @click.option(
     "--import-batch-size",
-    default=10,
+    default=200,
     type=int,
     help="Batch size for the import phase.",
 )

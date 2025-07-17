@@ -22,6 +22,7 @@ from rich.progress import (
 from .lib import conf_lib
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch
+from .lib.odoo_lib import ODOO_TO_POLARS_MAP
 from .logging_config import log
 
 # --- Fix for csv.field_size_limit OverflowError ---
@@ -60,9 +61,7 @@ class RPCThreadExport(RpcThread):
         """The actual function executed by the worker thread."""
         start_time = time()
         try:
-            log.debug(
-                f"Exporting batch {num} with {len(ids_to_export)} records..."
-            )
+            log.debug(f"Exporting batch {num} with {len(ids_to_export)} records...")
             if self.technical_names:
                 records: list[dict[str, Any]] = self.model.read(
                     ids_to_export, self.header
@@ -91,7 +90,7 @@ def _clean_batch(
     if not batch_data:
         return pl.DataFrame()
 
-    df = pl.DataFrame(batch_data)
+    df = pl.DataFrame(batch_data, infer_schema_length=None)
     cleaning_exprs = []
     for field_name, field_type in field_types.items():
         if field_name in df.columns and field_type != "boolean":
@@ -126,17 +125,26 @@ def _initialize_export(
         return None, None
 
 
-def _process_export_batches(
+def _process_export_batches(  # noqa C901
     rpc_thread: RPCThreadExport,
     total_ids: int,
     model_name: str,
     output: Optional[str],
     field_types: dict[str, str],
     separator: str,
+    streaming: bool,
 ) -> Optional[pl.DataFrame]:
-    """Processes exported batches, cleans them, and writes or collects them."""
-    all_data_for_memory: list[pl.DataFrame] = []
-    header_written = False
+    """Processes exported batches.
+
+    Uses streaming for large files if requested,
+    otherwise concatenates in memory for best performance.
+    """
+    polars_schema: dict[str, pl.DataType] = {
+        field: ODOO_TO_POLARS_MAP.get(odoo_type, pl.String)()
+        for field, odoo_type in field_types.items()
+    }
+    all_cleaned_dfs: list[pl.DataFrame] = []
+    header_written = False  # Only used in streaming mode
     progress = Progress(
         SpinnerColumn(),
         TextColumn("[bold blue]{task.description}", justify="right"),
@@ -148,9 +156,7 @@ def _process_export_batches(
         TimeRemainingColumn(),
     )
     with progress:
-        task = progress.add_task(
-            f"[cyan]Exporting {model_name}...", total=total_ids
-        )
+        task = progress.add_task(f"[cyan]Exporting {model_name}...", total=total_ids)
         for future in concurrent.futures.as_completed(rpc_thread.futures):
             try:
                 batch_result = future.result()
@@ -161,32 +167,55 @@ def _process_export_batches(
                 if cleaned_df.is_empty():
                     continue
 
-                if output:
-                    cleaned_df.write_csv(
-                        output,
-                        separator=separator,
-                        include_header=not header_written,
-                    )
-                    header_written = True
-                else:
-                    all_data_for_memory.append(cleaned_df)
+                # Cast the DataFrame to the consistent schema
+                casted_df = cleaned_df.cast(polars_schema, strict=False)  # type: ignore[arg-type]
 
-                progress.update(task, advance=len(cleaned_df))
+                if output and streaming:
+                    # STREAMING MODE: Write batch-by-batch to disk
+                    if not header_written:
+                        casted_df.write_csv(
+                            output, separator=separator, include_header=True
+                        )
+                        header_written = True
+                    else:
+                        with open(output, "ab") as f:
+                            casted_df.write_csv(
+                                f, separator=separator, include_header=False
+                            )
+                else:
+                    # IN-MEMORY MODE: Collect for later concatenation
+                    all_cleaned_dfs.append(casted_df)
+
+                progress.update(task, advance=len(batch_result))
             except Exception as e:
-                log.error(
-                    f"A task in a worker thread failed: {e}", exc_info=True
-                )
+                log.error(f"A task in a worker thread failed: {e}", exc_info=True)
 
     rpc_thread.executor.shutdown(wait=True)
 
+    # --- Post-Loop Logic ---
+    if output and streaming:
+        log.info(f"Streaming export complete. Data written to {output}")
+        # In streaming mode, we don't load the (potentially huge) file back into memory.
+        # We return None to signal completion.
+        return None
+
+    if not all_cleaned_dfs:
+        log.warning("No data was returned from the export.")
+        empty_df = pl.DataFrame(schema=list(field_types.keys()))
+        if output:
+            empty_df.write_csv(output, separator=separator)
+        return empty_df
+
+    # Concatenate all dataframes for the default in-memory mode
+    final_df = pl.concat(all_cleaned_dfs)
     if output:
-        log.info(f"Export complete. Data written to {output}")
-        return pl.read_csv(output, separator=separator)
+        log.info(f"Writing {len(final_df)} records to {output}...")
+        final_df.write_csv(output, separator=separator)
+        log.info("Export complete.")
     else:
         log.info("In-memory export complete.")
-        if not all_data_for_memory:
-            return pl.DataFrame(schema=list(field_types.keys()))
-        return pl.concat(all_data_for_memory)
+
+    return final_df
 
 
 def export_data(
@@ -201,10 +230,15 @@ def export_data(
     separator: str = ";",
     encoding: str = "utf-8",
     technical_names: bool = False,
+    streaming: bool = False,
 ) -> Optional[pl.DataFrame]:
     """Exports data from an Odoo model."""
     model_obj, field_types = _initialize_export(config_file, model, header)
     if not model_obj or field_types is None:
+        return None
+
+    if streaming and not output:
+        log.error("Streaming mode requires an output file path. Aborting.")
         return None
 
     log.info(f"Searching for records in model '{model}' to export...")
@@ -227,5 +261,5 @@ def export_data(
         rpc_thread.launch_batch(list(id_batch), i)
 
     return _process_export_batches(
-        rpc_thread, len(ids), model, output, field_types, separator
+        rpc_thread, len(ids), model, output, field_types, separator, streaming
     )
