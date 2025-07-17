@@ -8,7 +8,7 @@ import concurrent.futures
 import csv
 import sys
 from time import time
-from typing import Any, Optional
+from typing import Any, Optional, Union, cast
 
 import polars as pl
 from rich.progress import (
@@ -38,7 +38,12 @@ while decrement:
 
 
 class RPCThreadExport(RpcThread):
-    """Export Thread handler."""
+    """Export Thread handler with automatic batch resizing on MemoryError.
+
+    This class manages worker threads for exporting data from Odoo. It includes
+    a fallback mechanism that automatically splits and retries batches if the
+    Odoo server runs out of memory processing a large request.
+    """
 
     def __init__(
         self,
@@ -48,7 +53,16 @@ class RPCThreadExport(RpcThread):
         context: Optional[dict[str, Any]] = None,
         technical_names: bool = False,
     ) -> None:
-        """Initializes the export thread handler."""
+        """Initializes the export thread handler.
+
+        Args:
+            max_connection: The maximum number of concurrent connections.
+            model: The odoolib model object for making RPC calls.
+            header: A list of field names to export.
+            context: The Odoo context to use for the export.
+            technical_names: If True, uses `model.read()` for technical field
+                names. Otherwise, uses `model.export_data()`.
+        """
         super().__init__(max_connection)
         self.model = model
         self.header = header
@@ -56,30 +70,70 @@ class RPCThreadExport(RpcThread):
         self.technical_names = technical_names
 
     def _execute_batch(
-        self, ids_to_export: list[int], num: int
+        self, ids_to_export: list[int], num: Union[int, str]
     ) -> list[dict[str, Any]]:
-        """The actual function executed by the worker thread."""
+        """Executes the export for a single batch of IDs.
+
+        This method attempts to fetch data for the given IDs. If it detects a
+        MemoryError from the Odoo server, it splits the batch in half and
+        calls itself recursively on the smaller sub-batches.
+
+        Args:
+            ids_to_export: A list of Odoo record IDs to export.
+            num: The batch number, used for logging.
+
+        Returns:
+            A list of dictionaries representing the exported records. Returns an
+            empty list if the batch fails permanently.
+        """
         start_time = time()
+        log.debug(f"Exporting batch {num} with {len(ids_to_export)} records...")
         try:
-            log.debug(f"Exporting batch {num} with {len(ids_to_export)} records...")
             if self.technical_names:
-                records: list[dict[str, Any]] = self.model.read(
-                    ids_to_export, self.header
+                return cast(
+                    list[dict[str, Any]],
+                    self.model.read(ids_to_export, self.header),
                 )
-                return records
             else:
                 exported_data = self.model.export_data(
                     ids_to_export, self.header, context=self.context
                 ).get("datas", [])
                 return [dict(zip(self.header, row)) for row in exported_data]
+
         except Exception as e:
-            log.error(f"Export for batch {num} failed: {e}", exc_info=True)
-            return []
+            error_data = e.args[0].get("data", {}) if e.args else {}
+            is_memory_error = error_data.get("name") == "builtins.MemoryError"
+
+            if is_memory_error and len(ids_to_export) > 1:
+                log.warning(
+                    f"Batch {num} ({len(ids_to_export)} records) "
+                    "failed with MemoryError. "
+                    "Splitting batch and retrying..."
+                )
+                mid_point = len(ids_to_export) // 2
+                batch_a = ids_to_export[:mid_point]
+                batch_b = ids_to_export[mid_point:]
+
+                results_a = self._execute_batch(batch_a, f"{num}-a")
+                results_b = self._execute_batch(batch_b, f"{num}-b")
+
+                return results_a + results_b
+            else:
+                log.error(
+                    f"Export for batch {num} failed permanently: {e}",
+                    exc_info=True,
+                )
+                return []
         finally:
             log.debug(f"Batch {num} finished in {time() - start_time:.2f}s.")
 
     def launch_batch(self, data_ids: list[int], batch_number: int) -> None:
-        """Submits a batch of IDs to be exported by a worker thread."""
+        """Submits a batch of IDs to be exported by a worker thread.
+
+        Args:
+            data_ids: The list of record IDs to process in this batch.
+            batch_number: The sequential number of this batch.
+        """
         self.spawn_thread(self._execute_batch, [data_ids, batch_number])
 
 

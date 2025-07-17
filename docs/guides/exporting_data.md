@@ -96,3 +96,16 @@ This command will:
 2.  Search the `res.partner` model for records that are not companies and have their country set to Belgium.
 3.  For each matching record, it will retrieve the `name`, `email`, `city`, and the `name` of the related country.
 4.  It will save this data into a new CSV file located at `data/belgian_contacts.csv`.
+
+
+### Automatic Batch Resizing
+
+When exporting very large datasets, the Odoo server can sometimes run out of memory while preparing the data, causing the export of that batch to fail.
+
+To make the process more resilient, this tool includes an **automatic batch resizing** feature. If the export of a specific batch fails due to a server-side `MemoryError`, the tool will not quit. Instead, it will:
+
+1.  Automatically split the failed batch in half.
+2.  Retry exporting each of the new, smaller sub-batches.
+3.  This process continues recursively until the batch size is small enough for the server to process successfully.
+
+This feature makes the export much more reliable and reduces the need to perfectly tune the `--batch-size` argument. However, for best performance, starting with a reasonable batch size (e.g., 1000-5000) is still recommended to avoid the small overhead of the retry mechanism.
