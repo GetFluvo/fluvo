@@ -257,3 +257,120 @@ class TestExportData:
 
         with open(output_file) as f:
             assert f.read().strip() == "id,name"
+
+    def test_export_handles_memory_error_fallback(
+        self, mock_conf_lib: MagicMock, tmp_path: Path
+    ) -> None:
+        """Tests that the batch is split and retried on server MemoryError."""
+        # --- Arrange ---
+        output_file = tmp_path / "output.csv"
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.search.return_value = [1, 2, 3, 4]
+
+        # Simulate Odoo failing with MemoryError on the first large batch,
+        # then succeeding on the two smaller retry batches.
+        memory_error_response = Exception(
+            {
+                "code": 200,
+                "message": "Odoo Server Error",
+                "data": {"name": "builtins.MemoryError", "debug": "..."},
+            }
+        )
+        mock_model.read.side_effect = [
+            memory_error_response,
+            [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}],  # 1st retry
+            [{"id": 3, "name": "C"}, {"id": 4, "name": "D"}],  # 2nd retry
+        ]
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+        }
+
+        # --- Act ---
+        result_df = export_data(
+            config_file="dummy.conf",
+            model="res.partner",
+            domain=[],
+            header=["id", "name"],
+            output=str(output_file),
+            technical_names=True,
+            streaming=True,
+            batch_size=4,
+        )
+
+        # --- Assert ---
+        assert result_df is None
+        assert output_file.exists()
+        assert mock_model.read.call_count == 3  # 1 failure + 2 retries
+
+        # Verify the final file has all data from the successful retries
+        on_disk_df = pl.read_csv(output_file, separator=";")
+        expected_df = pl.DataFrame({"id": [1, 2, 3, 4], "name": ["A", "B", "C", "D"]})
+        assert_frame_equal(on_disk_df.sort("id"), expected_df.sort("id"))
+
+    def test_export_handles_empty_batch_result(
+        self, mock_conf_lib: MagicMock, tmp_path: Path
+    ) -> None:
+        """Tests that an empty result from a batch is handled gracefully."""
+        # --- Arrange ---
+        output_file = tmp_path / "output.csv"
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.search.return_value = [1, 2]
+        # Simulate one batch succeeding and one returning no data
+        mock_model.read.side_effect = [[{"id": 1, "name": "A"}], []]
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+        }
+
+        # --- Act ---
+        export_data(
+            config_file="dummy.conf",
+            model="res.partner",
+            domain=[],
+            header=["id", "name"],
+            output=str(output_file),
+            technical_names=True,
+            batch_size=1,
+        )
+
+        # --- Assert ---
+        # The file should contain only the data from the successful batch
+        on_disk_df = pl.read_csv(output_file, separator=";")
+        assert len(on_disk_df) == 1
+        assert on_disk_df["id"][0] == 1
+
+    def test_export_handles_permanent_worker_failure(
+        self, mock_conf_lib: MagicMock, tmp_path: Path
+    ) -> None:
+        """Tests that a non-MemoryError exception in a worker is survivable."""
+        # --- Arrange ---
+        output_file = tmp_path / "output.csv"
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.search.return_value = [1, 2]
+        # Simulate one batch succeeding and one failing with a different error
+        mock_model.read.side_effect = [
+            [{"id": 1, "name": "A"}],
+            ValueError("A permanent error"),
+        ]
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+        }
+
+        # --- Act ---
+        export_data(
+            config_file="dummy.conf",
+            model="res.partner",
+            domain=[],
+            header=["id", "name"],
+            output=str(output_file),
+            technical_names=True,
+            batch_size=1,
+        )
+
+        # --- Assert ---
+        # The export should complete with data from the successful batch
+        assert output_file.exists()
+        on_disk_df = pl.read_csv(output_file, separator=";")
+        assert len(on_disk_df) == 1
