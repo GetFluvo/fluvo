@@ -218,9 +218,7 @@ def _process_export_batches(  # noqa C901
         TimeRemainingColumn(),
     )
     with progress:
-        task = progress.add_task(
-            f"[cyan]Exporting {model_name}...", total=total_ids
-        )
+        task = progress.add_task(f"[cyan]Exporting {model_name}...", total=total_ids)
         for future in concurrent.futures.as_completed(rpc_thread.futures):
             try:
                 batch_result = future.result()
@@ -285,9 +283,7 @@ def _process_export_batches(  # noqa C901
 
                 progress.update(task, advance=len(batch_result))
             except Exception as e:
-                log.error(
-                    f"A task in a worker thread failed: {e}", exc_info=True
-                )
+                log.error(f"A task in a worker thread failed: {e}", exc_info=True)
 
     rpc_thread.executor.shutdown(wait=True)
 
