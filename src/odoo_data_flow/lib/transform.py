@@ -506,7 +506,38 @@ class Processor:
         params_copy["dataframe"] = dataframe
         self.file_to_write[filename_out] = params_copy
 
-    def _process_mapping(  # noqa: C901
+    def _cast_result_for_polars(self, result: Any, dtype: pl.DataType) -> Any:
+        """Casts a Python object to a type suitable for a Polars column.
+
+        This helper handles robust type conversion for data returned from
+        mapper functions before it's passed back into a Polars Series.
+
+        Args:
+            result: The value returned from a mapper function.
+            dtype: The target Polars DataType for the column.
+
+        Returns:
+            The casted value, or None if casting fails.
+        """
+        if dtype.is_integer():
+            try:
+                return int(result)
+            except (ValueError, TypeError):
+                return None
+        if dtype.is_float():
+            try:
+                return float(result)
+            except (ValueError, TypeError):
+                return None
+        if isinstance(dtype, pl.Boolean):
+            if isinstance(result, str):
+                return result.lower() in ("true", "1", "t", "yes")
+            return bool(result)
+        if isinstance(dtype, pl.String):
+            return str(result)
+        return result
+
+    def _process_mapping(
         self,
         mapping: Mapping[str, Union[Callable[..., Any], pl.Expr]],
         null_values: list[Any],
@@ -548,22 +579,7 @@ class Processor:
                             )
                             if result is None:
                                 return None
-
-                            # Correctly handle type casting before returning to Polars
-                            if dtype.is_integer():
-                                try:
-                                    return int(result)
-                                except (ValueError, TypeError):
-                                    return None
-                            if dtype.is_float():
-                                try:
-                                    return float(result)
-                                except (ValueError, TypeError):
-                                    return None
-                            if isinstance(dtype, pl.String):
-                                return str(result)
-
-                            return result
+                            return self._cast_result_for_polars(result, dtype)
                         except SkippingError:
                             return None
 

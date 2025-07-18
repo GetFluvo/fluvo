@@ -425,3 +425,49 @@ def test_process_with_datatype_in_mapping_tuple() -> None:
     # and that uncastable values become null.
     assert result["code_as_int"].dtype == pl.Int16
     assert result["code_as_int"].to_list() == [1, 2, None, None]
+
+
+def test_process_with_boolean_type_in_mapping() -> None:
+    """Tests that boolean casting correctly handles various string inputs.
+
+    This validates that the UDF wrapper correctly converts common string
+    representations of booleans ("true", "1", "yes", etc.) into actual
+    boolean values when the target column is specified as `pl.Boolean`.
+    """
+    df = pl.DataFrame(
+        {
+            "is_active_str": [
+                "True",
+                "false",
+                "1",
+                "0",
+                "t",
+                "yes",
+                "NO",
+                "other",
+            ],
+        }
+    )
+
+    # The mapping provides a Polars Boolean DataType class.
+    mapping = {"is_active": (pl.Boolean, lambda row: row["is_active_str"])}
+    processor = Processor(mapping=mapping, dataframe=df)
+    result = processor.process(filename_out="")
+
+    expected = pl.DataFrame(
+        {
+            "is_active": [
+                True,
+                False,
+                True,
+                False,
+                True,
+                True,
+                False,
+                False,
+            ],
+        },
+        schema={"is_active": pl.Boolean},
+    )
+
+    assert_frame_equal(result, expected)
