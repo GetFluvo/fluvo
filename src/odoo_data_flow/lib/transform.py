@@ -10,7 +10,6 @@ from typing import (
     Callable,
     Optional,
     Union,
-    cast,
 )
 
 from .odoo_lib import build_polars_schema
@@ -210,14 +209,10 @@ class Processor:
                     nodes = tree.xpath(xml_root_path)
 
                 if not nodes:
-                    log.warning(
-                        f"No nodes found for root path '{xml_root_path}'"
-                    )
+                    log.warning(f"No nodes found for root path '{xml_root_path}'")
                     return pl.DataFrame()
 
-                data = [
-                    {elem.tag: elem.text for elem in node} for node in nodes
-                ]
+                data = [{elem.tag: elem.text for elem in node} for node in nodes]
                 return pl.DataFrame(data)
             except etree.XMLSyntaxError as e:
                 log.error(f"Failed to parse XML file {filename}: {e}")
@@ -272,7 +267,7 @@ class Processor:
         )
         schema_items = (self.schema_overrides or {}).items()
         new_mapping = {
-            **{k: v for k, v in self.logic_mapping.items()},
+            **self.logic_mapping,
             **{
                 k: (v, self.logic_mapping.get(k))
                 for k, v in schema_items
@@ -292,9 +287,7 @@ class Processor:
     def get_o2o_mapping(self) -> dict[str, MapperRepr]:
         """Generates a direct 1-to-1 mapping dictionary."""
         return {
-            str(column): MapperRepr(
-                f"mapper.val('{column}')", mapper.val(column)
-            )
+            str(column): MapperRepr(f"mapper.val('{column}')", mapper.val(column))
             for column in self.dataframe.columns
             if column
         }
@@ -349,9 +342,7 @@ class Processor:
 
         if dry_run:
             console = Console()
-            log.info(
-                "--- DRY RUN MODE (Outputting sample of first 10 rows) ---"
-            )
+            log.info("--- DRY RUN MODE (Outputting sample of first 10 rows) ---")
             log.info("No files will be written.")
 
             table = Table(title="Dry Run Output Sample")
@@ -359,9 +350,7 @@ class Processor:
                 table.add_column(column_header, style="cyan")
 
             for row in result_df.head(10).iter_rows():
-                str_row = [str(item) for item in row]
-                table.add_row(*str_row)
-
+                table.add_row(*(str(item) for item in row))
             console.print(table)
             log.info(f"Total rows that would be generated: {len(result_df)}")
 
@@ -402,9 +391,7 @@ class Processor:
         exploded_df = df_with_lists.explode(m2m_columns)
 
         # 3. Create a new processor with this "tidy" data and the stored mapping
-        m2m_processor = Processor(
-            mapping=self.logic_mapping, dataframe=exploded_df
-        )
+        m2m_processor = Processor(mapping=self.logic_mapping, dataframe=exploded_df)
 
         # 4. Process the data (no m2m=True flag needed) and add to write queue
         result_df = m2m_processor.process(
@@ -542,7 +529,7 @@ class Processor:
                 # All its logic is now inside the 'else'.
                 sig = inspect.signature(func)
                 target_dtype = (
-                    self.schema_overrides.get(key, pl.String)
+                    self.schema_overrides.get(key, pl.String())
                     if self.schema_overrides
                     else pl.String()
                 )
@@ -561,8 +548,21 @@ class Processor:
                             )
                             if result is None:
                                 return None
-                            if dtype == pl.String:
+
+                            # Correctly handle type casting before returning to Polars
+                            if dtype.is_integer():
+                                try:
+                                    return int(result)
+                                except (ValueError, TypeError):
+                                    return None
+                            if dtype.is_float():
+                                try:
+                                    return float(result)
+                                except (ValueError, TypeError):
+                                    return None
+                            if isinstance(dtype, pl.String):
                                 return str(result)
+
                             return result
                         except SkippingError:
                             return None
@@ -574,7 +574,7 @@ class Processor:
                 ):
                     resolved_target_dtype = target_dtype()
                 else:
-                    resolved_target_dtype = cast(pl.DataType, target_dtype)
+                    resolved_target_dtype = target_dtype
 
                 wrapper_func = _create_wrapper(func, sig, resolved_target_dtype)
                 unique_cols = list(dict.fromkeys(self.dataframe.columns))
@@ -611,9 +611,7 @@ class Processor:
             )
 
         # 1. Unpivot the specified columns to create a robust long-format DataFrame
-        id_vars = [
-            col for col in self.dataframe.columns if col not in m2m_columns
-        ]
+        id_vars = [col for col in self.dataframe.columns if col not in m2m_columns]
         unpivoted_df = self.dataframe.unpivot(
             index=id_vars,
             on=m2m_columns,
@@ -684,11 +682,7 @@ class ProductProcessorV10(Processor):
             import_args: Import parameters for the script.
         """
         melted_df = self.dataframe.unpivot(
-            index=[
-                col
-                for col in self.dataframe.columns
-                if col not in attribute_list
-            ],
+            index=[col for col in self.dataframe.columns if col not in attribute_list],
             on=attribute_list,
             variable_name="attribute_name",
             value_name="value",
@@ -737,9 +731,7 @@ class ProductProcessorV9(Processor):
         attributes_list: list[str],
     ) -> pl.DataFrame:
         """Extracts and transforms data for 'product.attribute.value.csv'."""
-        id_cols = [
-            col for col in self.dataframe.columns if col not in attributes_list
-        ]
+        id_cols = [col for col in self.dataframe.columns if col not in attributes_list]
         unpivoted = self.dataframe.unpivot(
             index=id_cols,
             on=attributes_list,
@@ -763,20 +755,14 @@ class ProductProcessorV9(Processor):
     ) -> None:
         """Orchestrates the processing of legacy product attributes."""
         # 1. Generate product.attribute.csv
-        attr_df = self._generate_attribute_file_data(
-            attributes_list, attribute_prefix
-        )
+        attr_df = self._generate_attribute_file_data(attributes_list, attribute_prefix)
         self._add_data(attr_df, path + "product.attribute.csv", import_args)
 
         # 2. Generate product.attribute.value.csv
         values_df = self._extract_attribute_value_data(mapping, attributes_list)
-        self._add_data(
-            values_df, path + "product.attribute.value.csv", import_args
-        )
+        self._add_data(values_df, path + "product.attribute.value.csv", import_args)
 
         # 3. Generate product.attribute.line.csv
         line_df = self._process_mapping(line_mapping, null_values=[])
         line_import_args = dict(import_args, groupby="product_tmpl_id/id")
-        self._add_data(
-            line_df, path + "product.attribute.line.csv", line_import_args
-        )
+        self._add_data(line_df, path + "product.attribute.line.csv", line_import_args)

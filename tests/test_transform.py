@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 import pytest
 from polars.exceptions import ColumnNotFoundError
+from polars.testing import assert_frame_equal
 
 from odoo_data_flow.lib import mapper
 from odoo_data_flow.lib.transform import (
@@ -376,3 +377,51 @@ def test_product_processor_v9() -> None:
     assert "product.attribute.csv" in processor.file_to_write
     assert "product.attribute.value.csv" in processor.file_to_write
     assert "product.attribute.line.csv" in processor.file_to_write
+
+
+def test_process_with_mixed_mapping_types() -> None:
+    """Tests that a mapping with both Polars expressions and callables works correctly.
+
+    This validates the fix for the bug where one type of expression was being
+    dropped during processing.
+    """
+    df = pl.DataFrame({"value_a": [10, 20], "value_b": ["x", "y"]})
+
+    # Use a lambda for the callable part to avoid depending on a specific
+    # mapper function that may not exist (like 'static' or 'const').
+    mapping = {
+        "doubled": pl.col("value_a") * 2,
+        "prefixed": lambda row: "prefix_" + row["value_b"],
+    }
+    processor = Processor(mapping=mapping, dataframe=df)
+    result = processor.process(filename_out="")
+
+    expected = pl.DataFrame({"doubled": [20, 40], "prefixed": ["prefix_x", "prefix_y"]})
+    # Sort columns for reliable comparison
+    result = result.select(sorted(result.columns))
+    expected = expected.select(sorted(expected.columns))
+
+    assert_frame_equal(result, expected)
+
+
+def test_process_with_datatype_in_mapping_tuple() -> None:
+    """Tests with providing a DataType class.
+
+    Tests that providing a DataType class in a mapping tuple correctly sets the
+    output column's dtype.
+
+    This validates the type resolution logic (isinstance, cast) and the
+    explicit type casting fix in the wrapper function.
+
+    """
+    df = pl.DataFrame({"code": ["001", "002", "bad", None]})
+
+    # The mapping provides a Polars DataType class, not an instance.
+    mapping = {"code_as_int": (pl.Int16, mapper.val("code"))}
+    processor = Processor(mapping=mapping, dataframe=df)
+    result = processor.process(filename_out="")
+
+    # Assert that the resulting column has the correct integer data type
+    # and that uncastable values become null.
+    assert result["code_as_int"].dtype == pl.Int16
+    assert result["code_as_int"].to_list() == [1, 2, None, None]
