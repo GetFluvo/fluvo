@@ -7,6 +7,7 @@
 # pytest
 .pytest_cache/
 .coverage
+coverage.xml
 
 # ruff
 .ruff_cache/
@@ -40,5 +41,15 @@ uv.lock
 # pydoclint baseline
 pydoclint-baseline.txt
 
+# python
+__pycache__
+
 # docs build output
 docs/_build/
+
+# misc
+.project
+.pydevproject
+.cache
+node_modules
+_build
