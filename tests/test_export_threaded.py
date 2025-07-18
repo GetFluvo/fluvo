@@ -11,6 +11,7 @@ from polars.testing import assert_frame_equal
 from odoo_data_flow.export_threaded import (
     RPCThreadExport,
     _clean_batch,
+    _process_export_batches,
     export_data,
 )
 
@@ -374,3 +375,79 @@ class TestExportData:
         assert output_file.exists()
         on_disk_df = pl.read_csv(output_file, separator=";")
         assert len(on_disk_df) == 1
+
+
+@patch("odoo_data_flow.export_threaded.concurrent.futures.as_completed")
+@patch("odoo_data_flow.export_threaded._clean_batch")
+@patch("odoo_data_flow.export_threaded.Progress")
+def test_process_export_batches_handles_inconsistent_schemas(
+    mock_progress: MagicMock,
+    mock_clean_batch: MagicMock,
+    mock_as_completed: MagicMock,
+) -> None:
+    """Tests that batches with inconsistent schemas are correctly concatenated.
+
+    This validates the fix for the `SchemaError` that occurred when one batch
+    inferred a column as Boolean and another inferred it as String. The test
+    ensures that the final concatenated DataFrame has a consistent, correct schema.
+    """
+    # --- Arrange ---
+    # 1. Mock the RPC thread and its futures to simulate two batches
+    mock_rpc_thread = MagicMock(spec=RPCThreadExport)
+    future1, future2 = MagicMock(), MagicMock()
+    future1.result.return_value = [{"id": 1, "is_special": True}]
+    future2.result.return_value = [{"id": 2, "is_special": "False"}]
+
+    # FIX: Assign the 'futures' attribute to the mock object
+    mock_rpc_thread.futures = [future1, future2]
+
+    # Mock the return value of as_completed to prevent hanging
+    mock_as_completed.return_value = [future1, future2]
+
+    # Explicitly create the nested executor.shutdown attribute on the mock
+    mock_rpc_thread.executor = MagicMock()
+    mock_rpc_thread.executor.shutdown.return_value = None
+
+    # 2. Mock `_clean_batch` to return DataFrames with inconsistent dtypes,
+    #    simulating the real-world failure case.
+    mock_clean_batch.side_effect = [
+        pl.DataFrame(
+            {"id": [1], "is_special": [True]}
+        ),  # Polars infers this as Boolean
+        pl.DataFrame(
+            {"id": [2], "is_special": ["False"]}
+        ),  # Polars infers this as String
+    ]
+
+    # 3. Define the field types and total records
+    field_types = {"id": "integer", "is_special": "boolean"}
+    total_ids = 2
+
+    # --- Act ---
+    # Run the function in in-memory mode (output=None) to get the DataFrame back
+    final_df = _process_export_batches(
+        rpc_thread=mock_rpc_thread,
+        total_ids=total_ids,
+        model_name="test.model",
+        output=None,
+        field_types=field_types,
+        separator=",",
+        streaming=False,
+    )
+
+    assert final_df is not None
+    # --- Assert ---
+    # The final DataFrame should have a consistent schema and correct data
+    expected_schema = {
+        "id": pl.Int64(),
+        "is_special": pl.Boolean(),
+    }
+    expected_df = pl.DataFrame(
+        {"id": [1, 2], "is_special": [True, False]},
+        schema=expected_schema,
+    )
+
+    # Sort by 'id' to ensure a stable order for comparison
+    final_df = final_df.sort("id")
+
+    assert_frame_equal(final_df, expected_df)

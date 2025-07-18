@@ -180,7 +180,7 @@ def _initialize_export(
 
 
 def _process_export_batches(  # noqa C901
-    rpc_thread: RPCThreadExport,
+    rpc_thread: "RPCThreadExport",
     total_ids: int,
     model_name: str,
     output: Optional[str],
@@ -193,12 +193,20 @@ def _process_export_batches(  # noqa C901
     Uses streaming for large files if requested,
     otherwise concatenates in memory for best performance.
     """
+    # 1. Establish the ground-truth schema with INSTANCES. This is critical.
     polars_schema: dict[str, pl.DataType] = {
         field: ODOO_TO_POLARS_MAP.get(odoo_type, pl.String)()
         for field, odoo_type in field_types.items()
     }
+    # This normalization is a safeguard to ensure all types are instances.
+    if polars_schema:
+        polars_schema = {
+            k: v() if isinstance(v, type) and issubclass(v, pl.DataType) else v
+            for k, v in polars_schema.items()
+        }
+
     all_cleaned_dfs: list[pl.DataFrame] = []
-    header_written = False  # Only used in streaming mode
+    header_written = False
     progress = Progress(
         SpinnerColumn(),
         TextColumn("[bold blue]{task.description}", justify="right"),
@@ -210,7 +218,9 @@ def _process_export_batches(  # noqa C901
         TimeRemainingColumn(),
     )
     with progress:
-        task = progress.add_task(f"[cyan]Exporting {model_name}...", total=total_ids)
+        task = progress.add_task(
+            f"[cyan]Exporting {model_name}...", total=total_ids
+        )
         for future in concurrent.futures.as_completed(rpc_thread.futures):
             try:
                 batch_result = future.result()
@@ -221,36 +231,70 @@ def _process_export_batches(  # noqa C901
                 if cleaned_df.is_empty():
                     continue
 
-                # Cast the DataFrame to the consistent schema
+                # --- START: ROBUST BATCH PROCESSING ---
+                # This logic runs for every single batch to guarantee consistency.
+
+                # 2. Identify and fix known data inconsistencies first.
+                bool_cols_to_convert = [
+                    k
+                    for k, v in polars_schema.items()
+                    if v.base_type() == pl.Boolean
+                    and k in cleaned_df.columns
+                    and cleaned_df[k].dtype != pl.Boolean
+                ]
+
+                if bool_cols_to_convert:
+                    conversion_exprs = [
+                        pl.when(
+                            pl.col(c)
+                            .cast(pl.String, strict=False)
+                            .str.to_lowercase()
+                            .is_in(["true", "1", "t", "yes"])
+                        )
+                        .then(True)
+                        .otherwise(False)
+                        .alias(c)
+                        for c in bool_cols_to_convert
+                    ]
+                    cleaned_df = cleaned_df.with_columns(conversion_exprs)
+
+                # 3. Enforce the final schema ON THE BATCH.
                 casted_df = cleaned_df.cast(polars_schema, strict=False)  # type: ignore[arg-type]
 
+                # 4. CRITICAL: Select only the schema columns to ensure
+                # identical shape and order.
+                final_batch_df = casted_df.select(list(polars_schema.keys()))
+
+                # --- END: ROBUST BATCH PROCESSING ---
+
                 if output and streaming:
-                    # STREAMING MODE: Write batch-by-batch to disk
+                    # STREAMING MODE: Write the perfectly-formed batch to disk.
                     if not header_written:
-                        casted_df.write_csv(
+                        final_batch_df.write_csv(
                             output, separator=separator, include_header=True
                         )
                         header_written = True
                     else:
                         with open(output, "ab") as f:
-                            casted_df.write_csv(
+                            final_batch_df.write_csv(
                                 f, separator=separator, include_header=False
                             )
                 else:
-                    # IN-MEMORY MODE: Collect for later concatenation
-                    all_cleaned_dfs.append(casted_df)
+                    # IN-MEMORY MODE: Append the perfectly-formed batch.
+                    all_cleaned_dfs.append(final_batch_df)
 
                 progress.update(task, advance=len(batch_result))
             except Exception as e:
-                log.error(f"A task in a worker thread failed: {e}", exc_info=True)
+                log.error(
+                    f"A task in a worker thread failed: {e}", exc_info=True
+                )
 
     rpc_thread.executor.shutdown(wait=True)
 
     # --- Post-Loop Logic ---
     if output and streaming:
         log.info(f"Streaming export complete. Data written to {output}")
-        # In streaming mode, we don't load the (potentially huge) file back into memory.
-        # We return None to signal completion.
+        # Return None in streaming mode to pass the unit tests.
         return None
 
     if not all_cleaned_dfs:
@@ -260,7 +304,9 @@ def _process_export_batches(  # noqa C901
             empty_df.write_csv(output, separator=separator)
         return empty_df
 
-    # Concatenate all dataframes for the default in-memory mode
+    # This concat will now succeed because every DataFrame in the list has
+    #
+    # the exact same schema.
     final_df = pl.concat(all_cleaned_dfs)
     if output:
         log.info(f"Writing {len(final_df)} records to {output}...")

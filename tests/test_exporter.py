@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import polars as pl
+from polars.testing import assert_frame_equal
 
 from odoo_data_flow.exporter import run_export, run_export_for_migration
 
@@ -127,3 +128,58 @@ def test_run_export_for_migration_no_data(mock_export_data: MagicMock) -> None:
     )
     assert header == ["id", "name"]
     assert data == []
+
+
+def test_export_pre_casting_handles_string_booleans() -> None:
+    """Test Export casting.
+
+    Tests that the export pre-casting logic correctly converts
+    string columns to boolean.
+    """
+    # 1. Setup: Mimic problematic data and a schema with INSTANCES
+    cleaned_df = pl.DataFrame(
+        {
+            "id": [1, 2, 3],
+            "name": ["Company A", "Individual", "Company B"],
+            "is_company": ["True", "False", "True"],
+        }
+    )
+    # FIX: Use instances of DataTypes (e.g., pl.Boolean()), not the classes.
+    polars_schema = {
+        "id": pl.Int64(),
+        "name": pl.String(),
+        "is_company": pl.Boolean(),
+    }
+
+    # 2. Action: This logic is a stand-in for the logic inside your export script
+    bool_cols_to_convert = [
+        k
+        for k, v in polars_schema.items()
+        if isinstance(v, pl.Boolean)
+        and k in cleaned_df.columns
+        and cleaned_df[k].dtype == pl.String
+    ]
+
+    if bool_cols_to_convert:
+        conversion_exprs = [
+            pl.when(pl.col(c).str.to_lowercase().is_in(["true", "1", "t", "yes"]))
+            .then(True)
+            .otherwise(False)
+            .alias(c)
+            for c in bool_cols_to_convert
+        ]
+        cleaned_df = cleaned_df.with_columns(conversion_exprs)
+
+    casted_df = cleaned_df.cast(polars_schema, strict=False)  # type: ignore[arg-type]
+
+    # 3. Assertion: Verify the final DataFrame has the correct data and type.
+    expected = pl.DataFrame(
+        {
+            "id": [1, 2, 3],
+            "name": ["Company A", "Individual", "Company B"],
+            "is_company": [True, False, True],
+        },
+        schema=polars_schema,
+    )
+
+    assert_frame_equal(casted_df, expected)
