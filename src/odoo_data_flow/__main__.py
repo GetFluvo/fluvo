@@ -289,7 +289,8 @@ def import_cmd(**kwargs: Any) -> None:
 @click.option(  # Add this new option decorator
     "--streaming",
     is_flag=True,
-    help="Enable streaming to write data batch-by-batch. Use for very large datasets.",
+    help="""Enable streaming to write data batch-by-batch.
+    Use for very large datasets.""",
 )
 @click.option("-s", "--sep", "separator", default=";", help="CSV separator character.")
 @click.option(
@@ -302,7 +303,11 @@ def import_cmd(**kwargs: Any) -> None:
     "--technical-names",
     is_flag=True,
     default=False,
-    help="Export technical values for selection fields.",
+    help="""Force the use of the high-performance raw export mode.
+    This returns database IDs for relational fields instead of display names.
+    This mode is often detected and enabled automatically if you use
+    '.id' or '/.id' in --fields.
+    """,
 )
 def export_cmd(**kwargs: Any) -> None:
     """Runs the data export process."""
@@ -316,7 +321,14 @@ def export_cmd(**kwargs: Any) -> None:
     "-f",
     "--fields",
     required=True,
-    help="Comma-separated list of fields to convert from path to base64.",
+    help="""Comma-separated list of fields to export.
+        Special specifiers are available for IDs:
+        '.id' for the raw database ID of the record.
+        'field/.id' for the raw database ID of a related record.
+        'id' for the XML/External ID of the record.
+        'field/id' for the XML/External ID of a related record.
+        Using '.id' or '/.id' will automatically enable a faster, raw export mode.
+        """,
 )
 @click.option(
     "--path",

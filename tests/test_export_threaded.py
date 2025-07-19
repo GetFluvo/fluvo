@@ -39,8 +39,8 @@ def mock_conf_lib() -> Generator[MagicMock, None, None]:
 class TestRPCThreadExport:
     """Tests for the RPCThreadExport class."""
 
-    def test_execute_batch_technical_names(self) -> None:
-        """Tests that model.read is called when technical_names is True."""
+    def test_execute_batch_read_method(self) -> None:
+        """Tests that model.read is called when use read method is True."""
         mock_model = MagicMock()
         thread = RPCThreadExport(1, mock_model, ["id"], technical_names=True)
         thread._execute_batch([1], 1)
@@ -48,7 +48,7 @@ class TestRPCThreadExport:
         mock_model.export_data.assert_not_called()
 
     def test_execute_batch_export_data(self) -> None:
-        """Tests that model.export_data is called when technical_names is False."""
+        """Tests that model.export_data is called when use read method is False."""
         mock_model = MagicMock()
         mock_model.export_data.return_value = {"datas": [["Test"]]}
         thread = RPCThreadExport(1, mock_model, ["name"], technical_names=False)
@@ -122,14 +122,18 @@ class TestExportData:
         mock_model = mock_conf_lib.return_value.get_model.return_value
         mock_model.search.return_value = [1, 2]
 
-        # Ensure read() returns ONLY the columns in the header
-        mock_model.read.return_value = [
-            {"id": 1, "name": "Test 1", "active": True},
-            {"id": 2, "name": "Test 2", "active": False},
-        ]
-        # Ensure fields_get() returns ONLY the types for the header
+        # *** FIX ***: Mock 'export_data', not 'read', for this test case.
+        # The return format is a dict with a 'datas' key containing a list of lists.
+        mock_model.export_data.return_value = {
+            "datas": [
+                ["xml_id.1", "Test 1", True],
+                ["xml_id.2", "Test 2", False],
+            ]
+        }
+
+        # The fields_get mock is still correct.
         mock_model.fields_get.return_value = {
-            "id": {"type": "integer"},
+            "id": {"type": "char"},
             "name": {"type": "char"},
             "active": {"type": "boolean"},
         }
@@ -141,19 +145,18 @@ class TestExportData:
             domain=[],
             header=header,
             output=None,
-            technical_names=True,
+            technical_names=False,  # This correctly invokes the export_data path
         )
 
         # --- Assert ---
         assert result_df is not None
         expected_df = pl.DataFrame(
             {
-                "id": [1, 2],
+                "id": ["xml_id.1", "xml_id.2"],
                 "name": ["Test 1", "Test 2"],
                 "active": [True, False],
             }
-        ).with_columns(pl.col("id").cast(pl.Int64))
-
+        )
         assert_frame_equal(result_df, expected_df)
 
     def test_export_to_file_default_mode_success(
@@ -406,7 +409,9 @@ class TestExportData:
             "odoo_data_flow.export_threaded.conf_lib.get_connection_from_config",
             side_effect=Exception("Conn error"),
         ):
-            model, field_types = _initialize_export("dummy.conf", "res.partner", ["id"])
+            model, field_types = _initialize_export(
+                "dummy.conf", "res.partner", ["id"], technical_names=False
+            )
             assert model is None
             assert field_types is None
 
@@ -472,6 +477,168 @@ class TestExportData:
                 "dummy.conf", "res.partner", [], ["id"], None, streaming=True
             )
             assert result is None
+
+    def test_export_relational_raw_id_success(self, mock_conf_lib: MagicMock) -> None:
+        """Test Relational Raw id.
+
+        Tests that requesting a relational field with '/.id' triggers read mode
+        and correctly returns an integer database ID.
+        """
+        # --- Arrange ---
+        header = ["name", "parent_id/.id"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.search.return_value = [10, 20]
+
+        # *** FIX ***: The read() mock must include the 'id' of the records being read.
+        mock_model.read.return_value = [
+            {
+                "id": 10,
+                "name": "Child Category",
+                "parent_id": (5, "Parent Category"),
+            },
+            {"id": 20, "name": "Root Category", "parent_id": False},
+        ]
+
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+            "parent_id": {"type": "many2one"},
+        }
+
+        # --- Act ---
+        result_df = export_data(
+            config_file="dummy.conf",
+            model="res.partner.category",
+            domain=[],
+            header=header,
+            output=None,
+        )
+
+        # --- Assert ---
+        assert result_df is not None
+        expected_df = pl.DataFrame(
+            {
+                "name": ["Child Category", "Root Category"],
+                "parent_id/.id": [5, None],
+            }
+        ).with_columns(pl.col("parent_id/.id").cast(pl.Int64))
+
+        assert_frame_equal(result_df, expected_df)
+
+    @patch("odoo_data_flow.export_threaded.log")
+    def test_export_mixed_syntax_fails_gracefully(
+        self, mock_log: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Test mixed syntax gracefully.
+
+        Tests that mixing read-style ('.id') and export-style ('field/id')
+        syntax is blocked and logs a helpful error.
+        """
+        # --- Arrange ---
+        header = [".id", "parent_id/id"]  # Incompatible fields
+
+        # --- Act ---
+        result = export_data(
+            config_file="dummy.conf",
+            model="res.partner.category",
+            domain=[],
+            header=header,
+            output=None,
+        )
+
+        # --- Assert ---
+        assert result is None
+        mock_log.error.assert_called_once()
+        call_args, _ = mock_log.error.call_args
+        assert "Mixing incompatible field types" in call_args[0]
+        assert "['parent_id/id']" in call_args[0]
+
+    def test_export_id_and_dot_id_in_read_mode(self, mock_conf_lib: MagicMock) -> None:
+        """Test the read mode.
+
+        Tests that in read() mode, both 'id' and '.id' correctly resolve
+        to the integer database ID.
+        """
+        # --- Arrange ---
+        header = [".id", "id", "name"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.search.return_value = [101, 102]
+        mock_model.read.return_value = [
+            {"id": 101, "name": "Record 101"},
+            {"id": 102, "name": "Record 102"},
+        ]
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+        }
+
+        # --- Act ---
+        result_df = export_data(
+            config_file="dummy.conf",
+            model="res.partner",
+            domain=[],
+            header=header,
+            output=None,
+            technical_names=True,
+        )
+
+        # --- Assert ---
+        assert result_df is not None
+
+        # *** FIX ***: Use the 'schema' argument to define dtypes on creation.
+        expected_df = pl.DataFrame(
+            {
+                ".id": [101, 102],
+                "id": [101, 102],
+                "name": ["Record 101", "Record 102"],
+            },
+            schema={".id": pl.Int64, "id": pl.Int64, "name": pl.String},
+        )
+
+        assert_frame_equal(result_df, expected_df)
+
+    def test_export_id_in_export_data_mode(self, mock_conf_lib: MagicMock) -> None:
+        """Test export id in export data.
+
+        Tests that in export_data mode, the 'id' field correctly resolves
+        to a string (for XML IDs).
+        """
+        # --- Arrange ---
+        header = ["id", "name"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.search.return_value = [1, 2]
+        mock_model.export_data.return_value = {
+            "datas": [
+                ["__export__.rec_1", "Record 1"],
+                ["__export__.rec_2", "Record 2"],
+            ]
+        }
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},  # Odoo still says it's an integer
+            "name": {"type": "char"},
+        }
+
+        # --- Act ---
+        result_df = export_data(
+            config_file="dummy.conf",
+            model="res.partner",
+            domain=[],
+            header=header,
+            output=None,
+            technical_names=False,  # Explicitly use export_data mode
+        )
+
+        # --- Assert ---
+        assert result_df is not None
+        expected_df = pl.DataFrame(
+            {
+                "id": ["__export__.rec_1", "__export__.rec_2"],
+                "name": ["Record 1", "Record 2"],
+            }
+        )
+        # Check that our logic correctly inferred the 'id' column should be a string
+        assert result_df.schema["id"] == pl.String
+        assert_frame_equal(result_df, expected_df)
 
 
 @patch("odoo_data_flow.export_threaded.concurrent.futures.as_completed")
