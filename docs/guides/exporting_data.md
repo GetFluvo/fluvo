@@ -23,7 +23,7 @@ flowchart TD
 
 ## The `odoo-data-flow export` Command
 
-The export process is handled by the `export` sub-command of the main `odoo-data-flow` tool. Unlike the import workflow, exporting is a single-step operation where you execute one command with the right parameters to pull data from your Odoo database.
+The export process is handled by the `export` sub-command of the main `odoo-data-flow` tool. Unlike the import workflow, exporting is a single-step operation where you execute one command with the right parameters to pull data from your Odoo database. It now includes a smart export mode to handle both human-readable and raw data exports efficiently.
 
 ## High-Performance, Streaming Exports
 
@@ -97,6 +97,41 @@ This command will:
 3.  For each matching record, it will retrieve the `name`, `email`, `city`, and the `name` of the related country.
 4.  It will save this data into a new CSV file located at `data/belgian_contacts.csv`.
 
+
+The `--fields` argument is used to specify which columns to export. It now has special syntax for handling different ID formats, making it powerful for data migration.
+
+| Specifier | Mode Used | Resulting Value | Example |
+| :--- | :--- | :--- | :--- |
+| `id` | `export_data` | The record's XML ID (External ID) | `__export__.res_partner_123` |
+| `.id` | `read` | The record's database ID (integer) | `123` |
+| `field/id` | `export_data` | The related record's XML ID | `__export__.res_country_5` |
+| `field/.id` | `read` | The related record's database ID (integer) | `5` |
+
+The tool is smart: if you use `.id` or `field/.id`, it automatically switches to a high-performance "raw" export mode (using Odoo's `read` method). Otherwise, it defaults to a human-readable mode (using `export_data`).
+
+#### Forcing Raw Export Mode
+
+You can force the high-performance raw export mode using the `--technical-names` flag. This is useful if you need the raw values of `Many2one` fields (which will return the database ID) without explicitly using the `/.id` syntax.
+
+**Example Usage:**
+
+```bash
+# Standard export with human-readable Many2one fields
+odoo-data-flow export \
+  --model "res.partner" \
+  --fields "name,country_id"
+
+# Export with the raw database ID for the country
+odoo-data-flow export \
+  --model "res.partner" \
+  --fields "name,country_id/.id"
+
+# Force raw export mode for all fields
+odoo-data-flow export \
+  --model "res.partner" \
+  --fields "name,country_id" \
+  --technical-names
+```
 
 ### Automatic Batch Resizing
 
