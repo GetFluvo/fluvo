@@ -136,10 +136,10 @@ def field_existence_check(
 
     try:
         connection: Any = conf_lib.get_connection_from_config(config_file=config)
-        model_fields_obj = connection.get_model("ir.model.fields")
-        domain = [("model", "=", model)]
-        odoo_fields_data = model_fields_obj.search_read(domain, ["name"])
-        odoo_field_names = {field["name"] for field in odoo_fields_data}
+        model_obj = connection.get_model(model)
+        odoo_fields = model_obj.fields_get()
+        odoo_field_names = set(odoo_fields.keys())
+
     except Exception as e:
         _show_error_panel(
             "Odoo Connection Error",
@@ -147,7 +147,12 @@ def field_existence_check(
         )
         return False
 
-    missing_fields = [field for field in csv_header if field not in odoo_field_names]
+    # Add a check to specifically reject the export-only '/.id' syntax.
+    missing_fields = [
+        field
+        for field in csv_header
+        if (field.split("/")[0] not in odoo_field_names) or (field.endswith("/.id"))
+    ]
 
     if missing_fields:
         error_message = (

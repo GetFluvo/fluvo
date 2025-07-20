@@ -224,16 +224,96 @@ class TestFieldExistenceCheck:
     ) -> None:
         """Tests the success case where all CSV columns exist on the model."""
         mock_polars_read_csv.return_value.columns = ["id", "name", "email"]
-        mock_conf_lib.return_value.get_model.return_value.search_read.return_value = [
-            {"name": "id"},
-            {"name": "name"},
-            {"name": "email"},
-            {"name": "phone"},
-        ]
+
+        # Mock model.fields_get() which is now used instead of search_read()
+        # It returns a dictionary where keys are the field names.
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+            "email": {"type": "char"},
+            "phone": {"type": "char"},
+        }
+
         result = preflight.field_existence_check(
             model="res.partner", filename="file.csv", config=""
         )
         assert result is True
+
+    def test_field_check_success_with_relational_id(
+        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Test Relational Id's passes tests.
+
+        Tests that the check PASSES when using Odoo's standard relational
+        field syntax (field/id).
+        """
+        # Arrange
+        mock_polars_read_csv.return_value.columns = ["name", "parent_id/id"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {
+            "name": {"type": "char"},
+            "parent_id": {"type": "many2one"},
+        }
+
+        # Act
+        result = preflight.field_existence_check(
+            model="res.partner.category", filename="file.csv", config=""
+        )
+
+        # Assert
+        assert result is True
+
+    def test_field_check_failure_with_invalid_base_field(
+        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Test invalid base field.
+
+        Tests that the check FAILS if the base field name is invalid,
+        even when using relational syntax.
+        """
+        # Arrange
+        mock_polars_read_csv.return_value.columns = [
+            "name",
+            "invalid_parent/id",
+        ]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {
+            "name": {"type": "char"},
+            "parent_id": {"type": "many2one"},
+        }
+
+        # Act
+        result = preflight.field_existence_check(
+            model="res.partner.category", filename="file.csv", config=""
+        )
+
+        # Assert
+        assert result is False
+
+    def test_field_check_rejects_export_only_syntax(
+        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Test Reject export only syntax.
+
+        Tests that the check FAILS when using the export-only '/.id' syntax,
+        as this is not valid for importing.
+        """
+        # Arrange
+        mock_polars_read_csv.return_value.columns = ["name", "parent_id/.id"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {
+            "name": {"type": "char"},
+            "parent_id": {"type": "many2one"},
+        }
+
+        # Act
+        result = preflight.field_existence_check(
+            model="res.partner.category", filename="file.csv", config=""
+        )
+
+        # Assert
+        assert result is False
 
     def test_field_check_failure(
         self,
