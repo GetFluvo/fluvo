@@ -89,10 +89,10 @@ To export all companies from the United States, you would combine two criteria:
 
 ### Specifying Fields with `--fields`
 
-The `--fields` option is a simple comma-separated list of the field names you want in your output file. You can also access fields on related records using dot notation.
+The `--fields` option is a simple comma-separated list of the field names you want in your output file. You can also access fields on related records using slash notation (/).
 
 - Simple fields: `name,email,phone`
-- Relational fields: `name,parent_id/name,parent_id/city` (This would get the contact's name, their parent company's name, and their parent company's city).
+- Relational fields: `name,parent_id/id,parent_id/name` (This would get the contact's name, their parent company's XML ID, and their parent company's name).
 
 
 It now has special syntax for handling different ID formats, making it powerful for data migration.

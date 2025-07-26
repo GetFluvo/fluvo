@@ -366,3 +366,35 @@ class TestFieldExistenceCheck:
         assert result is False
         mock_show_error_panel.assert_called_once()
         assert "Odoo Connection Error" in mock_show_error_panel.call_args[0][0]
+
+    def test_field_check_success_with_slash_notation_for_display_name(
+        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Test the slash notation.
+
+        Tests that the pre-flight check PASSES when using Odoo's standard
+        slash notation to get a display name from a related field
+        (e.g., 'field/name').
+        """
+        # --- Arrange ---
+        # Simulate a CSV header requesting a related field's name
+        mock_polars_read_csv.return_value.columns = ["name", "parent_id/name"]
+
+        # Mock the Odoo model to confirm that the base field 'parent_id' exists
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {
+            "name": {"type": "char"},
+            "parent_id": {
+                "type": "many2one",
+                "relation": "res.partner.category",
+            },
+        }
+
+        # --- Act ---
+        result = preflight.field_existence_check(
+            model="res.partner.category", filename="file.csv", config=""
+        )
+
+        # --- Assert ---
+        # The check should pass because 'parent_id' is a valid field
+        assert result is True
