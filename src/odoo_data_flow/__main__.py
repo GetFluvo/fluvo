@@ -273,7 +273,14 @@ def import_cmd(**kwargs: Any) -> None:
 @click.option("--output", required=True, help="Output file path.")
 @click.option("--model", required=True, help="Odoo model to export from.")
 @click.option(
-    "--fields", required=True, help="Comma-separated list of fields to export."
+    "--fields",
+    required=True,
+    help="""Comma-separated list of fields to export.
+    Special specifiers are available for IDs:
+    '.id' for raw database ID; 'field/.id' for related raw ID;
+    'id' for XML ID; 'field/id' for related XML ID.
+    The tool automatically uses the best export method based on the fields requested.
+    """,
 )
 @click.option("--domain", default="[]", help="Odoo domain filter as a list string.")
 @click.option(
@@ -304,9 +311,8 @@ def import_cmd(**kwargs: Any) -> None:
     is_flag=True,
     default=False,
     help="""Force the use of the high-performance raw export mode.
-    This returns database IDs for relational fields instead of display names.
-    This mode is often detected and enabled automatically if you use
-    '.id' or '/.id' in --fields.
+    This is often enabled automatically if you request raw IDs or technical field types
+    like 'selection' or 'binary'.
     """,
 )
 def export_cmd(**kwargs: Any) -> None:

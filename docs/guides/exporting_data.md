@@ -23,32 +23,53 @@ flowchart TD
 
 ## The `odoo-data-flow export` Command
 
-The export process is handled by the `export` sub-command of the main `odoo-data-flow` tool. Unlike the import workflow, exporting is a single-step operation where you execute one command with the right parameters to pull data from your Odoo database. It now includes a smart export mode to handle both human-readable and raw data exports efficiently.
+```text
+Odoo Instance ---> (odoo-data-flow export) ---> Output File
+      ^                      ^
+      |                      |
+(Database)      (Configuration / CLI Options)
+```
 
-## High-Performance, Streaming Exports
 
-The `export` command is built for performance and scalability. To handle massive datasets with millions of records, the export process uses a streaming pipeline:
+The export process is handled by the `export` sub-command. It's a single-step operation designed for performance, reliability, and intelligent data handling.
 
-* **Streaming mode - Low Memory Usage:** Instead of loading the entire dataset into memory, records are fetched from Odoo in batches, processed, and written directly to the output file. This ensures that even very large exports can run on machines with limited RAM or on very large datasets.
-* **Type-Aware Cleaning:** The export process automatically cleans the data before writing. It intelligently inspects the field types on your Odoo model and corrects common data inconsistencies, such as converting Odoo's `False` values to empty strings for non-boolean fields (like `phone` or `website`), while preserving `False` for actual boolean fields.
-* **High-Speed Writer:** The tool uses the high-performance, multi-threaded CSV writer from the `Polars` library, making the file writing process significantly faster than standard Python libraries.
+### Smart Export Mode: Automatic Method Selection
+
+The exporter features a **smart mode** that automatically uses the best Odoo API method for the data you request. This ensures you get the most accurate and performant export without manual configuration.
+
+The tool will automatically use the high-performance **`read` method** if any of the following are true:
+
+1.  You request a raw database ID using special syntax (e.g., `.id` or `country_id/.id`).
+2.  You request a **`selection`** field (to get the raw key, e.g., `done`, instead of the label "Done").
+3.  You request a **`binary`** field (as `export_data` cannot handle these).
+4.  You manually force it with the `--technical-names` flag.
+
+Otherwise, it defaults to the human-readable `export_data` method.
+
+
+### High-Performance, Streaming Exports
+
+The `export` command is built for scalability. To handle massive datasets, it uses a streaming pipeline:
+
+* **Low Memory Usage:** Records are fetched in batches, processed, and written directly to the output file, ensuring a low memory footprint even for huge exports.
+* **Type-Aware Cleaning:** The tool inspects Odoo field types to correct common data inconsistencies, like converting `False` values to empty strings for non-boolean fields.
+* **Automatic Batch Resizing:** If the Odoo server runs out of memory on a large batch, the tool automatically splits the batch and retries, making the export process highly resilient.
 
 ### Command-Line Options
 
-The command is configured using a set of options. Here are the most essential ones:
+| Option | Description |
+| :--- | :--- |
+| `--config` | **Required**. Path to your `connection.conf` file. |
+| `--model` | **Required**. The technical name of the Odoo model to export (e.g., `res.partner`). |
+| `--fields` | **Required**. A comma-separated list of fields to export, with support for special ID specifiers. |
+| `--output` | **Required**. The path and filename for the output CSV file. |
+| `--domain` | A filter to select which records to export, using Odoo's domain syntax as a string. Defaults to `[]` (all records). |
+| `--worker` | The number of parallel processes to use. Defaults to `1`. |
+| `--size` | The number of records to fetch in a single batch. Defaults to `1000`. |
+| `--sep` | The character separating columns. Defaults to a semicolon (`;`). |
+| `--technical-names` | A flag to force the use of the high-performance raw export mode. Often enabled automatically. |
+| `--streaming` | A flag to enable streaming mode for very large datasets. Slower but uses minimal memory. |
 
-| Option              | Description                                                                                                                                                                                            |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--config`          | **Required**. Path to your `connection.conf` file containing the Odoo credentials.                                                                                                                       |
-| `--model`           | **Required**. The technical name of the Odoo model you want to export records from (e.g., `res.partner`).                                                                                                |
-| `--fields`          | **Required**. A comma-separated list of the technical field names you want to include in the export file.                                                                                                |
-| `--output`            | **Required**. The path and filename for the output CSV file (e.g., `data/exported_partners.csv`).                                                                                                        |
-| `--domain`          | A filter to select which records to export, written as a string. Defaults to `[]` (export all records).                                                                                                  |
-| `--worker`          | The number of parallel processes to use for the export. Defaults to `1`.                                                                                                                                 |
-| `--size`            | The number of records to fetch in a single batch. Defaults to `10`.                                                                                                                                      |
-| `--sep`             | The character separating columns. Defaults to a semicolon (`;`).                                                                                                                                         |
-| `--technical-names` | A flag that, when present, exports the raw technical values for fields (e.g., `draft` for a selection field, `False` for a boolean). This is highly recommended for data migrations and is type-aware. |
-| `--streaming`       | A flag that enables the streaming mode, This mode writes data to the output file in batches, ensuring a low and constant memory footprint. It is slower due to higher I/O overhead but is necessary for huge exports. |
 
 ### Understanding the `--domain` Filter
 
@@ -73,6 +94,18 @@ The `--fields` option is a simple comma-separated list of the field names you wa
 - Simple fields: `name,email,phone`
 - Relational fields: `name,parent_id/name,parent_id/city` (This would get the contact's name, their parent company's name, and their parent company's city).
 
+
+It now has special syntax for handling different ID formats, making it powerful for data migration.
+
+| Specifier | Mode Used | Resulting Value | Example |
+| :--- | :--- | :--- | :--- |
+| `id` | `export_data` | The record's XML ID (External ID) | `__export__.res_partner_123` |
+| `.id` | `read` | The record's database ID (integer) | `123` |
+| `field/id` | `export_data` | The related record's XML ID | `__export__.res_country_5` |
+| `field/.id` | `read` | The related record's database ID (integer) | `5` |
+
+The tool is smart: if you use `.id` or `field/.id`, it automatically switches to a high-performance "raw" export mode (using Odoo's `read` method). Otherwise, it defaults to a human-readable mode (using `export_data`).
+
 ## Full Export Example
 
 Let's combine these concepts into a full example. We want to export the name, email, and city for all individual contacts (not companies) located in Belgium.
@@ -84,7 +117,7 @@ odoo-data-flow export \
     --config conf/connection.conf \
     --model "res.partner" \
     --domain "[('is_company', '=', False), ('country_id.code', '=', 'BE')]" \
-    --fields "name,email,city,country_id/name" \
+    --fields "id,name,email,city,country_id/id" \
     --output "data/belgian_contacts.csv"
 ```
 
@@ -97,17 +130,6 @@ This command will:
 3.  For each matching record, it will retrieve the `name`, `email`, `city`, and the `name` of the related country.
 4.  It will save this data into a new CSV file located at `data/belgian_contacts.csv`.
 
-
-The `--fields` argument is used to specify which columns to export. It now has special syntax for handling different ID formats, making it powerful for data migration.
-
-| Specifier | Mode Used | Resulting Value | Example |
-| :--- | :--- | :--- | :--- |
-| `id` | `export_data` | The record's XML ID (External ID) | `__export__.res_partner_123` |
-| `.id` | `read` | The record's database ID (integer) | `123` |
-| `field/id` | `export_data` | The related record's XML ID | `__export__.res_country_5` |
-| `field/.id` | `read` | The related record's database ID (integer) | `5` |
-
-The tool is smart: if you use `.id` or `field/.id`, it automatically switches to a high-performance "raw" export mode (using Odoo's `read` method). Otherwise, it defaults to a human-readable mode (using `export_data`).
 
 #### Forcing Raw Export Mode
 

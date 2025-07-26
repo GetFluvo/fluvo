@@ -700,6 +700,102 @@ class TestExportData:
         assert_frame_equal(result_df, expected_df)
 
     @patch("odoo_data_flow.export_threaded.concurrent.futures.as_completed")
+    @patch("odoo_data_flow.export_threaded.RPCThreadExport")
+    def test_export_auto_enables_read_mode_for_selection_field(
+        self,
+        mock_rpc_thread_class: MagicMock,
+        mock_as_completed: MagicMock,
+        mock_conf_lib: MagicMock,
+    ) -> None:
+        """Test read mode for selection fields.
+
+        Tests that including a 'selection' field automatically triggers the
+        'read' method to export the raw technical value.
+        """
+        # --- Arrange ---
+        header = ["name", "state"]
+        mock_connection = mock_conf_lib.return_value
+        mock_model = mock_connection.get_model.return_value
+        mock_model.search.return_value = [1]
+
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+            "state": {"type": "selection"},
+        }
+
+        # FIX: Mock the result that the processing loop will receive
+        mock_future = MagicMock()
+        mock_future.result.return_value = [{"name": "Test Record", "state": "done"}]
+        mock_as_completed.return_value = [mock_future]
+
+        # --- Act ---
+        result_df = export_data(
+            config_file="dummy.conf",
+            model="sale.order",
+            domain=[],
+            header=header,
+            output=None,
+        )
+
+        # --- Assert ---
+        init_args, init_kwargs = mock_rpc_thread_class.call_args
+        assert init_kwargs.get("technical_names") is True, "Read mode was not triggered"
+
+        assert result_df is not None
+        expected_df = pl.DataFrame({"name": ["Test Record"], "state": ["done"]})
+        assert_frame_equal(result_df, expected_df, check_dtypes=False)
+
+    @patch("odoo_data_flow.export_threaded.concurrent.futures.as_completed")
+    @patch("odoo_data_flow.export_threaded.RPCThreadExport")
+    def test_export_auto_enables_read_mode_for_binary_field(
+        self,
+        mock_rpc_thread_class: MagicMock,
+        mock_as_completed: MagicMock,
+        mock_conf_lib: MagicMock,
+    ) -> None:
+        """Test read mode for selection fields.
+
+        Tests that including a 'binary' field automatically triggers the
+        'read' method to export the base64 data.
+        """
+        # --- Arrange ---
+        header = ["name", "datas"]
+        mock_connection = mock_conf_lib.return_value
+        mock_model = mock_connection.get_model.return_value
+        mock_model.search.return_value = [1]
+
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+            "datas": {"type": "binary"},
+        }
+
+        # FIX: Mock the result that the processing loop will receive
+        mock_future = MagicMock()
+        mock_future.result.return_value = [
+            {"name": "test.zip", "datas": "UEsDBAoAAAAA..."}
+        ]
+        mock_as_completed.return_value = [mock_future]
+
+        # --- Act ---
+        result_df = export_data(
+            config_file="dummy.conf",
+            model="ir.attachment",
+            domain=[],
+            header=header,
+            output=None,
+        )
+
+        # --- Assert ---
+        init_args, init_kwargs = mock_rpc_thread_class.call_args
+        assert init_kwargs.get("technical_names") is True, "Read mode was not triggered"
+
+        assert result_df is not None
+        expected_df = pl.DataFrame({"name": ["test.zip"], "datas": ["UEsDBAoAAAAA..."]})
+        assert_frame_equal(result_df, expected_df)
+
+    @patch("odoo_data_flow.export_threaded.concurrent.futures.as_completed")
     @patch("odoo_data_flow.export_threaded._clean_batch")
     @patch("odoo_data_flow.export_threaded.Progress")
     def test_process_export_batches_handles_inconsistent_schemas(

@@ -401,6 +401,62 @@ def _process_export_batches(  # noqa C901
     return final_df
 
 
+def _determine_export_strategy(
+    config_file: str,
+    model: str,
+    header: list[str],
+    technical_names: bool,
+) -> tuple[
+    Optional[Any],
+    Optional[Any],
+    Optional[dict[str, dict[str, Any]]],
+    bool,
+    bool,
+]:
+    """Perform pre-flight checks and determine the best export strategy."""
+    preliminary_read_mode = technical_names or any(
+        f.endswith("/.id") or f == ".id" for f in header
+    )
+    connection, model_obj, fields_info = _initialize_export(
+        config_file, model, header, preliminary_read_mode
+    )
+
+    if not model_obj or not fields_info:
+        return None, None, None, False, False
+
+    has_read_specifiers = any(f.endswith("/.id") or f == ".id" for f in header)
+    has_export_specifiers = any("/" in f and not f.endswith("/.id") for f in header)
+    technical_types = {"selection", "binary"}
+    has_technical_fields = any(
+        info.get("type") in technical_types for info in fields_info.values()
+    )
+
+    is_hybrid = has_read_specifiers and has_export_specifiers
+    force_read_method = (
+        technical_names or has_read_specifiers or is_hybrid or has_technical_fields
+    )
+
+    if is_hybrid:
+        log.info("Hybrid export mode activated. Using 'read' with XML ID enrichment.")
+    elif has_technical_fields:
+        log.info("Read method auto-enabled for 'selection' or 'binary' fields.")
+    elif force_read_method:
+        log.info("Exporting using 'read' method for raw database values.")
+    else:
+        log.info("Exporting using 'export_data' method for human-readable values.")
+
+    if force_read_method and not is_hybrid:
+        invalid_fields = [f for f in header if "/" in f and not f.endswith("/.id")]
+        if invalid_fields:
+            log.error(
+                f"Mixing export-style specifiers {invalid_fields} "
+                f"is not supported in pure 'read' mode."
+            )
+            return None, None, None, False, False
+
+    return connection, model_obj, fields_info, force_read_method, is_hybrid
+
+
 def export_data(
     config_file: str,
     model: str,
@@ -416,30 +472,21 @@ def export_data(
     streaming: bool = False,
 ) -> Optional[pl.DataFrame]:
     """Exports data from an Odoo model."""
-    has_read_specifiers = any(f.endswith("/.id") or f == ".id" for f in header)
-    has_export_specifiers = any("/" in f and not f.endswith("/.id") for f in header)
+    # --- Step 1: Get field metadata *before* deciding on a mode ---
+    # We pass a temporary 'technical_names' flag
+    # because the final decision hasn't been made yet.
+    # This ensures 'id' field type is inferred correctly in the initial check.
+    (
+        connection,
+        model_obj,
+        fields_info,
+        force_read_method,
+        is_hybrid,
+    ) = _determine_export_strategy(config_file, model, header, technical_names)
 
-    is_hybrid = has_read_specifiers and has_export_specifiers
-    force_read_method = technical_names or has_read_specifiers or is_hybrid
-    if is_hybrid:
-        log.info("Hybrid export mode activated. Using 'read' with XML ID enrichment.")
-    elif force_read_method:
-        log.info("Exporting using 'read' method for raw database values.")
-    else:
-        log.info("Exporting using 'export_data' method for human-readable values.")
-    if force_read_method and not is_hybrid:
-        invalid_fields = [f for f in header if "/" in f and not f.endswith("/.id")]
-        if invalid_fields:
-            log.error(
-                f"Mixing export-style specifiers {invalid_fields} is not "
-                f"supported in pure 'read' mode."
-            )
-            return None
-    connection, model_obj, fields_info = _initialize_export(
-        config_file, model, header, force_read_method
-    )
-    if not model_obj or fields_info is None:
+    if not connection or not model_obj or not fields_info:
         return None
+
     if streaming and not output:
         log.error("Streaming mode requires an output file path. Aborting.")
         return None
@@ -451,10 +498,12 @@ def export_data(
         if output:
             pl.DataFrame(schema=header).write_csv(output, separator=separator)
         return pl.DataFrame(schema=header)
+
     log.info(
         f"Found {len(ids)} records to export. Splitting into batches of {batch_size}."
     )
     id_batches = list(batch(ids, batch_size))
+
     rpc_thread = RPCThreadExport(
         max_connection=max_connection,
         connection=connection,
@@ -467,6 +516,7 @@ def export_data(
     )
     for i, id_batch in enumerate(id_batches):
         rpc_thread.launch_batch(list(id_batch), i)
+
     return _process_export_batches(
         rpc_thread, len(ids), model, output, fields_info, separator, streaming
     )
