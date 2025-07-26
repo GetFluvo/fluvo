@@ -82,9 +82,8 @@ class RPCThreadExport(RpcThread):
         self,
         raw_data: list[dict[str, Any]],
         enrichment_tasks: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        """Fetch XML IDs for related fields and return a lookup map."""
-        lookup_maps = {}
+    ) -> None:
+        """Fetch XML IDs for related fields and enrich the raw_data in-place."""
         ir_model_data = self.connection.get_model("ir.model.data")
         for task in enrichment_tasks:
             relation_model = task["relation"]
@@ -111,37 +110,41 @@ class RPCThreadExport(RpcThread):
                 item["res_id"]: f"{item['module']}.{item['name']}"
                 for item in xml_id_data
             }
-            lookup_maps[task["target_field"]] = db_id_to_xml_id
-        return lookup_maps
+
+            for record in raw_data:
+                related_val = record.get(source_field)
+                xml_id = None
+                if isinstance(related_val, (list, tuple)) and related_val:
+                    xml_id = db_id_to_xml_id.get(related_val[0])
+                record[task["target_field"]] = xml_id
 
     def _format_batch_results(
-        self, raw_data: list[dict[str, Any]], lookup_maps: dict[str, Any]
+        self, raw_data: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
         """Format the raw/enriched data to match the requested header."""
         processed_data = []
         for record in raw_data:
             new_record = {}
             for field in self.header:
-                base_field = field.split("/")[0].replace(".id", "id")
-                value = record.get(base_field)
-
-                if field == ".id":
-                    new_record[field] = record.get("id")
-                elif field.endswith("/.id"):
-                    new_record[field] = (
-                        value[0] if isinstance(value, (list, tuple)) and value else None
-                    )
-                elif field in lookup_maps:
-                    db_id = (
-                        value[0] if isinstance(value, (list, tuple)) and value else None
-                    )
-                    new_record[field] = (
-                        lookup_maps[field].get(db_id) if db_id is not None else None
-                    )
-                elif isinstance(value, (list, tuple)) and value:
-                    new_record[field] = value[1]
+                if field in record:
+                    value = record[field]
+                    if isinstance(value, (list, tuple)) and value:
+                        new_record[field] = value[1]
+                    else:
+                        new_record[field] = value
                 else:
-                    new_record[field] = value
+                    base_field = field.split("/")[0].replace(".id", "id")
+                    value = record.get(base_field)
+                    if field == ".id":
+                        new_record[".id"] = record.get("id")
+                    elif field.endswith("/.id"):
+                        new_record[field] = (
+                            value[0]
+                            if isinstance(value, (list, tuple)) and value
+                            else None
+                        )
+                    else:
+                        new_record[field] = None
             processed_data.append(new_record)
         return processed_data
 
@@ -191,8 +194,10 @@ class RPCThreadExport(RpcThread):
             if not raw_data:
                 return []
 
-            lookup_maps = self._enrich_with_xml_ids(raw_data, enrichment_tasks)
-            return self._format_batch_results(raw_data, lookup_maps)
+            if enrichment_tasks:
+                self._enrich_with_xml_ids(raw_data, enrichment_tasks)
+
+            return self._format_batch_results(raw_data)
 
         except Exception as e:
             error_data = (
@@ -229,27 +234,6 @@ class RPCThreadExport(RpcThread):
         self.spawn_thread(self._execute_batch, [data_ids, batch_number])
 
 
-def _clean_batch(
-    batch_data: list[dict[str, Any]], field_types: dict[str, str]
-) -> pl.DataFrame:
-    """Converts a batch of data to a DataFrame and cleans it."""
-    if not batch_data:
-        return pl.DataFrame()
-    df = pl.DataFrame(batch_data, infer_schema_length=None)
-    cleaning_exprs = []
-    for field_name, field_type in field_types.items():
-        if field_name in df.columns and field_type != "boolean":
-            cleaning_exprs.append(
-                pl.when(pl.col(field_name) == False)  # noqa: E712
-                .then(None)
-                .otherwise(pl.col(field_name))
-                .alias(field_name)
-            )
-    if cleaning_exprs:
-        df = df.with_columns(cleaning_exprs)
-    return df
-
-
 def _initialize_export(
     config_file: str, model_name: str, header: list[str], technical_names: bool
 ) -> tuple[Optional[Any], Optional[Any], Optional[dict[str, dict[str, Any]]]]:
@@ -265,7 +249,6 @@ def _initialize_export(
             )
         )
         field_metadata = model_obj.fields_get(fields_for_metadata)
-
         fields_info = {}
         for original_field in header:
             base_field = original_field.split("/")[0]
@@ -287,12 +270,79 @@ def _initialize_export(
         return None, None, None
 
 
-def _process_export_batches(  # noqa C901
+def _clean_batch(batch_data: list[dict[str, Any]]) -> pl.DataFrame:
+    """Converts a batch of data to a DataFrame without complex cleaning."""
+    if not batch_data:
+        return pl.DataFrame()
+    return pl.DataFrame(batch_data, infer_schema_length=None)
+
+
+def _clean_and_transform_batch(
+    df: pl.DataFrame,
+    field_types: dict[str, str],
+    polars_schema: dict[str, pl.DataType],
+) -> pl.DataFrame:
+    """Runs a multi-stage cleaning and transformation pipeline on a DataFrame."""
+    # Step 1: Convert any list-type or object-type columns to strings FIRST.
+    transform_exprs = []
+    for col_name in df.columns:
+        if df[col_name].dtype in (pl.List, pl.Object):
+            transform_exprs.append(pl.col(col_name).cast(pl.String))
+    if transform_exprs:
+        df = df.with_columns(transform_exprs)
+
+    # Step 2: Now that lists are gone, it's safe to clean up 'False' values.
+    false_cleaning_exprs = []
+    for field_name, field_type in field_types.items():
+        if field_name in df.columns and field_type != "boolean":
+            false_cleaning_exprs.append(
+                pl.when(pl.col(field_name) == False)  # noqa: E712
+                .then(None)
+                .otherwise(pl.col(field_name))
+                .alias(field_name)
+            )
+    if false_cleaning_exprs:
+        df = df.with_columns(false_cleaning_exprs)
+
+    # Step 3: Handle boolean string conversions.
+    bool_cols_to_convert = [
+        k
+        for k, v in polars_schema.items()
+        if v.base_type() == pl.Boolean and k in df.columns and df[k].dtype != pl.Boolean
+    ]
+    if bool_cols_to_convert:
+        conversion_exprs = [
+            pl.when(
+                pl.col(c)
+                .cast(pl.String, strict=False)
+                .str.to_lowercase()
+                .is_in(["true", "1", "t", "yes"])
+            )
+            .then(True)
+            .otherwise(False)
+            .alias(c)
+            for c in bool_cols_to_convert
+        ]
+        df = df.with_columns(conversion_exprs)
+
+    # Step 4: Ensure all schema columns exist before the final cast.
+    for col_name in polars_schema:
+        if col_name not in df.columns:
+            df = df.with_columns(
+                pl.lit(None, dtype=polars_schema[col_name]).alias(col_name)
+            )
+
+    # Step 5: Final cast to the target schema.
+    casted_df = df.cast(polars_schema, strict=False)  # type: ignore[arg-type]
+    return casted_df.select(list(polars_schema.keys()))
+
+
+def _process_export_batches(  # noqa: C901
     rpc_thread: "RPCThreadExport",
     total_ids: int,
     model_name: str,
     output: Optional[str],
-    fields_info: dict[str, dict[str, Any]],  # FIX: Take fields_info
+    fields_info: dict[str, dict[str, Any]],
     separator: str,
     streaming: bool,
 ) -> Optional[pl.DataFrame]:
@@ -311,6 +361,7 @@ def _process_export_batches(  # noqa C901
             k: v() if isinstance(v, type) and issubclass(v, pl.DataType) else v
             for k, v in polars_schema.items()
         }
+
     all_cleaned_dfs: list[pl.DataFrame] = []
     header_written = False
     progress = Progress(
@@ -330,38 +381,14 @@ def _process_export_batches(  # noqa C901
                 batch_result = future.result()
                 if not batch_result:
                     continue
-                cleaned_df = _clean_batch(batch_result, field_types)
-                if cleaned_df.is_empty():
-                    continue
-                bool_cols_to_convert = [
-                    k
-                    for k, v in polars_schema.items()
-                    if v.base_type() == pl.Boolean
-                    and k in cleaned_df.columns
-                    and cleaned_df[k].dtype != pl.Boolean
-                ]
-                if bool_cols_to_convert:
-                    conversion_exprs = [
-                        pl.when(
-                            pl.col(c)
-                            .cast(pl.String, strict=False)
-                            .str.to_lowercase()
-                            .is_in(["true", "1", "t", "yes"])
-                        )
-                        .then(True)
-                        .otherwise(False)
-                        .alias(c)
-                        for c in bool_cols_to_convert
-                    ]
-                    cleaned_df = cleaned_df.with_columns(conversion_exprs)
 
-                for col_name in polars_schema:
-                    if col_name not in cleaned_df.columns:
-                        cleaned_df = cleaned_df.with_columns(
-                            pl.lit(None, dtype=polars_schema[col_name]).alias(col_name)
-                        )
-                casted_df = cleaned_df.cast(polars_schema, strict=False)  # type: ignore[arg-type]
-                final_batch_df = casted_df.select(list(polars_schema.keys()))
+                df = _clean_batch(batch_result)
+                if df.is_empty():
+                    continue
+
+                final_batch_df = _clean_and_transform_batch(
+                    df, field_types, polars_schema
+                )
 
                 if output and streaming:
                     if not header_written:
@@ -379,6 +406,7 @@ def _process_export_batches(  # noqa C901
                 progress.update(task, advance=len(batch_result))
             except Exception as e:
                 log.error(f"A task in a worker thread failed: {e}", exc_info=True)
+
     rpc_thread.executor.shutdown(wait=True)
 
     if output and streaming:
@@ -402,10 +430,7 @@ def _process_export_batches(  # noqa C901
 
 
 def _determine_export_strategy(
-    config_file: str,
-    model: str,
-    header: list[str],
-    technical_names: bool,
+    config_file: str, model: str, header: list[str], technical_names: bool
 ) -> tuple[
     Optional[Any],
     Optional[Any],
@@ -430,7 +455,6 @@ def _determine_export_strategy(
     has_technical_fields = any(
         info.get("type") in technical_types for info in fields_info.values()
     )
-
     is_hybrid = has_read_specifiers and has_export_specifiers
     force_read_method = (
         technical_names or has_read_specifiers or is_hybrid or has_technical_fields
@@ -472,17 +496,9 @@ def export_data(
     streaming: bool = False,
 ) -> Optional[pl.DataFrame]:
     """Exports data from an Odoo model."""
-    # --- Step 1: Get field metadata *before* deciding on a mode ---
-    # We pass a temporary 'technical_names' flag
-    # because the final decision hasn't been made yet.
-    # This ensures 'id' field type is inferred correctly in the initial check.
-    (
-        connection,
-        model_obj,
-        fields_info,
-        force_read_method,
-        is_hybrid,
-    ) = _determine_export_strategy(config_file, model, header, technical_names)
+    connection, model_obj, fields_info, force_read_method, is_hybrid = (
+        _determine_export_strategy(config_file, model, header, technical_names)
+    )
 
     if not connection or not model_obj or not fields_info:
         return None

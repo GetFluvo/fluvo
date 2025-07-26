@@ -98,40 +98,35 @@ class TestRPCThreadExport:
 
 
 class TestCleanBatch:
-    """Tests for the _clean_batch helper function."""
+    """Tests for the _clean_batch utility function."""
 
-    def test_clean_batch_converts_false_correctly(self) -> None:
-        """Tests that False is converted to None for non-booleans."""
-        dirty_data = [
-            {"id": 1, "name": "Test", "is_company": True, "phone": False},
-            {"id": 2, "name": False, "is_company": False, "phone": "12345"},
+    def test_clean_batch_creates_dataframe(self) -> None:
+        """Tests that a DataFrame is created correctly from a list of dicts."""
+        # Arrange
+        test_data = [
+            {"id": 1, "name": "Test 1"},
+            {"id": 2, "name": "Test 2"},
         ]
-        field_types = {
-            "id": "integer",
-            "name": "char",
-            "is_company": "boolean",
-            "phone": "char",
-        }
-        cleaned_df = _clean_batch(dirty_data, field_types)
-        expected_df = pl.DataFrame(
-            {
-                "id": [1, 2],
-                "name": ["Test", None],
-                "is_company": [True, False],
-                "phone": [None, "12345"],
-            }
-        )
-        assert_frame_equal(cleaned_df, expected_df)
+
+        # Act
+        result_df = _clean_batch(test_data)
+
+        # Assert
+        assert isinstance(result_df, pl.DataFrame)
+        assert len(result_df) == 2
+        expected_df = pl.DataFrame(test_data)
+        assert_frame_equal(result_df, expected_df)
 
     def test_clean_batch_empty_input(self) -> None:
         """Tests that an empty list is handled correctly."""
-        assert _clean_batch([], {}).is_empty()
+        # Act & Assert
+        assert _clean_batch([]).is_empty()
 
     def test_clean_batch_with_boolean(self) -> None:
         """Test that _clean_batch handles boolean values correctly."""
         data = [{"id": 1, "active": True}, {"id": 2, "active": False}]
-        field_types = {"id": "integer", "active": "boolean"}
-        df = _clean_batch(data, field_types)
+        # field_types = {"id": "integer", "active": "boolean"}
+        df = _clean_batch(data)
         assert df.to_dicts() == data
 
 
