@@ -364,6 +364,7 @@ def _process_export_batches(  # noqa: C901
 
     all_cleaned_dfs: list[pl.DataFrame] = []
     header_written = False
+    has_errors = False
     progress = Progress(
         SpinnerColumn(),
         TextColumn("[bold blue]{task.description}", justify="right"),
@@ -406,8 +407,16 @@ def _process_export_batches(  # noqa: C901
                 progress.update(task, advance=len(batch_result))
             except Exception as e:
                 log.error(f"A task in a worker thread failed: {e}", exc_info=True)
+                has_errors = True
 
     rpc_thread.executor.shutdown(wait=True)
+
+    if has_errors:
+        log.error(
+            "Export failed due to one or more errors in the worker threads. "
+            "The output file may be incomplete or empty."
+        )
+        return None
 
     if output and streaming:
         log.info(f"Streaming export complete. Data written to {output}")
@@ -513,7 +522,7 @@ def export_data(
         log.warning("No records found for the given domain.")
         if output:
             pl.DataFrame(schema=header).write_csv(output, separator=separator)
-        return pl.DataFrame(schema=header)
+        return None
 
     log.info(
         f"Found {len(ids)} records to export. Splitting into batches of {batch_size}."

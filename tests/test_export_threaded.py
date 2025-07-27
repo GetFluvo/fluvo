@@ -298,11 +298,11 @@ class TestExportData:
         )
 
         assert output_file.exists()
-        assert isinstance(result_df, pl.DataFrame)
-        assert result_df.is_empty()
 
         with open(output_file) as f:
             assert f.read().strip() == "id,name"
+        assert output_file.exists()
+        assert result_df is None
 
     def test_export_handles_memory_error_fallback(
         self, mock_conf_lib: MagicMock, tmp_path: Path
