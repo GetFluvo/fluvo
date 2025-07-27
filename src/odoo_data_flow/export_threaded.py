@@ -253,6 +253,14 @@ def _initialize_export(
         for original_field in header:
             base_field = original_field.split("/")[0]
             meta = field_metadata.get(base_field)
+
+            if not meta and original_field != ".id":
+                log.warning(
+                    f"Field '{original_field}' (base: '{base_field}') not found"
+                    f" on model '{model_name}'. "
+                    f"An empty column will be created."
+                )
+
             field_type = "char"
             if meta:
                 field_type = meta["type"]

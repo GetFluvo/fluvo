@@ -218,3 +218,16 @@ A very common reason for the `No matching record found` error is that you are tr
   1. **First, import `res.partner.category`**: Run a transformation and load process for your contact tags. This creates the tags and their external IDs in Odoo.
 
   2. **Then, import `res.partner`**: Run a separate process for your contacts. The mapping for the `category_id/id` field can now successfully use `mapper.m2o_map` to look up the external IDs of the tags you created in the first step.
+
+## Why is one of my exported columns completely empty?
+
+his can happen for two main reasons:
+
+  1.  The field is genuinely empty for all records in your exported dataset.
+
+  2.  There might be a typo in the field name you provided in the --fields argument.
+
+To check for the second case, look at the console output when you run the export command. If the field name is invalid, odoo-data-flow will show a warning like this:
+
+`WARNING  Field 'your_field_name' (base: 'your_field_name') not found on model 'res.partner'. An empty column will be created.`
+If you see this warning, correct the field name in your command and run the export again.

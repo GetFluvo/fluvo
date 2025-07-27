@@ -36,6 +36,72 @@ def mock_conf_lib() -> Generator[MagicMock, None, None]:
         yield mock_conn
 
 
+class TestInitializeExport:
+    """Tests for the _initialize_export helper function."""
+
+    @patch("odoo_data_flow.export_threaded.log")
+    def test_initialize_export_warns_for_non_existent_field(
+        self, mock_log: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Non exsisting field test.
+
+        Tests that a warning is logged for a field that does not exist
+        on the model.
+        """
+        # --- Arrange ---
+        header = ["name", "non_existent_field"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+        }
+
+        # --- Act ---
+        _initialize_export(
+            config_file="dummy.conf",
+            model_name="res.partner",
+            header=header,
+            technical_names=False,
+        )
+
+        # --- Assert ---
+        mock_log.warning.assert_called_once()
+        call_args, _ = mock_log.warning.call_args
+        assert (
+            "Field 'non_existent_field' (base: 'non_existent_field') not found"
+            in call_args[0]
+        )
+
+    @patch("odoo_data_flow.export_threaded.log")
+    def test_initialize_export_does_not_warn_for_valid_and_special_fields(
+        self, mock_log: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Test no warning for special fields export.
+
+        Tests that no warning is logged for valid fields, including special
+        and relational syntax.
+        """
+        # --- Arrange ---
+        header = [".id", "id", "name", "parent_id/id"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+            "parent_id": {"type": "many2one"},
+        }
+
+        # --- Act ---
+        _initialize_export(
+            config_file="dummy.conf",
+            model_name="res.partner",
+            header=header,
+            technical_names=False,
+        )
+
+        # --- Assert ---
+        mock_log.warning.assert_not_called()
+
+
 class TestRPCThreadExport:
     """Tests for the RPCThreadExport class."""
 
