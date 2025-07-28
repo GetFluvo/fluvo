@@ -75,26 +75,45 @@ class RPCThreadImport(RpcThread):
     def _handle_odoo_messages(
         self, messages: list[dict[str, Any]], original_lines: list[list[Any]]
     ) -> list[list[Any]]:
-        """Processes error messages from an Odoo load response."""
-        failed_lines = []
+        """Processes error messages from an Odoo load response.
+
+        If a batch fails, ALL records from that batch are returned with an
+        appropriate error message.
+        """
+        failed_lines_with_specific_errors = []
+        failed_indices = set()
         full_error_message = ""
+
+        # First, collect all records that Odoo reported with a specific error.
         for msg in messages:
             message = msg.get("message", "Unknown Odoo error")
             full_error_message += message + "\n"
             record_index = msg.get("record", -1)
-            if record_index >= 0 and record_index < len(original_lines):
-                failed_line = original_lines[record_index]
+            if 0 <= record_index < len(original_lines):
+                # Make a copy to avoid modifying the original list
+                failed_line = list(original_lines[record_index])
                 if self.add_error_reason:
                     failed_line.append(message.replace("\n", " | "))
-                failed_lines.append(failed_line)
+                failed_lines_with_specific_errors.append(failed_line)
+                failed_indices.add(record_index)
 
-        # If Odoo sends a generic message without record details, assume all failed.
-        if not failed_lines:
-            if self.add_error_reason:
-                for line in original_lines:
-                    line.append(full_error_message.replace("\n", " | "))
-            failed_lines.extend(original_lines)
-        return failed_lines
+        # If Odoo reports any error, the entire transaction is rolled back.
+        # We must now account for the valid records that were also discarded.
+        if failed_lines_with_specific_errors:
+            collateral_error_msg = (
+                "Record was valid but rolled back due to other errors in the batch."
+            )
+            for i, line in enumerate(original_lines):
+                if i not in failed_indices:
+                    # Make a copy to avoid modifying the original list
+                    failed_line = list(line)
+                    if self.add_error_reason:
+                        failed_line.append(collateral_error_msg)
+                    failed_lines_with_specific_errors.append(failed_line)
+            return failed_lines_with_specific_errors
+
+        # Fallback for generic batch errors without specific record details
+        return self._handle_rpc_error(Exception(full_error_message), original_lines)
 
     def _handle_rpc_error(
         self, error: Exception, lines: list[list[Any]]
@@ -102,8 +121,11 @@ class RPCThreadImport(RpcThread):
         """Handles a general RPC exception, marking all lines as failed."""
         error_message = str(error).replace("\n", " | ")
         if self.add_error_reason:
-            for line in lines:
+            # Create a new list to avoid modifying the original lines list in place
+            failed_lines = [list(line) for line in lines]
+            for line in failed_lines:
                 line.append(error_message)
+            return failed_lines
         return lines
 
     def _handle_record_mismatch(
@@ -116,10 +138,7 @@ class RPCThreadImport(RpcThread):
             "Probably a duplicate XML ID."
         )
         log.error(error_message)
-        if self.add_error_reason:
-            for line in lines:
-                line.append(error_message)
-        return lines
+        return self._handle_rpc_error(Exception(error_message), lines)
 
     def launch_batch(
         self,
@@ -179,10 +198,9 @@ class RPCThreadImport(RpcThread):
         shutdown_called = False
         for future in concurrent.futures.as_completed(self.futures):
             if self.abort_flag:
-                # If a critical error occurred, don't wait for other tasks.
-                # Cancel pending futures and shut down immediately.
-                self.executor.shutdown(wait=True, cancel_futures=True)
-                shutdown_called = True
+                if not shutdown_called:
+                    self.executor.shutdown(wait=True, cancel_futures=True)
+                    shutdown_called = True
                 break
             try:
                 # The number of processed lines is returned by the future
@@ -297,7 +315,11 @@ def _create_batches(
 
 
 def _setup_fail_file(
-    fail_file: str, header: list[str], is_fail_run: bool, separator: str, encoding: str
+    fail_file: str,
+    header: list[str],
+    is_fail_run: bool,
+    separator: str,
+    encoding: str,
 ) -> tuple[Optional[Any], Optional[TextIO]]:
     """Opens the fail file and returns the writer and file handle."""
     try:
@@ -341,35 +363,45 @@ def _execute_import_in_threads(
         TimeRemainingColumn(),
     )
 
-    with progress:
-        task_id = progress.add_task(
-            f"Importing to [bold]{model}[/bold]", total=len(final_data)
-        )
+    rpc_thread = None
+    try:
+        with progress:
+            task_id = progress.add_task(
+                f"Importing to [bold]{model}[/bold]", total=len(final_data)
+            )
 
-        rpc_thread = RPCThreadImport(
-            max_connection,
-            model_obj,
-            final_header,
-            fail_file_writer,
-            context,
-            add_error_reason=is_fail_run,
-            progress=progress,
-            task_id=task_id,
-        )
+            rpc_thread = RPCThreadImport(
+                max_connection,
+                model_obj,
+                final_header,
+                fail_file_writer,
+                context,
+                add_error_reason=is_fail_run,
+                progress=progress,
+                task_id=task_id,
+            )
 
-        for batch_number, lines_batch in _create_batches(
-            final_data, split, final_header, batch_size, o2m
-        ):
-            if rpc_thread.abort_flag:
-                log.error(
-                    "Aborting further processing due to critical connection error."
-                )
-                break
-            rpc_thread.launch_batch(lines_batch, batch_number, check)
+            for batch_number, lines_batch in _create_batches(
+                final_data, split, final_header, batch_size, o2m
+            ):
+                if rpc_thread.abort_flag:
+                    log.error(
+                        "Aborting further processing due to critical connection error."
+                    )
+                    break
+                rpc_thread.launch_batch(lines_batch, batch_number, check)
 
-        rpc_thread.wait()
+            rpc_thread.wait()
 
-    return not rpc_thread.abort_flag
+    except KeyboardInterrupt:
+        log.warning("\nImport process interrupted by user. Shutting down workers...")
+        if rpc_thread:
+            rpc_thread.abort_flag = True
+            rpc_thread.executor.shutdown(wait=True, cancel_futures=True)
+        log.error("Import aborted.")
+        return False
+
+    return not rpc_thread.abort_flag if rpc_thread else False
 
 
 def import_data(
@@ -448,6 +480,7 @@ def import_data(
         if not fail_file_writer:
             return False
 
+    start_time = time()
     success = _execute_import_in_threads(
         max_connection,
         model_obj,
@@ -462,7 +495,6 @@ def import_data(
         check,
         model,
     )
-    start_time = time()
 
     if fail_file_handle:
         fail_file_handle.close()

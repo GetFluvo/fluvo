@@ -178,7 +178,11 @@ class RPCThreadExport(RpcThread):
             for field in self.header:
                 base_field = field.split("/")[0].replace(".id", "id")
                 read_fields.add(base_field)
-                if self.is_hybrid and "/" in field and not field.endswith("/.id"):
+                if (
+                    self.is_hybrid
+                    and "/" in field
+                    and not field.endswith("/.id")
+                ):
                     enrichment_tasks.append(
                         {
                             "source_field": base_field,
@@ -212,8 +216,12 @@ class RPCThreadExport(RpcThread):
                     f"MemoryError. Splitting and retrying..."
                 )
                 mid_point = len(ids_to_export) // 2
-                results_a = self._execute_batch(ids_to_export[:mid_point], f"{num}-a")
-                results_b = self._execute_batch(ids_to_export[mid_point:], f"{num}-b")
+                results_a = self._execute_batch(
+                    ids_to_export[:mid_point], f"{num}-a"
+                )
+                results_b = self._execute_batch(
+                    ids_to_export[mid_point:], f"{num}-b"
+                )
                 return results_a + results_b
             else:
                 log.error(
@@ -244,7 +252,11 @@ def _initialize_export(
         model_obj = connection.get_model(model_name)
         fields_for_metadata = sorted(
             list(
-                {f.split("/")[0].replace(".id", "id") for f in header if f != ".id"}
+                {
+                    f.split("/")[0].replace(".id", "id")
+                    for f in header
+                    if f != ".id"
+                }
                 | {"id"}
             )
         )
@@ -271,10 +283,14 @@ def _initialize_export(
             fields_info[original_field] = {"type": field_type}
             if meta and meta.get("relation"):
                 fields_info[original_field]["relation"] = meta["relation"]
-        log.debug(f"Successfully initialized metadata. Fields info: {fields_info}")
+        log.debug(
+            f"Successfully initialized metadata. Fields info: {fields_info}"
+        )
         return connection, model_obj, fields_info
     except Exception as e:
-        log.error(f"Failed during metadata initialization. Error: {e}", exc_info=True)
+        log.error(
+            f"Failed during metadata initialization. Error: {e}", exc_info=True
+        )
         return None, None, None
 
 
@@ -316,7 +332,9 @@ def _clean_and_transform_batch(
     bool_cols_to_convert = [
         k
         for k, v in polars_schema.items()
-        if v.base_type() == pl.Boolean and k in df.columns and df[k].dtype != pl.Boolean
+        if v.base_type() == pl.Boolean
+        and k in df.columns
+        and df[k].dtype != pl.Boolean
     ]
     if bool_cols_to_convert:
         conversion_exprs = [
@@ -383,39 +401,51 @@ def _process_export_batches(  # noqa: C901
         TextColumn("•"),
         TimeRemainingColumn(),
     )
-    with progress:
-        task = progress.add_task(f"[cyan]Exporting {model_name}...", total=total_ids)
-        for future in concurrent.futures.as_completed(rpc_thread.futures):
-            try:
-                batch_result = future.result()
-                if not batch_result:
-                    continue
+    try:
+        with progress:
+            task = progress.add_task(
+                f"[cyan]Exporting {model_name}...", total=total_ids
+            )
+            for future in concurrent.futures.as_completed(rpc_thread.futures):
+                try:
+                    batch_result = future.result()
+                    if not batch_result:
+                        continue
 
-                df = _clean_batch(batch_result)
-                if df.is_empty():
-                    continue
+                    df = _clean_batch(batch_result)
+                    if df.is_empty():
+                        continue
 
-                final_batch_df = _clean_and_transform_batch(
-                    df, field_types, polars_schema
-                )
+                    final_batch_df = _clean_and_transform_batch(
+                        df, field_types, polars_schema
+                    )
 
-                if output and streaming:
-                    if not header_written:
-                        final_batch_df.write_csv(
-                            output, separator=separator, include_header=True
-                        )
-                        header_written = True
-                    else:
-                        with open(output, "ab") as f:
+                    if output and streaming:
+                        if not header_written:
                             final_batch_df.write_csv(
-                                f, separator=separator, include_header=False
+                                output, separator=separator, include_header=True
                             )
-                else:
-                    all_cleaned_dfs.append(final_batch_df)
-                progress.update(task, advance=len(batch_result))
-            except Exception as e:
-                log.error(f"A task in a worker thread failed: {e}", exc_info=True)
-                has_errors = True
+                            header_written = True
+                        else:
+                            with open(output, "ab") as f:
+                                final_batch_df.write_csv(
+                                    f, separator=separator, include_header=False
+                                )
+                    else:
+                        all_cleaned_dfs.append(final_batch_df)
+                    progress.update(task, advance=len(batch_result))
+                except Exception as e:
+                    log.error(
+                        f"A task in a worker thread failed: {e}", exc_info=True
+                    )
+                    has_errors = True
+    except KeyboardInterrupt:
+        log.warning(
+            "\nExport process interrupted by user. Shutting down workers..."
+        )
+        rpc_thread.executor.shutdown(wait=True, cancel_futures=True)
+        log.error("Export aborted.")
+        return None
 
     rpc_thread.executor.shutdown(wait=True)
 
@@ -469,7 +499,8 @@ def _determine_export_strategy(
     has_read_specifiers = any(f.endswith("/.id") or f == ".id" for f in header)
     has_xml_id_specifiers = any(f.endswith("/id") for f in header)
     has_other_subfield_specifiers = any(
-        "/" in f and not f.endswith("/id") and not f.endswith("/.id") for f in header
+        "/" in f and not f.endswith("/id") and not f.endswith("/.id")
+        for f in header
     )
 
     if has_read_specifiers and has_other_subfield_specifiers:
@@ -491,20 +522,29 @@ def _determine_export_strategy(
     )
     is_hybrid = has_read_specifiers and has_xml_id_specifiers
     force_read_method = (
-        technical_names or has_read_specifiers or is_hybrid or has_technical_fields
+        technical_names
+        or has_read_specifiers
+        or is_hybrid
+        or has_technical_fields
     )
 
     if is_hybrid:
-        log.info("Hybrid export mode activated. Using 'read' with XML ID enrichment.")
+        log.info(
+            "Hybrid export mode activated. Using 'read' with XML ID enrichment."
+        )
     elif has_technical_fields:
         log.info("Read method auto-enabled for 'selection' or 'binary' fields.")
     elif force_read_method:
         log.info("Exporting using 'read' method for raw database values.")
     else:
-        log.info("Exporting using 'export_data' method for human-readable values.")
+        log.info(
+            "Exporting using 'export_data' method for human-readable values."
+        )
 
     if force_read_method and not is_hybrid:
-        invalid_fields = [f for f in header if "/" in f and not f.endswith("/.id")]
+        invalid_fields = [
+            f for f in header if "/" in f and not f.endswith("/.id")
+        ]
         if invalid_fields:
             log.error(
                 f"Mixing export-style specifiers {invalid_fields} "

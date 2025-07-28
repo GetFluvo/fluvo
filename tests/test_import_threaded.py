@@ -161,6 +161,55 @@ class TestHelperFunctions:
         assert len(batches[0][1]) == 3
         assert len(batches[1][1]) == 2
 
+    def test_handle_odoo_messages_saves_all_records_from_failed_batch(
+        self,
+    ) -> None:
+        """Test if all failed records ar in failed file.
+
+        Tests that when Odoo reports specific record errors, all other records
+        in that same batch are also saved to the fail file with a generic message.
+        This simulates a transactional rollback.
+        """
+        # --- Arrange ---
+        header = ["id", "name"]
+        # Simulate a batch of 3 records
+        lines = [
+            ["xml_id_1", "Alice"],
+            ["xml_id_2", ""],
+            ["xml_id_3", "Charlie"],
+        ]
+
+        mock_writer = MagicMock()
+        rpc_thread = RPCThreadImport(
+            1, MagicMock(), header, mock_writer, add_error_reason=True
+        )
+
+        # Odoo's response only identifies the record with the empty name as failing
+        messages = [{"message": "Name is required", "record": 1}]
+
+        # --- Act ---
+        failed_lines = rpc_thread._handle_odoo_messages(messages, lines)
+
+        # --- Assert ---
+        # 1. All three original lines should be present in the result.
+        assert len(failed_lines) == 3
+
+        # 2. Find the specifically failed record and check its error message.
+        record_with_specific_error = next(
+            (line for line in failed_lines if line[0] == "xml_id_2"), None
+        )
+        assert record_with_specific_error is not None
+        assert record_with_specific_error[-1] == "Name is required"
+
+        # 3. Find a "collateral damage" record and check its generic error message.
+        record_with_generic_error = next(
+            (line for line in failed_lines if line[0] == "xml_id_1"), None
+        )
+        assert record_with_generic_error is not None
+        assert record_with_generic_error[-1] == (
+            "Record was valid but rolled back due to other errors in the batch."
+        )
+
 
 class TestImportData:
     """Tests for the main import_data orchestrator function."""
