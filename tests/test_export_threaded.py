@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
+import requests  # type: ignore[import-untyped]
 from polars.testing import assert_frame_equal
 
 from odoo_data_flow.export_threaded import (
@@ -137,6 +138,39 @@ class TestRPCThreadExport:
         )
         thread._execute_batch([1], 1)
         mock_model.export_data.assert_called_once()
+
+    def test_execute_batch_handles_json_decode_error(self) -> None:
+        """Test JSONDecodeError.
+
+        Tests that a JSONDecodeError is handled gracefully during export.
+        """
+        # 1. Setup
+        mock_model = MagicMock()
+        mock_connection = MagicMock()
+        mock_model.read.side_effect = requests.exceptions.JSONDecodeError(
+            "Expecting value", "", 0
+        )
+        fields_info = {"id": {"type": "integer"}}
+        thread = RPCThreadExport(
+            1,
+            mock_connection,
+            mock_model,
+            ["id"],
+            fields_info,
+            technical_names=True,
+        )
+
+        # 2. Action
+        with patch("odoo_data_flow.export_threaded.log.error") as mock_log_error:
+            result = thread._execute_batch([1], 1)
+
+            # 3. Assert
+            assert result == []  # Should return an empty list on failure
+            mock_log_error.assert_called_once()
+            assert (
+                "The server returned an invalid (non-JSON) response"
+                in mock_log_error.call_args[0][0]
+            )
 
     def test_rpc_thread_export_memory_error(self) -> None:
         """Test for memory errors.

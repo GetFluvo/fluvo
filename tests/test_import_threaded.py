@@ -72,6 +72,87 @@ class TestRPCThreadImport:
         assert len(failed_lines) == 2
         assert failed_lines[0][2] == "Connection Timed Out"
 
+    def test_execute_batch_handles_json_decode_error(self) -> None:
+        """Test user-friendly JSONDecode error message.
+
+        Tests that a JSONDecodeError is handled gracefully with a user-friendly
+        message.
+        """
+        # 1. Setup
+        header = ["id", "name"]
+        lines = [["xml_id_1", "Record 1"]]
+        mock_writer = MagicMock()
+        mock_model = MagicMock()
+        mock_model.load.side_effect = requests.exceptions.JSONDecodeError(
+            "Expecting value", "", 0
+        )
+
+        rpc_thread = RPCThreadImport(
+            1, mock_model, header, mock_writer, add_error_reason=True
+        )
+
+        # 2. Action
+        with patch("odoo_data_flow.import_threaded.log.error") as mock_log_error:
+            rpc_thread._execute_batch(lines, "0", do_check=False)
+
+            # 3. Assert
+            mock_log_error.assert_called_once()
+            assert (
+                "The server returned an invalid (non-JSON) response"
+                in mock_log_error.call_args[0][0]
+            )
+
+            mock_writer.writerows.assert_called_once()
+            failed_data = mock_writer.writerows.call_args[0][0]
+            assert len(failed_data) == 1
+            assert (
+                "The server returned an invalid (non-JSON) response"
+                in failed_data[0][-1]
+            )
+
+    def test_handle_odoo_messages_saves_all_records_from_failed_batch(
+        self,
+    ) -> None:
+        """Test that all failed records from a batch are saved.
+
+        Tests that when Odoo reports specific record errors, all other records
+        in that same batch are also saved to the fail file with a generic message.
+        """
+        # --- Arrange ---
+        header = ["id", "name"]
+        lines = [
+            ["xml_id_1", "Alice"],
+            ["xml_id_2", ""],
+            ["xml_id_3", "Charlie"],
+        ]
+
+        mock_writer = MagicMock()
+        rpc_thread = RPCThreadImport(
+            1, MagicMock(), header, mock_writer, add_error_reason=True
+        )
+
+        messages = [{"message": "Name is required", "record": 1}]
+
+        # --- Act ---
+        failed_lines = rpc_thread._handle_odoo_messages(messages, lines)
+
+        # --- Assert ---
+        assert len(failed_lines) == 3
+
+        record_with_specific_error = next(
+            (line for line in failed_lines if line[0] == "xml_id_2"), None
+        )
+        assert record_with_specific_error is not None
+        assert record_with_specific_error[-1] == "Name is required"
+
+        record_with_generic_error = next(
+            (line for line in failed_lines if line[0] == "xml_id_1"), None
+        )
+        assert record_with_generic_error is not None
+        assert record_with_generic_error[-1] == (
+            "Record was valid but rolled back due to other errors in the batch."
+        )
+
     @patch("odoo_data_flow.lib.internal.rpc_thread.RpcThread.wait")
     def test_wait_fallback_without_progress(self, mock_super_wait: MagicMock) -> None:
         """Tests that wait() calls super().wait() if no progress bar is given."""

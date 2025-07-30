@@ -11,6 +11,7 @@ from time import time
 from typing import Any, Optional, Union, cast
 
 import polars as pl
+import requests  # type: ignore[import-untyped]
 from rich.progress import (
     BarColumn,
     Progress,
@@ -198,6 +199,18 @@ class RPCThreadExport(RpcThread):
                 self._enrich_with_xml_ids(raw_data, enrichment_tasks)
 
             return self._format_batch_results(raw_data)
+
+        # --- FIX START: Add specific handling for JSONDecodeError ---
+        except requests.exceptions.JSONDecodeError:
+            error_msg = (
+                "The server returned an invalid (non-JSON) response. "
+                "This is often caused by a web server (e.g., Nginx) timeout "
+                "or a critical Odoo error. Check your server logs for details "
+                "like a '504 Gateway Timeout' and consider reducing the batch size."
+            )
+            log.error(f"Failed to process batch {num}. {error_msg}")
+            return []  # Return empty list to signal batch failure
+        # --- FIX END ---
 
         except Exception as e:
             error_data = (

@@ -140,6 +140,47 @@ class RPCThreadImport(RpcThread):
         log.error(error_message)
         return self._handle_rpc_error(Exception(error_message), lines)
 
+    def _execute_batch(self, lines: list[list[Any]], num: Any, do_check: bool) -> int:
+        """The actual function executed by the worker thread."""
+        if self.abort_flag:
+            return 0
+        start_time = time()
+        failed_lines = []
+        try:
+            log.debug(f"Importing batch {num} with {len(lines)} records...")
+            res = self.model.load(self.header, lines, context=self.context)
+
+            if res.get("messages"):
+                failed_lines = self._handle_odoo_messages(res["messages"], lines)
+            elif do_check and len(res.get("ids", [])) != len(lines):
+                failed_lines = self._handle_record_mismatch(res, lines)
+
+        except requests.exceptions.JSONDecodeError:
+            error_msg = (
+                "The server returned an invalid (non-JSON) response. "
+                "This is often caused by a web server (e.g., Nginx) timeout "
+                "or a critical Odoo error. Check your server logs for details "
+                "like a '504 Gateway Timeout' and consider reducing the batch size."
+            )
+            log.error(f"Failed to process batch {num}. {error_msg}")
+            failed_lines = self._handle_rpc_error(Exception(error_msg), lines)
+        except requests.exceptions.ConnectionError as e:
+            log.error(f"Connection to Odoo failed: {e}. Aborting import.")
+            failed_lines = self._handle_rpc_error(e, lines)
+            self.abort_flag = True
+        except Exception as e:
+            log.error(f"RPC call for batch {num} failed: {e}", exc_info=True)
+            failed_lines = self._handle_rpc_error(e, lines)
+
+        if failed_lines and self.writer:
+            self.writer.writerows(failed_lines)
+
+        success = not bool(failed_lines)
+        log.info(
+            f"Time for batch {num}: {time() - start_time:.2f}s. Success: {success}"
+        )
+        return len(lines)
+
     def launch_batch(
         self,
         data_lines: list[list[Any]],
@@ -150,42 +191,8 @@ class RPCThreadImport(RpcThread):
         if self.abort_flag:
             return
 
-        def launch_batch_fun(lines: list[list[Any]], num: Any, do_check: bool) -> int:
-            """The actual function executed by the worker thread."""
-            if self.abort_flag:
-                return 0
-            start_time = time()
-            failed_lines = []
-            try:
-                log.debug(f"Importing batch {num} with {len(lines)} records...")
-                res = self.model.load(self.header, lines, context=self.context)
-
-                if res.get("messages"):
-                    failed_lines = self._handle_odoo_messages(res["messages"], lines)
-                elif do_check and len(res.get("ids", [])) != len(lines):
-                    failed_lines = self._handle_record_mismatch(res, lines)
-
-            except requests.exceptions.ConnectionError as e:
-                log.error(f"Connection to Odoo failed: {e}. Aborting import.")
-                failed_lines = self._handle_rpc_error(e, lines)
-                self.abort_flag = True
-            except Exception as e:
-                # For all other unexpected errors, log the full traceback.
-                log.error(f"RPC call for batch {num} failed: {e}", exc_info=True)
-                failed_lines = self._handle_rpc_error(e, lines)
-
-            if failed_lines and self.writer:
-                self.writer.writerows(failed_lines)
-
-            success = not bool(failed_lines)
-            log.info(
-                f"Time for batch {num}: {time() - start_time:.2f}s. Success: {success}"
-            )
-            # Return the number of lines in this batch to update the progress
-            return len(lines)
-
         self.spawn_thread(
-            launch_batch_fun, [data_lines, batch_number], {"do_check": check}
+            self._execute_batch, [data_lines, batch_number], {"do_check": check}
         )
 
     def wait(self) -> None:
@@ -495,6 +502,11 @@ def import_data(
         check,
         model,
     )
+
+    if not success:
+        if fail_file_handle:
+            fail_file_handle.close()
+        return False
 
     if fail_file_handle:
         fail_file_handle.close()
