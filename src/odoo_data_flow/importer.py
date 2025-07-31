@@ -1,8 +1,15 @@
-"""This module contains the core logic for importing data into Odoo."""
+"""Main importer module.
+
+This module contains the high-level logic for orchestrating the import process.
+It handles file I/O, pre-flight checks, and the delegation of the core
+import tasks to the multi-threaded `import_threaded` module.
+"""
 
 import ast
+import csv
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
 from rich.console import Console
@@ -13,6 +20,15 @@ from .enums import PreflightMode
 from .lib import preflight
 from .lib.internal.ui import _show_error_panel
 from .logging_config import log
+
+
+def _get_fail_filename(model: str, is_fail_run: bool) -> str:
+    """Generates a standardized filename for failed records."""
+    model_filename = model.replace(".", "_")
+    if is_fail_run:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return f"{model_filename}_{timestamp}_failed.csv"
+    return f"{model_filename}_fail.csv"
 
 
 def _run_preflight_checks(preflight_mode: PreflightMode, **kwargs: Any) -> bool:
@@ -80,8 +96,37 @@ def run_import(  # noqa: C901
         log.info(f"No model provided. Inferred model '{final_model}' from filename.")
 
     current_preflight_mode = PreflightMode.NORMAL
+    fail_filename = _get_fail_filename(final_model, is_fail_run=False)
+    fail_file_path = Path(filename).parent / fail_filename
     if fail:
         current_preflight_mode = PreflightMode.FAIL_MODE
+
+        file_has_records_to_retry = False
+        if fail_file_path.exists():
+            with open(fail_file_path, encoding="utf-8") as f:
+                # Check if there is more than just a header line
+                reader = csv.reader(f)
+                try:
+                    next(reader)  # Skip header
+                    next(reader)  # Try to read the first data row
+                    file_has_records_to_retry = True
+                except StopIteration:
+                    # This means the file has a header but no data rows
+                    file_has_records_to_retry = False
+
+        if not file_has_records_to_retry:
+            console = Console()
+            console.print(
+                Panel(
+                    f"No records found in '{fail_file_path}'. Nothing to retry.",
+                    title="[bold green]No Recovery Needed[/bold green]",
+                    border_style="green",
+                )
+            )
+            return
+
+        log.info(f"Running in --fail mode. Retrying records from: {fail_file_path}")
+        filename = str(fail_file_path)
 
     # --- Pre-flight Checks ---
     if not no_preflight_checks:

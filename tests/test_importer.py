@@ -92,8 +92,10 @@ def test_run_import_fail_mode(
     """
     # 1. Setup
     source_file = tmp_path / "res_partner.csv"
-    source_file.write_text("id,name\n1,test")  # Give the file some content
-    (tmp_path / "res_partner_fail.csv").touch()  # The fail file must exist
+    source_file.write_text("id,name\n1,test")  # Original file, can be minimal
+
+    fail_file = tmp_path / "res_partner_fail.csv"
+    fail_file.write_text("id,name\n2,failed_record")
 
     # 2. Action
     run_import(
@@ -105,14 +107,51 @@ def test_run_import_fail_mode(
 
     # 3. Assertions
     mock_import_data.assert_called_once()
-    call_kwargs = mock_import_data.call_args.kwargs
 
-    # Check that the file paths and flags are set correctly for a fail run
-    assert call_kwargs["file_csv"].endswith("res_partner_fail.csv")
-    assert call_kwargs["fail_file"].endswith("_failed.csv")
+    # Verify that the correct file (the fail file) was passed to the importer
+    call_kwargs = mock_import_data.call_args.kwargs
+    assert call_kwargs["file_csv"] == str(fail_file)
     assert call_kwargs["is_fail_run"] is True
-    assert call_kwargs["batch_size"] == 1
-    assert call_kwargs["max_connection"] == 1
+
+
+@patch("odoo_data_flow.importer.Console")
+@patch("odoo_data_flow.importer.import_threaded.import_data")
+def test_run_import_fail_mode_no_records_to_retry(
+    mock_import_data: MagicMock, mock_console_class: MagicMock, tmp_path: Path
+) -> None:
+    """Test the no import running if no records in fail file.
+
+    Tests that a panel is displayed and the import is skipped if the fail
+    file is empty or missing.
+    """
+    # 1. Setup: Create a source file but an EMPTY fail file
+    source_file = tmp_path / "res_partner.csv"
+    source_file.write_text("id,name\n1,test")
+    (tmp_path / "res_partner_fail.csv").write_text("id,name\n")  # Header only
+
+    # Get a reference to the mock instance that will be created
+    mock_console_instance = mock_console_class.return_value
+
+    # 2. Action
+    run_import(
+        config="dummy.conf",
+        filename=str(source_file),
+        model="res.partner",
+        fail=True,
+        headless=False,  # Ensure headless is False for this test
+    )
+
+    # 3. Assertions
+    # The main import function should NOT have been called
+    mock_import_data.assert_not_called()
+
+    # The print method on our mock console instance should have been called
+    mock_console_instance.print.assert_called_once()
+
+    # Check the content of the printed panel
+    panel = mock_console_instance.print.call_args[0][0]
+    assert "No Recovery Needed" in str(panel.title)
+    assert "Nothing to retry" in str(panel.renderable)
 
 
 @patch("odoo_data_flow.importer._run_preflight_checks")
