@@ -1,9 +1,10 @@
 """Test the high-level import orchestrator, including pre-flight checks."""
 
+import unittest
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import polars as pl
 import pytest
@@ -388,3 +389,148 @@ def test_run_preflight_checks_pass() -> None:
         headless=False,
         separator=";",
     )
+
+
+class TestRunImportSplitArgumentHandling(unittest.TestCase):
+    """Test Split and spliy_by_cols handling.
+
+    Tests the argument handling for `split` and `split_by_cols`
+    in the `run_import` function.
+    """
+
+    def _get_common_kwargs(self) -> dict[str, Any]:
+        """Returns a dictionary of common arguments required by run_import."""
+        # We patch 'importer.preflight' to avoid running actual preflight checks
+        # which require a live Odoo connection and valid files.
+        patcher = patch(
+            "odoo_data_flow.importer._run_preflight_checks", return_value=True
+        )
+        self.addCleanup(patcher.stop)
+        patcher.start()
+
+        return {
+            "config": "dummy_config.cfg",
+            "filename": "dummy_file.csv",
+            "model": "res.partner",
+            "no_preflight_checks": True,  # Skip checks to isolate the test
+        }
+
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    def test_split_by_cols_with_comma_separated_string(
+        self, mock_import_data: Mock
+    ) -> None:
+        """Verify comma separated string parsing.
+
+        Verify that a comma-separated string is correctly parsed into a list.
+        """
+        kwargs = self._get_common_kwargs()
+        kwargs["split_by_cols"] = "partner_id/id, company_id/id"
+        expected_list = ["partner_id/id", "company_id/id"]
+
+        run_import(**kwargs)
+
+        # Verify that import_data was called once, then check the specific argument
+        mock_import_data.assert_called_once()
+        self.assertEqual(
+            mock_import_data.call_args.kwargs["split_by_cols"], expected_list
+        )
+
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    def test_split_by_cols_with_single_string(self, mock_import_data: Mock) -> None:
+        """Test splitting columns with single string.
+
+        Verify that a single string is correctly converted into a list.
+        """
+        kwargs = self._get_common_kwargs()
+        kwargs["split_by_cols"] = "parent_id/id"
+        expected_list = ["parent_id/id"]
+
+        run_import(**kwargs)
+
+        mock_import_data.assert_called_once()
+        self.assertEqual(
+            mock_import_data.call_args.kwargs["split_by_cols"], expected_list
+        )
+
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    def test_split_by_cols_with_tuple(self, mock_import_data: Mock) -> None:
+        """Verify split by clumn tuple.
+
+        Verify that a tuple of strings is correctly converted into a list.
+        """
+        kwargs = self._get_common_kwargs()
+        kwargs["split_by_cols"] = ("partner_id/id", "company_id/id")
+        expected_list = ["partner_id/id", "company_id/id"]
+
+        run_import(**kwargs)
+
+        mock_import_data.assert_called_once()
+        self.assertEqual(
+            mock_import_data.call_args.kwargs["split_by_cols"], expected_list
+        )
+
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    def test_split_by_cols_with_list(self, mock_import_data: Mock) -> None:
+        """Test split by columns with list.
+
+        Verify that a list of strings is passed through correctly.
+        """
+        kwargs = self._get_common_kwargs()
+        kwargs["split_by_cols"] = ["partner_id/id", "company_id/id"]
+        expected_list = ["partner_id/id", "company_id/id"]
+
+        run_import(**kwargs)
+
+        mock_import_data.assert_called_once()
+        self.assertEqual(
+            mock_import_data.call_args.kwargs["split_by_cols"], expected_list
+        )
+
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    def test_legacy_split_argument_is_handled(self, mock_import_data: Mock) -> None:
+        """Test compatability split argument.
+
+        Verify backward compatibility with the old `split` argument.
+        """
+        kwargs = self._get_common_kwargs()
+        kwargs["split"] = "parent_id/id"
+        expected_list = ["parent_id/id"]
+
+        run_import(**kwargs)
+
+        mock_import_data.assert_called_once()
+        self.assertEqual(
+            mock_import_data.call_args.kwargs["split_by_cols"], expected_list
+        )
+
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    def test_split_by_cols_takes_precedence(self, mock_import_data: Mock) -> None:
+        """Test Split by clumn precedence.
+
+        Verify that `split_by_cols` is used if both it and `split` are provided.
+        """
+        kwargs = self._get_common_kwargs()
+        kwargs["split_by_cols"] = "new_arg"
+        kwargs["split"] = "old_arg"  # This one should be ignored
+        expected_list = ["new_arg"]
+
+        run_import(**kwargs)
+
+        mock_import_data.assert_called_once()
+        self.assertEqual(
+            mock_import_data.call_args.kwargs["split_by_cols"], expected_list
+        )
+
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    def test_no_split_argument_provided(self, mock_import_data: Mock) -> None:
+        """Test no split argument.
+
+        Verify that the argument is None if neither is provided.
+        """
+        kwargs = self._get_common_kwargs()
+        # No split or split_by_cols key added
+
+        run_import(**kwargs)
+
+        mock_import_data.assert_called_once()
+        self.assertIsNone(mock_import_data.call_args.kwargs["split_by_cols"])

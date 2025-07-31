@@ -10,7 +10,7 @@ import csv
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from rich.console import Console
 from rich.panel import Panel
@@ -50,7 +50,8 @@ def run_import(  # noqa: C901
     skip: int = 0,
     fail: bool = False,
     separator: str = ";",
-    split: Optional[str] = None,
+    split: Optional[Union[str, tuple[str, ...], list[str]]] = None,
+    split_by_cols: Optional[Union[str, tuple[str, ...], list[str]]] = None,
     ignore: Optional[str] = None,
     check: bool = False,
     context: str = "{'tracking_disable' : True}",
@@ -72,7 +73,11 @@ def run_import(  # noqa: C901
         skip: The number of initial lines to skip in the source file.
         fail: If True, runs in fail mode, retrying records from the _fail.csv file.
         separator: The delimiter used in the CSV file.
-        split: The column name to group records by to avoid concurrent updates.
+        split: [DEPRECATED] Use `split_by_cols` instead. Kept for backward
+               compatibility with internal tests.
+        split_by_cols: A column name (string), or a list/tuple of column
+                       names to group records by to avoid concurrent updates on
+                       the same parent record.
         ignore: A comma-separated string of column names to ignore.
         check: If True, checks if records were successfully imported.
         context: A string representation of the Odoo context dictionary.
@@ -190,7 +195,20 @@ def run_import(  # noqa: C901
     log.info(f"Workers: {max_connection_run}, Batch Size: {batch_size_run}")
     log.info(f"Failed records will be saved to: {fail_output_file}")
 
-    split_by_cols_for_import = [split] if split else None
+    # --- Compatibility Shim ---
+    final_split_argument = split_by_cols or split
+
+    split_by_cols_for_import = None
+    if isinstance(final_split_argument, str):
+        # This will handle a string like "id,name"
+        split_by_cols_for_import = [
+            col.strip() for col in final_split_argument.split(",")
+        ]
+    elif isinstance(final_split_argument, (list, tuple)):
+        # This will handle the TUPLE that your debug log proved is there
+        split_by_cols_for_import = list(final_split_argument)
+
+    # Now, 'split_by_cols_for_import' is reliably a list of strings or None
 
     success = import_threaded.import_data(
         config_file=config,
