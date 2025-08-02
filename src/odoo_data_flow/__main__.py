@@ -15,9 +15,10 @@ from .lib.actions.module_manager import (
     run_module_uninstallation,
     run_update_module_list,
 )
-from .logging_config import setup_logging
+from .logging_config import log, setup_logging
 from .migrator import run_migration
 from .workflow_runner import run_invoice_v9_workflow
+from .writer import run_write
 
 
 @click.group(
@@ -272,6 +273,50 @@ def split_by_comma(
 def import_cmd(**kwargs: Any) -> None:
     """Runs the data import process."""
     run_import(**kwargs)
+
+
+# --- Write Command (New) ---
+@cli.command(name="write")
+@click.option(
+    "-c",
+    "--config",
+    default="conf/connection.conf",
+    show_default=True,
+    help="Configuration file for connection parameters.",
+)
+@click.option("--file", "filename", required=True, help="File with records to update.")
+@click.option("--model", required=True, help="Odoo model to write to.")
+@click.option(
+    "--worker", default=1, type=int, help="Number of simultaneous connections."
+)
+@click.option(
+    "--size",
+    "batch_size",
+    default=1000,
+    type=int,
+    help="Number of records to process per batch.",
+)
+@click.option(
+    "--fail",
+    is_flag=True,
+    default=False,
+    help="Run in fail mode, retrying records from the _write_fail.csv file.",
+)
+@click.option("-s", "--sep", "separator", default=";", help="CSV separator character.")
+@click.option(
+    "--context",
+    default="{'tracking_disable': True}",
+    help="Odoo context as a dictionary string.",
+)
+@click.option("--encoding", default="utf-8", help="Encoding of the data file.")
+def write_cmd(**kwargs: Any) -> None:
+    """Runs the batch update (write) process."""
+    try:
+        kwargs["context"] = ast.literal_eval(kwargs.get("context", "{}"))
+    except (ValueError, SyntaxError) as e:
+        log.error(f"Invalid --context dictionary provided: {e}")
+        return
+    run_write(**kwargs)
 
 
 # --- Export Command ---

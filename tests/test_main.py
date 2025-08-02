@@ -151,6 +151,33 @@ def test_export_cmd_streaming_mode(
     assert call_kwargs["streaming"] is True
 
 
+@patch("odoo_data_flow.__main__.run_write")
+def test_write_cmd_invalid_context(mock_run_write: MagicMock) -> None:
+    """Tests that the 'write' command handles an invalid context string gracefully."""
+    runner = CliRunner()
+
+    with patch("odoo_data_flow.__main__.log.error") as mock_log_error:
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "write",
+                "--config",
+                "dummy.conf",
+                "--file",
+                "dummy.csv",
+                "--model",
+                "res.partner",
+                "--context",
+                "{'invalid-syntax'",  # Malformed dictionary string
+            ],
+        )
+
+        assert result.exit_code == 0  # Should exit gracefully, not crash
+        mock_run_write.assert_not_called()
+        mock_log_error.assert_called_once()
+        assert "Invalid --context dictionary provided" in mock_log_error.call_args[0][0]
+
+
 @patch("odoo_data_flow.__main__.run_path_to_image")
 def test_path_to_image_command_calls_runner(
     mock_run_path_to_image: MagicMock, runner: CliRunner
