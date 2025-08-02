@@ -37,6 +37,7 @@ dist/
 # Odoo Data Flow specific
 *_fail.csv
 *_failed.csv
+testdata/
 
 # uv lock file
 uv.lock
