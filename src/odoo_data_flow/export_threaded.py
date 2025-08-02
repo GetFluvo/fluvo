@@ -11,7 +11,7 @@ from time import time
 from typing import Any, Optional, Union, cast
 
 import polars as pl
-import requests  # type: ignore[import-untyped]
+import requests
 from rich.progress import (
     BarColumn,
     Progress,
@@ -432,7 +432,7 @@ def _process_export_batches(  # noqa: C901
                 except Exception as e:
                     log.error(f"A task in a worker thread failed: {e}", exc_info=True)
                     has_errors = True
-    except KeyboardInterrupt:
+    except KeyboardInterrupt:  # pragma: no cover
         log.warning("\nExport process interrupted by user. Shutting down workers...")
         rpc_thread.executor.shutdown(wait=True, cancel_futures=True)
         log.error("Export aborted.")

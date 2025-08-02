@@ -9,6 +9,16 @@ from textwrap import dedent
 
 import nox
 
+# A helper command to clean up build artifacts
+CLEAN_COMMAND = """
+import glob, os, shutil;
+shutil.rmtree('build', ignore_errors=True);
+shutil.rmtree('dist', ignore_errors=True);
+shutil.rmtree('src/odoo_data_flow.egg-info', ignore_errors=True);
+for f in glob.glob('src/odoo_data_flow/*.so'): os.remove(f);
+for f in glob.glob('src/odoo_data_flow/*.c'): os.remove(f);
+"""
+
 nox.options.default_venv_backend = "uv"
 
 package = "odoo_data_flow"
@@ -140,6 +150,7 @@ def mypy(session: nox.Session) -> None:
 
     session.install("mypy")
     session.install("pytest")
+    session.install("requests", "types-requests")
     session.install("-e", ".")
     session.run("mypy", *args)
     if not session.posargs:
@@ -149,6 +160,7 @@ def mypy(session: nox.Session) -> None:
 @nox.session(python=python_versions)
 def tests(session: nox.Session) -> None:
     """Run the test suite."""
+    session.run("python", "-c", CLEAN_COMMAND)
     session.run(
         "uv",
         "sync",
@@ -161,6 +173,18 @@ def tests(session: nox.Session) -> None:
 
     session.install("pytest", "coverage", "pytest-mock")
     session.install("-e", ".")
+    session.run("pytest", *session.posargs)
+
+
+@nox.session(python=python_versions[0])
+def tests_compiled(session: nox.Session) -> None:
+    """Run tests against the compiled C extension code."""
+    session.run("python", "-c", CLEAN_COMMAND)
+    session.install("pytest", "pytest-mock")
+
+    # Install the project WITH the env var to trigger mypyc compilation
+    session.install("-e", ".", env={"ODF_COMPILE_MYPYC": "1"})
+
     session.run("pytest", *session.posargs)
 
 

@@ -10,9 +10,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import polars as pl
-import requests  # type: ignore[import-untyped]
+import requests
 
-from odoo_data_flow.converter import run_path_to_image, run_url_to_image, to_base64
+from odoo_data_flow.converter import (
+    run_path_to_image,
+    run_url_to_image,
+    to_base64,
+)
 
 
 def test_run_path_to_image(tmp_path: Path) -> None:

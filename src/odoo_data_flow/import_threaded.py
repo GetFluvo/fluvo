@@ -6,12 +6,13 @@ data into an Odoo instance.
 
 import concurrent.futures
 import csv
+import os  # noqa: F401
 import sys
 from collections.abc import Generator
 from time import time
 from typing import Any, Optional, TextIO
 
-import requests  # type: ignore[import-untyped]
+import requests
 from rich.progress import (
     BarColumn,
     Progress,
@@ -32,15 +33,13 @@ from .logging_config import log
 # field_size_limit function expects. This causes an OverflowError.
 # The following code block finds the maximum possible value that works
 # by reducing it until it's accepted.
-max_int = sys.maxsize
-decrement = True
-while decrement:
-    decrement = False
-    try:
-        csv.field_size_limit(max_int)
-    except OverflowError:
-        max_int = int(max_int / 10)
-        decrement = True
+try:
+    # Try to set the limit to the maximum possible value for the system
+    csv.field_size_limit(sys.maxsize)
+except OverflowError:
+    # If sys.maxsize is too large, fallback to a large but safe value (e.g., 1GB)
+    # This avoids the hanging loop when compiled with mypyc.
+    csv.field_size_limit(2**30)
 
 
 class RPCThreadImport(RpcThread):
@@ -407,7 +406,7 @@ def _recursive_create_batches(
         )
 
 
-def _create_batches(  # noqa C901
+def _create_batches(
     data: list[list[Any]],
     split_by_cols: Optional[list[str]],
     header: list[str],
@@ -422,76 +421,14 @@ def _create_batches(  # noqa C901
     if not data:
         return
 
-    batch: list[list[Any]] = []
-    # Determine the grouping column. If multiple, we'll just use the first for now.
-    # This might need refinement based on desired multi-column grouping behavior.
-    split_column_name: Optional[str] = None
-    if split_by_cols and len(split_by_cols) > 0:
-        split_column_name = split_by_cols[0]
-
-    split_index = -1
-    if split_column_name:
-        try:
-            split_index = header.index(split_column_name)
-        except ValueError:
-            log.error(
-                f"Grouping column '{split_column_name}' not found in header. "
-                f"Cannot use --groupby."
-            )
-            return
-
-    batch_counter = 0
-
-    # If splitting is enabled and a valid column is found
-    if split_index != -1 and split_column_name:
-        current_data = sorted(
-            data,
-            key=lambda row: (
-                row[split_index] is None or row[split_index] == "",
-                row[split_index],
-            ),
-        )
-
-        current_group_value = object()  # Sentinel for initial comparison
-
-        for row in current_data:
-            row_group_value = row[split_index]
-            is_o2m_line = o2m and (
-                row[0] is None or row[0] == ""
-            )  # Assuming ID is first column
-
-            if o2m and is_o2m_line and batch:
-                # If it's an O2M line and a batch already exists,
-                # append to the current batch
-                batch.append(row)
-            elif row_group_value != current_group_value:
-                # New group or first record, yield current batch if not empty
-                if batch:
-                    batch_counter += 1
-                    yield batch_counter, batch
-                batch = [row]  # Start new batch with current row
-                current_group_value = row_group_value
-            elif len(batch) >= batch_size:
-                # Same group, but batch is full, yield and start new batch
-                batch_counter += 1
-                yield batch_counter, batch
-                batch = [row]
-            else:
-                # Same group, batch not full, append
-                batch.append(row)
-
-        if batch:  # Yield any remaining batch
-            batch_counter += 1
-            yield batch_counter, batch
-    else:  # No splitting, just batch by size
-        for row in data:
-            batch.append(row)
-            if len(batch) >= batch_size:
-                yield batch_counter, batch
-                batch = []
-        if batch:
-            batch_counter += 1
-            yield batch_counter, batch
+    # The recursive generator yields complex batch IDs;
+    # we re-number them starting from 1
+    # for simplicity in the rest of the application.
+    for i, (_, batch_data) in enumerate(
+        _recursive_create_batches(data, split_by_cols or [], header, batch_size, o2m),
+        start=1,
+    ):
+        yield i, batch_data
 
 
 def _setup_fail_file(
@@ -604,7 +541,7 @@ def _execute_import_in_threads(
                         exc_info=True,
                     )
 
-    except KeyboardInterrupt:
+    except KeyboardInterrupt:  # pragma: no cover
         log.warning("\nImport process interrupted by user. Shutting down workers...")
         if rpc_thread:
             rpc_thread.abort_flag = True

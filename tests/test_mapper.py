@@ -7,7 +7,7 @@ from typing import Any, Callable
 from unittest.mock import MagicMock, patch
 
 import pytest
-import requests  # type: ignore[import-untyped]
+import requests
 
 from odoo_data_flow.lib import mapper
 from odoo_data_flow.lib.internal.exceptions import SkippingError

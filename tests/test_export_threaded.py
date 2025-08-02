@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
-import requests  # type: ignore[import-untyped]
+import requests
 from polars.testing import assert_frame_equal
 
 from odoo_data_flow.export_threaded import (

@@ -1,6 +1,6 @@
 """Sphinx configuration."""
 
-from sphinx.application import Sphinx  # type: ignore[import-not-found]
+from sphinx.application import Sphinx
 
 project = "Odoo Data Flow"
 author = "bosd"

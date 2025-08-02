@@ -25,7 +25,7 @@ else:
     TypeUnion = Union
 
 import polars as pl
-from lxml import etree  # type: ignore[import-untyped]
+from lxml import etree
 from rich.console import Console
 from rich.table import Table
 

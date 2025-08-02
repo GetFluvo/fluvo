@@ -11,7 +11,7 @@ import base64
 import os
 from typing import Any, Callable, Optional, Union, cast
 
-import requests  # type: ignore[import-untyped]
+import requests
 
 from ..logging_config import log
 from .internal.exceptions import SkippingError

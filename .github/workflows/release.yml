@@ -48,6 +48,8 @@ jobs:
           # uv bump $version.dev.$(date +%s)
 
       - name: Build package
+        env:
+          ODF_COMPILE_MYPYC: "1"
         run: |
           uv build
 

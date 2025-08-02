@@ -7,7 +7,7 @@ establishing a connection to the Odoo server using odoo-client-lib.
 import configparser
 from typing import Any
 
-import odoolib  # type: ignore[import-untyped]
+import odoolib
 
 from ..logging_config import log
 
