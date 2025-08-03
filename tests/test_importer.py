@@ -534,3 +534,92 @@ class TestRunImportSplitArgumentHandling(unittest.TestCase):
 
         mock_import_data.assert_called_once()
         self.assertIsNone(mock_import_data.call_args.kwargs["split_by_cols"])
+
+
+class TestRunImportRouting:
+    """Test the import routing.
+
+    Tests the routing logic within the main run_import function to ensure
+    it calls the correct import strategy (standard or deferred).
+    """
+
+    @patch("odoo_data_flow.importer._run_preflight_checks", return_value=True)
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    @patch("odoo_data_flow.importer.run_import_deferred")
+    def test_run_import_routes_to_deferred(
+        self,
+        mock_run_deferred: MagicMock,
+        mock_import_standard: MagicMock,
+        mock_preflight: MagicMock,
+    ) -> None:
+        """Test run deffered import routes.
+
+        Test that providing deferred_fields and unique_id_field calls the
+        deferred import function.
+        """
+        # --- Act ---
+        run_import(
+            config="dummy.conf",
+            filename="dummy.csv",
+            model="res.partner",
+            deferred_fields="parent_id",
+            unique_id_field="xml_id",
+        )
+
+        # --- Assert ---
+        mock_run_deferred.assert_called_once()
+        mock_import_standard.assert_not_called()
+
+    @patch("odoo_data_flow.importer._run_preflight_checks", return_value=True)
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    @patch("odoo_data_flow.importer.run_import_deferred")
+    def test_run_import_routes_to_standard(
+        self,
+        mock_run_deferred: MagicMock,
+        mock_import_standard: MagicMock,
+        mock_preflight: MagicMock,
+    ) -> None:
+        """Test standard import route.
+
+        Test that standard arguments call the original single-pass
+        import function.
+        """
+        # --- Act ---
+        run_import(
+            config="dummy.conf",
+            filename="dummy.csv",
+            model="res.partner",
+        )
+
+        # --- Assert ---
+        mock_run_deferred.assert_not_called()
+        mock_import_standard.assert_called_once()
+
+    @patch("odoo_data_flow.importer._show_error_panel")
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    @patch("odoo_data_flow.importer.run_import_deferred")
+    def test_run_import_handles_mutually_exclusive_flags(
+        self,
+        mock_run_deferred: MagicMock,
+        mock_import_standard: MagicMock,
+        mock_error_panel: MagicMock,
+    ) -> None:
+        """Test fail and deferred fields combo.
+
+        Test that using --fail and --deferred-fields together shows an error
+        and does not call any import function.
+        """
+        # --- Act ---
+        run_import(
+            config="dummy.conf",
+            filename="dummy.csv",
+            model="res.partner",
+            fail=True,
+            deferred_fields="parent_id",
+            unique_id_field="xml_id",
+        )
+
+        # --- Assert ---
+        mock_error_panel.assert_called_once()
+        mock_run_deferred.assert_not_called()
+        mock_import_standard.assert_not_called()

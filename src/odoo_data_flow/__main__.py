@@ -208,6 +208,20 @@ def split_by_comma(
     default=None,
     help="Odoo model to import into. If not provided, it's inferred from the filename.",
 )
+# --- ADDED: New options for the deferred import strategy ---
+@click.option(
+    "--deferred-fields",
+    default=None,
+    help="Comma-separated list of fields to defer to a second pass "
+    "(enables two-pass import).",
+)
+@click.option(
+    "--unique-id-field",
+    default=None,
+    help="The column that uniquely identifies records (e.g., 'xml_id'). "
+    "Required for deferred imports.",
+)
+# --- END ADDED ---
 @click.option(
     "--no-preflight-checks",
     is_flag=True,
@@ -351,7 +365,7 @@ def write_cmd(**kwargs: Any) -> None:
     type=int,
     help="Number of records to process per batch.",
 )
-@click.option(  # Add this new option decorator
+@click.option(
     "--streaming",
     is_flag=True,
     help="""Enable streaming to write data batch-by-batch.

@@ -75,6 +75,27 @@ When you run an import, Odoo's `load` method performs the following logic for ea
 
 This built-in upsert logic is essential for incremental data loads and for re-running scripts to correct or enrich data that has already been imported.
 
+##Two-Pass Import for Deferred Relations
+
+When importing data with self-referential or interdependent relationships (e.g., a list of partners where a `parent_id` refers to another partner in the same file), a standard single-pass import can fail because the related record may not exist yet.
+
+To solve this, the tool provides a two-pass import strategy. It first creates all records without the relational fields (Pass 1), and then updates those records to set the relationships (Pass 2). This is enabled by using two new options together:
+
+  * **--deferred-fields**: A comma-separated list of the relational fields you want to defer to the second pass (e.g., `parent_id`).
+
+  * **--unique-id-field**: The column in your CSV that uniquely identifies each record (e.g., `id` or `xml_id`). This is required when using the deferred strategy.
+
+```console
+odoo-data-flow import \
+    --file path/to/res_partner.csv \
+    --deferred-fields "parent_id" \
+    --unique-id-field "id"
+```
+
+!!! note
+    The two-pass strategy is not compatible with `--fail` mode.
+
+
 ## Input File Requirements
 
 For a successful import into Odoo, the clean CSV file you generate (the `filename_out` in your script) must follow some important rules.
