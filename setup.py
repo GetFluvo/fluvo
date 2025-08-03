@@ -1,4 +1,5 @@
-# setup.py
+"""This file handles the mypyc compilation settings."""
+
 import os
 
 from mypyc.build import mypycify
