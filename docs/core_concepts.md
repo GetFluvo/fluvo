@@ -147,25 +147,26 @@ This standard Python `dict` ties everything together. The keys are the column na
 
 A key strength of this library is its robust error handling, which ensures that a few bad records won't cause an entire import to fail. This is managed through a clever two-pass system.
 
-### The Two-Pass Load Sequence
+## The Smart Import Engine: Performance and Robustness
 
-The generated `load.sh` script contains two commands designed to maximize both speed and accuracy.
+A key strength of this library is its "smart" import engine, which is designed to maximize both speed and success rates. It automatically handles common issues like individual bad records in large batches and complex data relationships without requiring manual intervention.
 
-```bash
-# First pass (Normal Mode): Fast, parallel import. Writes recoverable errors to a .fail file.
-odoo-data-flow import --config conf/connection.conf --file data/res_partner.csv --model res.partner
-# Second pass: Slower, precise import of the failed records.
-odoo-data-flow import --config conf/connection.conf --fail --file data/res_partner.csv --model res.partner
-```
+This is managed through two core automatic strategies: the `load` -> `create` fallback and the two-pass strategy for relations.
 
-1. **First Pass (Normal Mode)**: The command runs in its default, high-speed mode, importing records in batches. If an entire batch is rejected for any reason, the original records from that batch are written to an intermediate failure file named **`<model_name>.fail.csv`** (e.g., `res_partner_fail.csv`).
+### Tier 1: The `load` -> `create` Fallback for Robustness
 
-2. **Second Pass (`--fail` Mode)**: The command is invoked again with the `--fail` flag. In this mode, it automatically targets the `_fail.csv` file and retries each failed record individually. Records that still fail are written to a final, timestamped error file: **`<original_filename>_YYYYMMDD_HHMMSS_failed.csv`**. This file includes an additional **`_ERROR_REASON`** column to explain why each record failed, making it easy to identify and fix the problematic data manually.
+A common problem with batch imports is that a single invalid record can cause the entire batch of hundreds or thousands of records to be rejected. The smart importer solves this with a two-tier fallback system.
 
+1.  **Attempt `load`:** The importer first attempts to import each batch using Odoo's highly performant, multi-record `load` method.
+2.  **Fallback to `create`:** If the `load` method fails for a batch, the importer does **not** immediately write the entire batch to a fail file. Instead, it automatically retries each record within that single failed batch one-by-one using the slower but more precise `create` method.
 
-### Error Handling Flow Diagram
+This powerful feature "rescues" all the good records from a failed batch, ensuring they are imported successfully. Only the specific record that also fails the `create` call is written to the `_fail.csv` file, along with a detailed error message.
 
-This diagram visualizes how records flow through the two-pass system.
+This gives you the best of both worlds: the speed of `load` for clean batches and the pinpoint error accuracy of `create` for problematic ones.
+
+#### Error Handling Flow Diagram
+
+This diagram visualizes how a single batch flows through the smart import engine.
 (with res.partner model as an example.)
 ```{mermaid}
 ---
@@ -192,6 +193,17 @@ flowchart TD
     style F fill:#FF6D00
 
 ```
+
+Tier 2: Automatic Two-Pass for Relational Data
+
+The smart importer also automatically handles the performance and logic challenges of importing data with interdependent relationships (like a `parent_id` on a partner that refers to another partner in the same file).
+
+When the pre-flight check detects these fields, it automatically enables a two-pass strategy:
+1. Pass 1 (Create): The importer automatically excludes the relational fields and runs the robust load -> create process described above. This creates all the base records quickly and efficiently.
+
+2. Pass 2 (Write): After Pass 1 is complete, the importer performs a second, multi-threaded write pass to set the relationships on the newly created records.
+
+This automatic behavior means you no longer need to manually use --ignore or split your files to handle these common scenarios.
 
 ## The Export Concept
 
