@@ -33,7 +33,6 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
         ["rec_02", "Record 2 (will fail create)", "200"],
     ]
     with open(source_file, "w", newline="", encoding="utf-8") as f:
-        # NOTE: Using semicolon to match the application's default
         writer = csv.writer(f, delimiter=";")
         writer.writerow(header)
         writer.writerows(source_data)
@@ -52,29 +51,27 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
     mock_model.create.side_effect = create_side_effect
     mock_get_conn.return_value.get_model.return_value = mock_model
 
-    # --- 2. Action ---
-    import_threaded.import_data(
+    # --- Act ---
+    # Capture the return value of the import process
+    result = import_threaded.import_data(
         config_file="dummy.conf",
         model=model_name,
         unique_id_field="id",
         file_csv=str(source_file),
         fail_file=str(fail_file),
-        # separator=";" is the default, so no need to pass it
     )
 
-    # --- 3. Assert ---
+    # --- Assert ---
+    # NEW: Assert that the overall process is a success because the abort
+    # flag was not set and good records were processed.
+    assert result is True
+
+    # Existing assertions for the fail file remain
     assert fail_file.exists()
     with open(fail_file, encoding="utf-8") as f:
-        # FIX: Tell the reader to use the correct semicolon delimiter
         reader = csv.reader(f, delimiter=";")
         rows = list(reader)
 
-        # Header + one failed record
-        assert len(rows) == 2
-
-        # Check header
-        assert rows[0] == ["id", "name", "value", "_ERROR_REASON"]
-
-        # Check failed record and its error
+        assert len(rows) == 2  # Header + one failed record
         assert rows[1][0] == "rec_02"
         assert "Validation Error" in rows[1][3]

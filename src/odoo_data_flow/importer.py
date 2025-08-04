@@ -168,40 +168,48 @@ def run_import(  # noqa: C901
             return
 
     # --- 4. Select Import Strategy (Routing) ---
-    auto_detected_deferred_fields = import_plan.get("deferred_fields", [])
+    if not fail:
+        auto_detected_deferred_fields = import_plan.get("deferred_fields", [])
+        if deferred_fields and unique_id_field:
+            log.info(
+                "User has specified deferred fields. Using two-pass import strategy."
+            )
+            deferred_list = [field.strip() for field in deferred_fields.split(",")]
 
-    # Strategy 1: User explicitly requests deferred import
-    if deferred_fields and unique_id_field:
-        log.info("User has specified deferred fields. Using two-pass import strategy.")
-        deferred_list = [field.strip() for field in deferred_fields.split(",")]
-        run_import_deferred(
-            config=config,
-            filename=filename,
-            model_name=final_model,
-            unique_id_field=unique_id_field,
-            deferred_fields=deferred_list,
-            encoding=encoding,
-            separator=separator,
-        )
-        return
+        # Strategy 1: User explicitly requests deferred import
+        if deferred_fields and unique_id_field:
+            log.info(
+                "User has specified deferred fields. Using two-pass import strategy."
+            )
+            deferred_list = [field.strip() for field in deferred_fields.split(",")]
+            run_import_deferred(
+                config=config,
+                filename=filename,
+                model_name=final_model,
+                unique_id_field=unique_id_field,
+                deferred_fields=deferred_list,
+                encoding=encoding,
+                separator=separator,
+            )
+            return
 
-    # Strategy 2: Automatic detection triggers deferred import
-    final_unique_id_field = unique_id_field or import_plan.get("unique_id_field")
-    if auto_detected_deferred_fields and final_unique_id_field:
-        log.info(
-            f"Auto-detected deferrable fields: {auto_detected_deferred_fields}. "
-            "Switching to two-pass import strategy."
-        )
-        run_import_deferred(
-            config=config,
-            filename=filename,
-            model_name=final_model,
-            unique_id_field=final_unique_id_field,
-            deferred_fields=auto_detected_deferred_fields,
-            encoding=encoding,
-            separator=separator,
-        )
-        return
+        # Strategy 2: Automatic detection triggers deferred import
+        final_unique_id_field = unique_id_field or import_plan.get("unique_id_field")
+        if auto_detected_deferred_fields and final_unique_id_field:
+            log.info(
+                f"Auto-detected deferrable fields: {auto_detected_deferred_fields}. "
+                "Switching to two-pass import strategy."
+            )
+            run_import_deferred(
+                config=config,
+                filename=filename,
+                model_name=final_model,
+                unique_id_field=final_unique_id_field,
+                deferred_fields=auto_detected_deferred_fields,
+                encoding=encoding,
+                separator=separator,
+            )
+            return
 
     # --- 5. Execute Standard Single-Pass Import (Fallback) ---
     log.info("No deferrable fields specified or detected. Using standard import.")
@@ -218,12 +226,14 @@ def run_import(  # noqa: C901
     model_filename_part = final_model.replace(".", "_")
 
     if fail:
+        force_create_run = True
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         fail_output_file = os.path.join(
             file_dir, f"{model_filename_part}_{timestamp}_failed.csv"
         )
         batch_size_run, max_connection_run = 1, 1
     else:
+        force_create_run = False
         fail_output_file = os.path.join(file_dir, f"{model_filename_part}_fail.csv")
         batch_size_run, max_connection_run = int(batch_size), int(worker)
 
@@ -244,6 +254,7 @@ def run_import(  # noqa: C901
         max_connection=max_connection_run,
         batch_size=batch_size_run,
         skip=int(skip),
+        force_create=force_create_run,
     )
 
     console = Console()

@@ -442,3 +442,44 @@ class TestRunImportRouting:
         mock_error_panel.assert_called_once()
         mock_run_deferred.assert_not_called()
         mock_import_standard.assert_not_called()
+
+
+@patch("odoo_data_flow.importer.run_import_deferred")
+@patch("odoo_data_flow.importer._run_preflight_checks")
+def test_run_import_uses_auto_detected_deferred_fields(
+    mock_run_checks: MagicMock,
+    mock_run_deferred: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Test auto detect deffered fields.
+
+    Test that run_import automatically calls the deferred strategy when
+    the pre-flight check detects deferrable fields.
+    """
+    # --- Arrange ---
+    source_file = tmp_path / "res_partner.csv"
+    source_file.write_text("id,name,category_id/id\n1,test,cat_a")
+
+    # Simulate the pre-flight check detecting a m2m field
+    def preflight_side_effect(import_plan: dict, **kwargs):
+        import_plan["deferred_fields"] = ["category_id"]
+        import_plan["unique_id_field"] = "id"
+        return True
+
+    mock_run_checks.side_effect = preflight_side_effect
+
+    # --- Act ---
+    run_import(
+        config="dummy.conf",
+        filename=str(source_file),
+        model="res.partner",
+        unique_id_field="id",  # User provides the ID field
+    )
+
+    # --- Assert ---
+    mock_run_checks.assert_called_once()
+    mock_run_deferred.assert_called_once()  # Verify the deferred path was taken
+
+    # Verify it was called with the auto-detected fields
+    call_kwargs = mock_run_deferred.call_args.kwargs
+    assert call_kwargs["deferred_fields"] == ["category_id"]

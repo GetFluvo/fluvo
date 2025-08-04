@@ -163,6 +163,29 @@ class RPCThreadImport(RpcThread):
         self.abort_flag = False
 
 
+def _create_batch_individually(
+    model: Any,
+    batch_lines: list[list[Any]],
+    batch_header: list[str],
+    unique_id_field_index: int,
+) -> dict[str, Any]:
+    """Fallback to create records one-by-one to get detailed errors."""
+    id_map: dict[str, int] = {}
+    failed_lines: list[list[Any]] = []
+    for line in batch_lines:
+        source_id = line[unique_id_field_index]
+        vals = dict(zip(batch_header, line))
+        try:
+            new_record = model.create(vals)
+            id_map[source_id] = new_record.id
+        except Exception as create_error:
+            error_message = str(create_error).replace("\n", " | ")
+            failed_line = list(line)
+            failed_line.append(error_message)
+            failed_lines.append(failed_line)
+    return {"id_map": id_map, "failed_lines": failed_lines}
+
+
 def _execute_load_batch(
     thread_state: dict[str, Any],
     batch_lines: list[list[Any]],
@@ -194,9 +217,17 @@ def _execute_load_batch(
     model = thread_state["model"]
     context = thread_state["context"]
     unique_id_field_index = thread_state["unique_id_field_index"]
-    id_map: dict[str, int] = {}
-    failed_lines: list[list[Any]] = []
+    force_create = thread_state.get("force_create", False)
+
+    if force_create:
+        log.info(f"Batch {batch_number}: Fail mode active, using `create` method.")
+        return _create_batch_individually(
+            model, batch_lines, batch_header, unique_id_field_index
+        )
+
     try:
+        if force_create:
+            raise ValueError("Fail mode is active, forcing create method.")
         log.debug(f"Attempting `load` for batch {batch_number}...")
         res = model.load(batch_header, batch_lines, context=context)
         if res.get("messages"):
@@ -204,26 +235,21 @@ def _execute_load_batch(
         created_ids = res.get("ids", [])
         if len(created_ids) != len(batch_lines):
             raise ValueError("Record count mismatch, falling back to create.")
+
+        id_map: dict[str, int] = {}
         for i, line in enumerate(batch_lines):
             source_id = line[unique_id_field_index]
             id_map[source_id] = created_ids[i]
+        return {"id_map": id_map, "failed_lines": []}
     except Exception as e:
         log.warning(
             f"Batch {batch_number} failed with `load` ('{e}'). "
             "Falling back to slower, single-record `create` method for this batch."
         )
-        for line in batch_lines:
-            source_id = line[unique_id_field_index]
-            vals = dict(zip(batch_header, line))
-            try:
-                new_record = model.create(vals)
-                id_map[source_id] = new_record.id
-            except Exception as create_error:
-                error_message = str(create_error).replace("\n", " | ")
-                failed_line = list(line)
-                failed_line.append(error_message)
-                failed_lines.append(failed_line)
-    return {"id_map": id_map, "failed_lines": failed_lines}
+
+        return _create_batch_individually(
+            model, batch_lines, batch_header, unique_id_field_index
+        )
 
 
 def _execute_write_batch(
@@ -291,7 +317,7 @@ def _run_threaded_pass(
         dict[str, Any]: A dictionary containing the aggregated results from all
         worker threads, such as `id_map` and `failed_lines`.
     """
-    future_to_batch = {}
+    future_to_batch_size = {}
     for batch_number, batch_data in batches:
         if rpc_thread.abort_flag:
             break
@@ -304,34 +330,38 @@ def _run_threaded_pass(
                 batch_number,
             ],
         )
-        future_to_batch[future] = batch_data
+        future_to_batch_size[future] = len(batch_data)
 
     aggregated_results: dict[str, Any] = {
         "id_map": {},
         "failed_lines": [],
         "failed_writes": [],
+        "error_summary": None,
     }
-    for future in concurrent.futures.as_completed(future_to_batch):
+    for future in concurrent.futures.as_completed(future_to_batch_size):
         if rpc_thread.abort_flag:
             break
         try:
             result = future.result()
             # Aggregate all results from the worker
             aggregated_results["id_map"].update(result.get("id_map", {}))
-            aggregated_results["failed_lines"].extend(result.get("failed_lines", []))
-            aggregated_results["failed_writes"].extend(result.get("failed_writes", []))
+            failed_lines = result.get("failed_lines", [])
+            if failed_lines:
+                aggregated_results["failed_lines"].extend(failed_lines)
+                if rpc_thread.writer:
+                    rpc_thread.writer.writerows(failed_lines)
 
-            # FIX: Write failures immediately as they are processed
-            failed_lines_from_batch = result.get("failed_lines", [])
-            if rpc_thread.writer and failed_lines_from_batch:
-                log.debug(
-                    f"Writing {len(failed_lines_from_batch)} failed lines to fail file."
-                )
-                rpc_thread.writer.writerows(failed_lines_from_batch)
+            error_summary = result.get("error_summary")
+            if error_summary:
+                aggregated_results["error_summary"] = error_summary
+                if len(error_summary) > 70:
+                    error_summary = error_summary[:67] + "..."
 
-            # Update progress bar based on the size of the original batch
-            original_batch_size = len(future_to_batch[future])
-            rpc_thread.progress.update(rpc_thread.task_id, advance=original_batch_size)
+            rpc_thread.progress.update(
+                rpc_thread.task_id,
+                advance=future_to_batch_size[future],
+                last_error=f"Last Error: {error_summary}" if error_summary else "",
+            )
         except Exception as e:
             log.error(f"A worker thread failed unexpectedly: {e}", exc_info=True)
             rpc_thread.abort_flag = True
@@ -352,6 +382,7 @@ def _orchestrate_pass_1(
     fail_writer: Optional[Any],
     max_connection: int,
     batch_size: int,
+    force_create: bool = False,
 ) -> dict[str, Any]:
     """Orchestrates the multi-threaded Pass 1 (load/create).
 
@@ -375,23 +406,24 @@ def _orchestrate_pass_1(
         fail_writer (Optional[Any]): The CSV writer object for recording failures.
         max_connection (int): The number of parallel worker threads to use.
         batch_size (int): The number of records to process in each batch.
+        force_create (bool): If True, bypasses the `load` method and uses
+            the `create` method directly. Used for fail mode.
 
     Returns:
         dict[str, Any]: A dictionary containing the results of the pass,
             including the `id_map` ({source_id: db_id}), a list of any
             `failed_lines`, and a `success` boolean flag.
     """
+
+    pass_1_task = progress.add_task(
+        f"Pass 1/2: Importing to [bold]{model_obj._name}[/bold]",
+        total=len(all_data),
+        last_error="",
+    )
+    rpc_pass_1 = RPCThreadImport(max_connection, progress, pass_1_task, fail_writer)
     pass_1_header, pass_1_data = _filter_ignored_columns(
         deferred_fields + ignore, header, all_data
     )
-    pass_1_batches = list(_create_batches(pass_1_data, batch_size))
-
-    task_description = f"Pass 1/2: Importing to [bold]{model_obj._name}[/bold]"
-    pass_1_task = progress.add_task(
-        task_description, total=len(pass_1_data), last_error=""
-    )
-
-    rpc_pass_1 = RPCThreadImport(max_connection, progress, pass_1_task, fail_writer)
 
     try:
         pass_1_uid_index = pass_1_header.index(unique_id_field)
@@ -406,8 +438,9 @@ def _orchestrate_pass_1(
         "context": context,
         "unique_id_field_index": pass_1_uid_index,
         "batch_header": pass_1_header,
+        "force_create": force_create,
     }
-
+    pass_1_batches = _create_batches(pass_1_data, batch_size)
     results = _run_threaded_pass(
         rpc_pass_1, _execute_load_batch, pass_1_batches, thread_state_1
     )
@@ -434,6 +467,8 @@ def _prepare_pass_2_data(
         unique_id_field_index (int): The column index of the unique identifier.
         id_map (dict[str, int]): The map of source IDs to database IDs from Pass 1.
         deferred_fields (list[str]): A list of the relational fields to process.
+        force_create (bool): If True, bypasses the `load` method and uses
+            the `create` method directly. Used for fail mode.
 
     Returns:
         list[tuple[int, dict[str, Any]]]: A list of write payloads, where each
@@ -505,14 +540,15 @@ def _orchestrate_pass_2(
         log.info("No valid relations found to update in Pass 2. Import complete.")
         return True
 
-    pass_2_batches = list(enumerate(batch(pass_2_data_to_write, batch_size), 1))
 
-    task_description = f"Pass 2/2: Updating [bold]{model_obj._name}[/bold] relations"
     pass_2_task = progress.add_task(
-        task_description, total=len(pass_2_batches), last_error=""
+        f"Pass 2/2: Updating [bold]{model_obj._name}[/bold] relations",
+        total=len(pass_2_data_to_write),
+        last_error="",
     )
     rpc_pass_2 = RPCThreadImport(max_connection, progress, pass_2_task, fail_writer)
     thread_state_2 = {"model": model_obj}
+    pass_2_batches = enumerate(batch(pass_2_data_to_write, batch_size), 1)
 
     pass_2_results = _run_threaded_pass(
         rpc_pass_2, _execute_write_batch, pass_2_batches, thread_state_2
@@ -549,6 +585,7 @@ def import_data(
     max_connection: int = 1,
     batch_size: int = 10,
     skip: int = 0,
+    force_create: bool = False,
 ) -> bool:
     """Orchestrates a robust, multi-threaded, two-pass import process.
 
@@ -582,6 +619,8 @@ def import_data(
         max_connection (int): The number of parallel threads to use.
         batch_size (int): The number of records to process in each batch.
         skip (int): The number of lines to skip at the top of the source file.
+        force_create (bool): If True, bypasses the `load` method and uses
+            the `create` method directly. Used for fail mode.
 
     Returns:
         bool: True if the entire import process completed without any
