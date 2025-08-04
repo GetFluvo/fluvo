@@ -8,6 +8,7 @@ import tasks to the multi-threaded `import_threaded` module.
 import ast
 import csv
 import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, Union, cast
@@ -169,6 +170,7 @@ def run_import(  # noqa: C901
     # --- 4. Select Import Strategy (Routing) ---
     auto_detected_deferred_fields = import_plan.get("deferred_fields", [])
 
+    # Strategy 1: User explicitly requests deferred import
     if deferred_fields and unique_id_field:
         log.info("User has specified deferred fields. Using two-pass import strategy.")
         deferred_list = [field.strip() for field in deferred_fields.split(",")]
@@ -183,11 +185,8 @@ def run_import(  # noqa: C901
         )
         return
 
-    # --- MODIFIED: Automatic detection path now checks the import_plan ---
-    auto_detected_deferred_fields = import_plan.get("deferred_fields", [])
-    # The unique ID field can come from the user OR from auto-detection
+    # Strategy 2: Automatic detection triggers deferred import
     final_unique_id_field = unique_id_field or import_plan.get("unique_id_field")
-
     if auto_detected_deferred_fields and final_unique_id_field:
         log.info(
             f"Auto-detected deferrable fields: {auto_detected_deferred_fields}. "
@@ -214,7 +213,6 @@ def run_import(  # noqa: C901
         _show_error_panel("Invalid Context", f"Invalid --context dictionary: {e}")
         return
 
-    # ... (The rest of the standard import logic remains the same)
     ignore_list = ignore.split(",") if ignore else []
     file_dir = os.path.dirname(filename)
     model_filename_part = final_model.replace(".", "_")
@@ -224,42 +222,28 @@ def run_import(  # noqa: C901
         fail_output_file = os.path.join(
             file_dir, f"{model_filename_part}_{timestamp}_failed.csv"
         )
-        batch_size_run, max_connection_run, is_fail_run = 1, 1, True
+        batch_size_run, max_connection_run = 1, 1
     else:
         fail_output_file = os.path.join(file_dir, f"{model_filename_part}_fail.csv")
-        batch_size_run, max_connection_run, is_fail_run = (
-            int(batch_size),
-            int(worker),
-            False,
-        )
+        batch_size_run, max_connection_run = int(batch_size), int(worker)
 
     log.info(f"Importing file: {file_to_process}")
     log.info(f"Target model: {final_model}")
     log.info(f"Workers: {max_connection_run}, Batch Size: {batch_size_run}")
 
-    final_split_argument = split_by_cols or split
-    split_by_cols_for_import = None
-    if isinstance(final_split_argument, str):
-        split_by_cols_for_import = [c.strip() for c in final_split_argument.split(",")]
-    elif isinstance(final_split_argument, (list, tuple)):
-        split_by_cols_for_import = list(final_split_argument)
-
     success = import_threaded.import_data(
         config_file=config,
         model=final_model,
+        unique_id_field=unique_id_field or "id",  # Default to 'id' for standard runs
         file_csv=file_to_process,
         context=parsed_context,
         fail_file=fail_output_file,
         encoding=encoding,
         separator=separator,
         ignore=ignore_list,
-        split_by_cols=split_by_cols_for_import,
-        check=check,
         max_connection=max_connection_run,
         batch_size=batch_size_run,
         skip=int(skip),
-        o2m=o2m,
-        is_fail_run=is_fail_run,
     )
 
     console = Console()
@@ -297,20 +281,28 @@ def run_import_for_migration(
     """
     log.info("Starting data import from in-memory data...")
 
-    parsed_context = {"tracking_disable": True}
+    with tempfile.NamedTemporaryFile(
+        mode="w+", delete=False, suffix=".csv", newline=""
+    ) as tmp:
+        writer = csv.writer(tmp)
+        writer.writerow(header)
+        writer.writerows(data)
+        tmp_path = tmp.name
 
-    log.info(f"Importing {len(data)} records into model: {model}")
-    log.info(f"Workers: {worker}, Batch Size: {batch_size}")
+    log.info(f"In-memory data written to temporary file: {tmp_path}")
 
-    import_threaded.import_data(
-        config,
-        model,
-        header=header,
-        data=data,
-        context=parsed_context,
-        max_connection=int(worker),
-        batch_size=int(batch_size),
-    )
+    try:
+        import_threaded.import_data(
+            config_file=config,
+            model=model,
+            unique_id_field="id",  # Migration import assumes 'id'
+            file_csv=tmp_path,
+            context={"tracking_disable": True},
+            max_connection=int(worker),
+            batch_size=int(batch_size),
+        )
+    finally:
+        os.remove(tmp_path)  # Clean up the temporary file
 
     log.info("In-memory import process finished.")
 
