@@ -31,10 +31,15 @@ def _get_fail_filename(model: str, is_fail_run: bool) -> str:
     return f"{model_filename}_fail.csv"
 
 
-def _run_preflight_checks(preflight_mode: PreflightMode, **kwargs: Any) -> bool:
+# --- MODIFIED: Accept and pass the import_plan dictionary ---
+def _run_preflight_checks(
+    preflight_mode: PreflightMode, import_plan: dict[str, Any], **kwargs: Any
+) -> bool:
     """Iterates through and runs all registered pre-flight checks."""
     for check_func in preflight.PREFLIGHT_CHECKS:
-        if not check_func(preflight_mode=preflight_mode, **kwargs):
+        if not check_func(
+            preflight_mode=preflight_mode, import_plan=import_plan, **kwargs
+        ):
             return False
     return True
 
@@ -92,6 +97,7 @@ def run_import(  # noqa: C901
     """
     log.info("Starting data import process from file...")
 
+    # --- 1. Initial Setup and Model Inference ---
     final_model = model
     if not final_model:
         base_name = os.path.basename(filename)
@@ -99,24 +105,72 @@ def run_import(  # noqa: C901
         if not inferred_model or inferred_model.startswith("."):
             _show_error_panel(
                 "Model Not Found",
-                "Model not specified and could not be inferred from filename "
-                f"'{base_name}'.\nPlease use the --model option.",
+                f"Could not infer model from filename '{base_name}'. "
+                f"Please use the --model option.",
             )
             return
         final_model = inferred_model
         log.info(f"No model provided. Inferred model '{final_model}' from filename.")
 
-    # --- SAFETY CHECK: Ensure mutually exclusive flags are not used ---
     if fail and deferred_fields:
         _show_error_panel(
             "Invalid Arguments",
-            "The --fail flag cannot be used with --deferred-fields at the same time.\n"
-            "Please run one or the other.",
+            "The --fail flag cannot be used with --deferred-fields at the same time.",
         )
         return
 
-    # --- ROUTING LOGIC: Decide which import strategy to use ---
+    # --- 2. Handle Fail Mode and Determine File to Process ---
+    current_preflight_mode = PreflightMode.NORMAL
+    file_to_process = filename
+    if fail:
+        current_preflight_mode = PreflightMode.FAIL_MODE
+        fail_filename = _get_fail_filename(final_model, is_fail_run=False)
+        fail_file_path = Path(filename).parent / fail_filename
+
+        file_has_records_to_retry = False
+        if fail_file_path.exists():
+            with open(fail_file_path, encoding="utf-8") as f:
+                reader = csv.reader(f)
+                try:
+                    next(reader)  # Header
+                    next(reader)  # First data row
+                    file_has_records_to_retry = True
+                except StopIteration:
+                    file_has_records_to_retry = False
+
+        if not file_has_records_to_retry:
+            Console().print(
+                Panel(
+                    f"No records found in '{fail_file_path}'. Nothing to retry.",
+                    title="[bold green]No Recovery Needed[/bold green]",
+                    border_style="green",
+                )
+            )
+            return  # EXIT EARLY before pre-flight checks
+
+        log.info(f"Running in --fail mode. Retrying records from: {fail_file_path}")
+        file_to_process = str(fail_file_path)
+
+    # --- 3. Pre-flight Checks ---
+    import_plan: dict[str, Any] = {}
+    if not no_preflight_checks:
+        if not _run_preflight_checks(
+            preflight_mode=current_preflight_mode,
+            import_plan=import_plan,
+            model=final_model,
+            filename=file_to_process,  # Use the correctly determined file
+            config=config,
+            headless=headless,
+            separator=separator,
+            unique_id_field=unique_id_field,
+        ):
+            return
+
+    # --- 4. Select Import Strategy (Routing) ---
+    auto_detected_deferred_fields = import_plan.get("deferred_fields", [])
+
     if deferred_fields and unique_id_field:
+        log.info("User has specified deferred fields. Using two-pass import strategy.")
         deferred_list = [field.strip() for field in deferred_fields.split(",")]
         run_import_deferred(
             config=config,
@@ -127,117 +181,63 @@ def run_import(  # noqa: C901
             encoding=encoding,
             separator=separator,
         )
-        return  # End execution after deferred import
+        return
 
-    current_preflight_mode = PreflightMode.NORMAL
-    fail_filename = _get_fail_filename(final_model, is_fail_run=False)
-    fail_file_path = Path(filename).parent / fail_filename
-    if fail:
-        current_preflight_mode = PreflightMode.FAIL_MODE
-
-        file_has_records_to_retry = False
-        if fail_file_path.exists():
-            with open(fail_file_path, encoding="utf-8") as f:
-                # Check if there is more than just a header line
-                reader = csv.reader(f)
-                try:
-                    next(reader)  # Skip header
-                    next(reader)  # Try to read the first data row
-                    file_has_records_to_retry = True
-                except StopIteration:
-                    # This means the file has a header but no data rows
-                    file_has_records_to_retry = False
-
-        if not file_has_records_to_retry:
-            console = Console()
-            console.print(
-                Panel(
-                    f"No records found in '{fail_file_path}'. Nothing to retry.",
-                    title="[bold green]No Recovery Needed[/bold green]",
-                    border_style="green",
-                )
-            )
-            return
-
-        log.info(f"Running in --fail mode. Retrying records from: {fail_file_path}")
-        filename = str(fail_file_path)
-
-    # --- Pre-flight Checks ---
-    if not no_preflight_checks:
-        if not _run_preflight_checks(
-            preflight_mode=current_preflight_mode,
-            model=final_model,
-            filename=filename,
-            config=config,
-            headless=headless,
-            separator=separator,
-        ):
-            return
-        # elif fail and no_preflight_checks:
-    if fail and no_preflight_checks:
-        log.warning(
-            "Both --fail and --no-preflight-checks were specified. "
-            "Skipping all checks as per explicit request."
+    if auto_detected_deferred_fields and unique_id_field:
+        log.info(
+            f"Auto-detected deferrable fields: {auto_detected_deferred_fields}. "
+            "Switching to two-pass import strategy."
         )
+        run_import_deferred(
+            config=config,
+            filename=filename,
+            model_name=final_model,
+            unique_id_field=unique_id_field,
+            deferred_fields=auto_detected_deferred_fields,
+            encoding=encoding,
+            separator=separator,
+        )
+        return
+
+    # --- 5. Execute Standard Single-Pass Import (Fallback) ---
+    log.info("No deferrable fields specified or detected. Using standard import.")
     try:
         parsed_context = ast.literal_eval(context)
         if not isinstance(parsed_context, dict):
             raise TypeError("Context must be a dictionary.")
     except Exception as e:
-        _show_error_panel(
-            "Invalid Context",
-            f"The --context argument must be a valid Python dictionary string.\n"
-            f"Error: {e}",
-        )
+        _show_error_panel("Invalid Context", f"Invalid --context dictionary: {e}")
         return
 
+    # ... (The rest of the standard import logic remains the same)
     ignore_list = ignore.split(",") if ignore else []
-
     file_dir = os.path.dirname(filename)
-    file_to_process: str
-    fail_output_file: str
-    is_fail_run: bool
-    batch_size_run: int
-    max_connection_run: int
-
     model_filename_part = final_model.replace(".", "_")
 
     if fail:
-        log.info("Running in --fail mode. Retrying failed records...")
-        file_to_process = os.path.join(file_dir, f"{model_filename_part}_fail.csv")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         fail_output_file = os.path.join(
             file_dir, f"{model_filename_part}_{timestamp}_failed.csv"
         )
-        batch_size_run = 1
-        max_connection_run = 1
-        is_fail_run = True
+        batch_size_run, max_connection_run, is_fail_run = 1, 1, True
     else:
-        file_to_process = filename
         fail_output_file = os.path.join(file_dir, f"{model_filename_part}_fail.csv")
-        batch_size_run = int(batch_size)
-        max_connection_run = int(worker)
-        is_fail_run = False
+        batch_size_run, max_connection_run, is_fail_run = (
+            int(batch_size),
+            int(worker),
+            False,
+        )
 
     log.info(f"Importing file: {file_to_process}")
     log.info(f"Target model: {final_model}")
     log.info(f"Workers: {max_connection_run}, Batch Size: {batch_size_run}")
-    log.info(f"Failed records will be saved to: {fail_output_file}")
 
-    # --- Compatibility Shim ---
     final_split_argument = split_by_cols or split
-
     split_by_cols_for_import = None
     if isinstance(final_split_argument, str):
-        # This will handle a string like "id,name"
-        split_by_cols_for_import = [
-            col.strip() for col in final_split_argument.split(",")
-        ]
+        split_by_cols_for_import = [c.strip() for c in final_split_argument.split(",")]
     elif isinstance(final_split_argument, (list, tuple)):
-        # This will handle the TUPLE that your debug log proved is there
         split_by_cols_for_import = list(final_split_argument)
-
-    # Now, 'split_by_cols_for_import' is reliably a list of strings or None
 
     success = import_threaded.import_data(
         config_file=config,
@@ -261,18 +261,14 @@ def run_import(  # noqa: C901
     if success:
         console.print(
             Panel(
-                f"Import process for model [bold cyan]{final_model}[/bold cyan] "
-                f"finished successfully.",
+                f"Import for [cyan]{final_model}[/cyan] finished successfully.",
                 title="[bold green]Import Complete[/bold green]",
                 border_style="green",
             )
         )
     else:
-        # log.error(
         _show_error_panel(
-            "Import Aborted",
-            "The import process was aborted due to a critical error. "
-            "Please check the logs above for details.",
+            "Import Aborted", "The import was aborted due to a critical error."
         )
 
 

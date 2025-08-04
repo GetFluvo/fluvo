@@ -4,7 +4,7 @@ These checks are run before the main import process to catch common,
 systemic errors early (e.g., missing languages, incorrect configuration).
 """
 
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import polars as pl
 from polars.exceptions import ColumnNotFoundError
@@ -146,17 +146,26 @@ def language_check(
 
 
 @register_check
-def field_existence_check(
+def field_existence_check(  # noqa: C901
     preflight_mode: "PreflightMode",
     model: str,
     filename: str,
     config: str,
+    import_plan: Optional[dict[str, Any]] = None,
     **kwargs: Any,
 ) -> bool:
-    """Preflight check.
+    """Verifies fields exist and detects which fields require deferred import.
 
-    Pre-flight check to verify that all columns in the header exist as
-    fields on the target Odoo model.
+    Args:
+        preflight_mode: The current pre-flight mode.
+        model: The target Odoo model name.
+        filename: The path to the source CSV file.
+        config: The path to the connection configuration file.
+        import_plan: A dictionary to be populated with import strategy details.
+        **kwargs: Additional arguments passed from the importer.
+
+    Returns:
+        True if all checks pass, False otherwise.
     """
     log.info(f"Running pre-flight check: Verifying fields for model '{model}'...")
 
@@ -197,6 +206,33 @@ def field_existence_check(
             error_message += f"  - '{field}' is not a valid field on model '{model}'\n"
         _show_error_panel("Invalid Fields Found", error_message)
         return False
+
+    # --- NEW: Logic to detect deferrable fields ---
+    deferrable_fields = []
+    for field_name in csv_header:
+        clean_field_name = field_name.replace("/id", "")
+        if clean_field_name in odoo_fields:
+            field_info = odoo_fields[clean_field_name]
+            field_type = field_info.get("type")
+            relation = field_info.get("relation")
+            if (field_type == "many2one" and relation == model) or (
+                field_type == "many2many"
+            ):
+                deferrable_fields.append(clean_field_name)
+
+    if deferrable_fields:
+        log.info(f"Detected deferrable fields: {deferrable_fields}")
+        if not kwargs.get("unique_id_field"):
+            _show_error_panel(
+                "Action Required for Two-Pass Import",
+                "Deferrable fields (e.g., parent_id, many2many) were detected.\n"
+                "To handle these, you must specify the unique ID column of your "
+                "file using the [bold cyan]--unique-id-field[/bold cyan] option.",
+            )
+            return False
+        if import_plan is not None:
+            import_plan["deferred_fields"] = deferrable_fields
+    # --- END NEW ---
 
     log.info("Pre-flight Check Successful: All columns are valid fields on the model.")
     return True

@@ -367,6 +367,7 @@ def test_run_preflight_checks_fail() -> None:
     """Test that _run_preflight_checks returns False if a check fails."""
     assert not _run_preflight_checks(
         PreflightMode.NORMAL,
+        import_plan={},
         model="test",
         filename="test.csv",
         config="test.conf",
@@ -383,6 +384,7 @@ def test_run_preflight_checks_pass() -> None:
     """Test that _run_preflight_checks returns True if all checks pass."""
     assert _run_preflight_checks(
         PreflightMode.NORMAL,
+        import_plan={},
         model="test",
         filename="test.csv",
         config="test.conf",

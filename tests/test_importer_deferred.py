@@ -86,9 +86,7 @@ class TestImportDeferred:
         assert (103, {"parent_id": 101}) in pass_2_call_args
 
     @patch("odoo_data_flow.importer.conf_lib.get_connection_from_config")
-    def test_import_fails_on_pass_1_exception(
-        self, mock_get_conn: MagicMock
-    ) -> None:
+    def test_import_fails_on_pass_1_exception(self, mock_get_conn: MagicMock) -> None:
         """Test that the import returns False if Pass 1 fails."""
         # --- Arrange ---
         mock_model = MagicMock()
