@@ -228,13 +228,24 @@ def _detect_and_plan_deferrals(
 
     if deferrable_fields:
         log.info(f"Detected deferrable fields: {deferrable_fields}")
-        if not kwargs.get("unique_id_field"):
-            _show_error_panel(
-                "Action Required for Two-Pass Import",
-                "Deferrable fields were detected. You must specify the unique ID "
-                "column using the [bold cyan]--unique-id-field[/bold cyan] option.",
-            )
-            return False
+        unique_id_field = kwargs.get("unique_id_field")
+
+        # --- NEW: Automatic 'id' column detection ---
+        if not unique_id_field:
+            if "id" in csv_header:
+                log.info("Automatically using 'id' column as the unique identifier.")
+                unique_id_field = "id"
+                if import_plan is not None:
+                    import_plan["unique_id_field"] = "id"  # Store the inferred field
+            else:
+                _show_error_panel(
+                    "Action Required for Two-Pass Import",
+                    "Deferrable fields were detected, but no 'id' column was found.\n"
+                    "Please specify the unique ID column using the "
+                    "[bold cyan]--unique-id-field[/bold cyan] option.",
+                )
+                return False
+
         if import_plan is not None:
             import_plan["deferred_fields"] = deferrable_fields
     return True

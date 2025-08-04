@@ -183,7 +183,12 @@ def run_import(  # noqa: C901
         )
         return
 
-    if auto_detected_deferred_fields and unique_id_field:
+    # --- MODIFIED: Automatic detection path now checks the import_plan ---
+    auto_detected_deferred_fields = import_plan.get("deferred_fields", [])
+    # The unique ID field can come from the user OR from auto-detection
+    final_unique_id_field = unique_id_field or import_plan.get("unique_id_field")
+
+    if auto_detected_deferred_fields and final_unique_id_field:
         log.info(
             f"Auto-detected deferrable fields: {auto_detected_deferred_fields}. "
             "Switching to two-pass import strategy."
@@ -192,7 +197,7 @@ def run_import(  # noqa: C901
             config=config,
             filename=filename,
             model_name=final_model,
-            unique_id_field=unique_id_field,
+            unique_id_field=final_unique_id_field,
             deferred_fields=auto_detected_deferred_fields,
             encoding=encoding,
             separator=separator,
