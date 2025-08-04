@@ -8,11 +8,7 @@ import concurrent.futures
 import csv
 import sys
 from collections.abc import Generator, Iterable
-from typing import (
-    Any,
-    Optional,
-    TextIO,
-)
+from typing import Any, Optional, TextIO
 
 from rich.progress import (
     BarColumn,
@@ -295,45 +291,47 @@ def _run_threaded_pass(
         dict[str, Any]: A dictionary containing the aggregated results from all
         worker threads, such as `id_map` and `failed_lines`.
     """
-    # Launch all batches in threads
+    future_to_batch = {}
     for batch_number, batch_data in batches:
         if rpc_thread.abort_flag:
             break
-        rpc_thread.spawn_thread(
+        future = rpc_thread.spawn_thread(
             target_func,
             [
                 thread_state,
                 batch_data,
-                thread_state.get("batch_header"),  # Will be None for write pass
+                thread_state.get("batch_header"),
                 batch_number,
             ],
         )
+        future_to_batch[future] = batch_data
 
-    # Collect and aggregate results
-    aggregated_results: dict[str, Any] = {"id_map": {}, "failed_lines": []}
-    for future in concurrent.futures.as_completed(rpc_thread.futures):
+    aggregated_results: dict[str, Any] = {
+        "id_map": {},
+        "failed_lines": [],
+        "failed_writes": [],
+    }
+    for future in concurrent.futures.as_completed(future_to_batch):
         if rpc_thread.abort_flag:
             break
         try:
             result = future.result()
+            # Aggregate all results from the worker
             aggregated_results["id_map"].update(result.get("id_map", {}))
+            aggregated_results["failed_lines"].extend(result.get("failed_lines", []))
+            aggregated_results["failed_writes"].extend(result.get("failed_writes", []))
 
-            # Check for and write failed lines as soon as they are available.
-            failed_lines = result.get("failed_lines", [])
-            if failed_lines:
-                aggregated_results["failed_lines"].extend(failed_lines)
-                if rpc_thread.writer:
-                    rpc_thread.writer.writerows(failed_lines)
+            # FIX: Write failures immediately as they are processed
+            failed_lines_from_batch = result.get("failed_lines", [])
+            if rpc_thread.writer and failed_lines_from_batch:
+                log.debug(
+                    f"Writing {len(failed_lines_from_batch)} failed lines to fail file."
+                )
+                rpc_thread.writer.writerows(failed_lines_from_batch)
 
-            # Update progress bar
-            processed_count = len(result.get("id_map", {})) + len(failed_lines)
-            if processed_count == 0 and "failed_writes" in result:
-                # This path is for the write pass, which doesn't return id_map
-                # We can't know the original batch size here, so we don't advance
-                pass
-
-            rpc_thread.progress.update(rpc_thread.task_id, advance=processed_count)
-
+            # Update progress bar based on the size of the original batch
+            original_batch_size = len(future_to_batch[future])
+            rpc_thread.progress.update(rpc_thread.task_id, advance=original_batch_size)
         except Exception as e:
             log.error(f"A worker thread failed unexpectedly: {e}", exc_info=True)
             rpc_thread.abort_flag = True
@@ -383,43 +381,38 @@ def _orchestrate_pass_1(
             including the `id_map` ({source_id: db_id}), a list of any
             `failed_lines`, and a `success` boolean flag.
     """
-    pass_1_task = progress.add_task(
-        f"Pass 1/2: Importing to [bold]{model_obj._name}[/bold]",
-        total=len(all_data),
+    pass_1_header, pass_1_data = _filter_ignored_columns(
+        deferred_fields + ignore, header, all_data
     )
+    pass_1_batches = list(_create_batches(pass_1_data, batch_size))
+
+    task_description = f"Pass 1/2: Importing to [bold]{model_obj._name}[/bold]"
+    pass_1_task = progress.add_task(
+        task_description, total=len(pass_1_data), last_error=""
+    )
+
     rpc_pass_1 = RPCThreadImport(max_connection, progress, pass_1_task, fail_writer)
 
     try:
-        pass_1_header, pass_1_data = _filter_ignored_columns(
-            deferred_fields + ignore, header, all_data
-        )
         pass_1_uid_index = pass_1_header.index(unique_id_field)
-
-        thread_state_1 = {
-            "model": model_obj,
-            "context": context,
-            "unique_id_field_index": pass_1_uid_index,
-            "batch_header": pass_1_header,
-        }
-        pass_1_batches = _create_batches(pass_1_data, batch_size)
-        results = _run_threaded_pass(
-            rpc_pass_1, _execute_load_batch, pass_1_batches, thread_state_1
-        )
-        results["success"] = not rpc_pass_1.abort_flag
-        return results
-
-    except KeyboardInterrupt:  # pragma: no cover
-        log.warning(
-            "\nImport process interrupted by user during Pass 1. Shutting down..."
-        )
-        rpc_pass_1.abort_flag = True
-        rpc_pass_1.executor.shutdown(wait=True, cancel_futures=True)
-        return {"success": False}
     except ValueError:
         log.error(
             f"Unique ID field '{unique_id_field}' was removed by the ignore list."
         )
         return {"success": False}
+
+    thread_state_1 = {
+        "model": model_obj,
+        "context": context,
+        "unique_id_field_index": pass_1_uid_index,
+        "batch_header": pass_1_header,
+    }
+
+    results = _run_threaded_pass(
+        rpc_pass_1, _execute_load_batch, pass_1_batches, thread_state_1
+    )
+    results["success"] = not rpc_pass_1.abort_flag
+    return results
 
 
 def _prepare_pass_2_data(
@@ -512,41 +505,34 @@ def _orchestrate_pass_2(
         log.info("No valid relations found to update in Pass 2. Import complete.")
         return True
 
+    pass_2_batches = list(enumerate(batch(pass_2_data_to_write, batch_size), 1))
+
+    task_description = f"Pass 2/2: Updating [bold]{model_obj._name}[/bold] relations"
     pass_2_task = progress.add_task(
-        f"Pass 2/2: Updating [bold]{model_obj._name}[/bold] relations",
-        total=len(pass_2_data_to_write),
+        task_description, total=len(pass_2_batches), last_error=""
     )
     rpc_pass_2 = RPCThreadImport(max_connection, progress, pass_2_task, fail_writer)
-    try:
-        thread_state_2 = {"model": model_obj}
-        pass_2_batches = enumerate(batch(pass_2_data_to_write, batch_size), 1)
+    thread_state_2 = {"model": model_obj}
 
-        pass_2_results = _run_threaded_pass(
-            rpc_pass_2, _execute_write_batch, pass_2_batches, thread_state_2
-        )
+    pass_2_results = _run_threaded_pass(
+        rpc_pass_2, _execute_write_batch, pass_2_batches, thread_state_2
+    )
 
-        failed_writes = pass_2_results["failed_writes"]
-        if fail_writer and failed_writes:
-            log.warning("Writing failed Pass 2 records to fail file...")
-            reverse_id_map = {v: k for k, v in id_map.items()}
-            source_data_map = {row[unique_id_field_index]: row for row in all_data}
-            failed_lines = []
-            for db_id, _, error_message in failed_writes:
-                source_id = reverse_id_map.get(db_id)
-                if source_id and source_id in source_data_map:
-                    original_row = list(source_data_map[source_id])
-                    original_row.append(error_message)
-                    failed_lines.append(original_row)
-            fail_writer.writerows(failed_lines)
+    failed_writes = pass_2_results["failed_writes"]
+    if fail_writer and failed_writes:
+        log.warning("Writing failed Pass 2 records to fail file...")
+        reverse_id_map = {v: k for k, v in id_map.items()}
+        source_data_map = {row[unique_id_field_index]: row for row in all_data}
+        failed_lines = []
+        for db_id, _, error_message in failed_writes:
+            source_id = reverse_id_map.get(db_id)
+            if source_id and source_id in source_data_map:
+                original_row = list(source_data_map[source_id])
+                original_row.append(error_message)
+                failed_lines.append(original_row)
+        fail_writer.writerows(failed_lines)
 
-        return not rpc_pass_2.abort_flag
-    except KeyboardInterrupt:  # pragma: no cover
-        log.warning(
-            "\nImport process interrupted by user during Pass 2. Shutting down..."
-        )
-        rpc_pass_2.abort_flag = True
-        rpc_pass_2.executor.shutdown(wait=True, cancel_futures=True)
-        return False
+    return not rpc_pass_2.abort_flag
 
 
 def import_data(
@@ -606,7 +592,6 @@ def import_data(
         deferred_fields or [],
         ignore or [],
     )
-
     header, all_data = _read_data_file(file_csv, separator, encoding, skip)
     if not header:
         return False
@@ -630,39 +615,37 @@ def import_data(
 
     overall_success = False
     try:
-        with progress:
-            pass_1_results = _orchestrate_pass_1(
-                progress,
-                model_obj,
-                header,
-                all_data,
-                unique_id_field,
-                _deferred,
-                _ignore,
-                _context,
-                fail_writer,
-                max_connection,
-                batch_size,
-            )
+        pass_1_results = _orchestrate_pass_1(
+            progress,
+            model_obj,
+            header,
+            all_data,
+            unique_id_field,
+            _deferred,
+            _ignore,
+            _context,
+            fail_writer,
+            max_connection,
+            batch_size,
+        )
         if not pass_1_results.get("success"):
             return False
 
         if not _deferred:
-            return True
+            return True  # Successful single-pass import
 
-        with progress:
-            overall_success = _orchestrate_pass_2(
-                progress,
-                model_obj,
-                header,
-                all_data,
-                unique_id_field,
-                pass_1_results["id_map"],
-                _deferred,
-                fail_writer,
-                max_connection,
-                batch_size,
-            )
+        overall_success = _orchestrate_pass_2(
+            progress,
+            model_obj,
+            header,
+            all_data,
+            unique_id_field,
+            pass_1_results["id_map"],
+            _deferred,
+            fail_writer,
+            max_connection,
+            batch_size,
+        )
     finally:
         if fail_handle:
             fail_handle.close()
