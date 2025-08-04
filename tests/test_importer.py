@@ -460,8 +460,7 @@ def test_run_import_uses_auto_detected_deferred_fields(
     source_file = tmp_path / "res_partner.csv"
     source_file.write_text("id,name,category_id/id\n1,test,cat_a")
 
-    # Simulate the pre-flight check detecting a m2m field
-    def preflight_side_effect(import_plan: dict, **kwargs):
+    def preflight_side_effect(import_plan: dict[str, Any], **kwargs: Any) -> bool:
         import_plan["deferred_fields"] = ["category_id"]
         import_plan["unique_id_field"] = "id"
         return True
@@ -478,8 +477,36 @@ def test_run_import_uses_auto_detected_deferred_fields(
 
     # --- Assert ---
     mock_run_checks.assert_called_once()
-    mock_run_deferred.assert_called_once()  # Verify the deferred path was taken
+    mock_run_deferred.assert_called_once()
 
-    # Verify it was called with the auto-detected fields
     call_kwargs = mock_run_deferred.call_args.kwargs
     assert call_kwargs["deferred_fields"] == ["category_id"]
+
+
+@patch("odoo_data_flow.importer._run_preflight_checks", return_value=True)
+@patch("odoo_data_flow.importer.import_threaded.import_data")
+def test_run_import_in_fail_mode_uses_force_create(
+    mock_import_data: MagicMock, mock_run_checks: MagicMock, tmp_path: Path
+) -> None:
+    """Test that fail mode correctly enables the 'force_create' flag."""
+    # --- Arrange ---
+    source_file = tmp_path / "res_partner.csv"
+    source_file.write_text("id,name\n1,test")
+
+    fail_file = tmp_path / "res_partner_fail.csv"
+    fail_file.write_text("id,name\n2,failed_record")
+
+    # --- Act ---
+    run_import(
+        config="dummy.conf",
+        filename=str(source_file),
+        model="res.partner",
+        fail=True,  # Enable fail mode
+    )
+
+    # --- Assert ---
+    mock_import_data.assert_called_once()
+    call_kwargs = mock_import_data.call_args.kwargs
+
+    # Verify that the 'force_create' flag was set to True for the backend
+    assert call_kwargs.get("force_create") is True

@@ -414,7 +414,6 @@ def _orchestrate_pass_1(
             including the `id_map` ({source_id: db_id}), a list of any
             `failed_lines`, and a `success` boolean flag.
     """
-
     pass_1_task = progress.add_task(
         f"Pass 1/2: Importing to [bold]{model_obj._name}[/bold]",
         total=len(all_data),
@@ -539,7 +538,6 @@ def _orchestrate_pass_2(
     if not pass_2_data_to_write:
         log.info("No valid relations found to update in Pass 2. Import complete.")
         return True
-
 
     pass_2_task = progress.add_task(
         f"Pass 2/2: Updating [bold]{model_obj._name}[/bold] relations",
