@@ -388,30 +388,38 @@ def _orchestrate_pass_1(
         total=len(all_data),
     )
     rpc_pass_1 = RPCThreadImport(max_connection, progress, pass_1_task, fail_writer)
-    pass_1_header, pass_1_data = _filter_ignored_columns(
-        deferred_fields + ignore, header, all_data
-    )
 
     try:
+        pass_1_header, pass_1_data = _filter_ignored_columns(
+            deferred_fields + ignore, header, all_data
+        )
         pass_1_uid_index = pass_1_header.index(unique_id_field)
+
+        thread_state_1 = {
+            "model": model_obj,
+            "context": context,
+            "unique_id_field_index": pass_1_uid_index,
+            "batch_header": pass_1_header,
+        }
+        pass_1_batches = _create_batches(pass_1_data, batch_size)
+        results = _run_threaded_pass(
+            rpc_pass_1, _execute_load_batch, pass_1_batches, thread_state_1
+        )
+        results["success"] = not rpc_pass_1.abort_flag
+        return results
+
+    except KeyboardInterrupt:  # pragma: no cover
+        log.warning(
+            "\nImport process interrupted by user during Pass 1. Shutting down..."
+        )
+        rpc_pass_1.abort_flag = True
+        rpc_pass_1.executor.shutdown(wait=True, cancel_futures=True)
+        return {"success": False}
     except ValueError:
         log.error(
             f"Unique ID field '{unique_id_field}' was removed by the ignore list."
         )
         return {"success": False}
-
-    thread_state_1 = {
-        "model": model_obj,
-        "context": context,
-        "unique_id_field_index": pass_1_uid_index,
-        "batch_header": pass_1_header,
-    }
-    pass_1_batches = _create_batches(pass_1_data, batch_size)
-    results = _run_threaded_pass(
-        rpc_pass_1, _execute_load_batch, pass_1_batches, thread_state_1
-    )
-    results["success"] = not rpc_pass_1.abort_flag
-    return results
 
 
 def _prepare_pass_2_data(
@@ -509,28 +517,36 @@ def _orchestrate_pass_2(
         total=len(pass_2_data_to_write),
     )
     rpc_pass_2 = RPCThreadImport(max_connection, progress, pass_2_task, fail_writer)
-    thread_state_2 = {"model": model_obj}
-    pass_2_batches = enumerate(batch(pass_2_data_to_write, batch_size), 1)
+    try:
+        thread_state_2 = {"model": model_obj}
+        pass_2_batches = enumerate(batch(pass_2_data_to_write, batch_size), 1)
 
-    pass_2_results = _run_threaded_pass(
-        rpc_pass_2, _execute_write_batch, pass_2_batches, thread_state_2
-    )
+        pass_2_results = _run_threaded_pass(
+            rpc_pass_2, _execute_write_batch, pass_2_batches, thread_state_2
+        )
 
-    failed_writes = pass_2_results["failed_writes"]
-    if fail_writer and failed_writes:
-        log.warning("Writing failed Pass 2 records to fail file...")
-        reverse_id_map = {v: k for k, v in id_map.items()}
-        source_data_map = {row[unique_id_field_index]: row for row in all_data}
-        failed_lines = []
-        for db_id, _, error_message in failed_writes:
-            source_id = reverse_id_map.get(db_id)
-            if source_id and source_id in source_data_map:
-                original_row = list(source_data_map[source_id])
-                original_row.append(error_message)
-                failed_lines.append(original_row)
-        fail_writer.writerows(failed_lines)
+        failed_writes = pass_2_results["failed_writes"]
+        if fail_writer and failed_writes:
+            log.warning("Writing failed Pass 2 records to fail file...")
+            reverse_id_map = {v: k for k, v in id_map.items()}
+            source_data_map = {row[unique_id_field_index]: row for row in all_data}
+            failed_lines = []
+            for db_id, _, error_message in failed_writes:
+                source_id = reverse_id_map.get(db_id)
+                if source_id and source_id in source_data_map:
+                    original_row = list(source_data_map[source_id])
+                    original_row.append(error_message)
+                    failed_lines.append(original_row)
+            fail_writer.writerows(failed_lines)
 
-    return not rpc_pass_2.abort_flag
+        return not rpc_pass_2.abort_flag
+    except KeyboardInterrupt:  # pragma: no cover
+        log.warning(
+            "\nImport process interrupted by user during Pass 2. Shutting down..."
+        )
+        rpc_pass_2.abort_flag = True
+        rpc_pass_2.executor.shutdown(wait=True, cancel_futures=True)
+        return False
 
 
 def import_data(

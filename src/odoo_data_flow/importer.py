@@ -18,7 +18,7 @@ from rich.panel import Panel
 
 from . import import_threaded
 from .enums import PreflightMode
-from .lib import conf_lib, preflight
+from .lib import preflight
 from .lib.internal.ui import _show_error_panel
 from .logging_config import log
 
@@ -425,32 +425,35 @@ def run_import_deferred(
         True if the import process completes successfully, False otherwise.
     """
     log.info(f"Starting two-pass deferred import for model '{model_name}'...")
-    console = Console()
 
-    try:
-        connection = conf_lib.get_connection_from_config(config)
-        model = connection.get_model(model_name)
-        with open(filename, encoding=encoding, newline="") as f:
-            reader = csv.DictReader(f, delimiter=separator)
-            records = list(reader)
-    except Exception as e:
-        _show_error_panel("Setup Error", f"Failed to connect or read file: {e}")
-        return False
-
-    try:
-        id_map = _execute_pass_1(model, records, deferred_fields, unique_id_field)
-        updates_made = _execute_pass_2(
-            model, records, deferred_fields, unique_id_field, id_map
-        )
-    except Exception as e:
-        log.error(f"Import process failed during execution: {e}", exc_info=True)
-        return False
-
-    summary_text = (
-        f"[bold]Two-Pass Import Summary for [cyan]{model_name}[/cyan][/bold]\n\n"
-        f"  - Total Records Processed: [bold]{len(records)}[/bold]\n"
-        f"  - Records Created (Pass 1):  [bold green]{len(id_map)}[/bold green]\n"
-        f"  - Relations Updated (Pass 2): [bold blue]{updates_made}[/bold blue]"
+    # This function now acts as a simple wrapper that calls the powerful
+    # low-level import engine with the correct parameters.
+    success = import_threaded.import_data(
+        config_file=config,
+        model=model_name,
+        unique_id_field=unique_id_field,
+        file_csv=filename,
+        deferred_fields=deferred_fields,
+        encoding=encoding,
+        separator=separator,
+        # Sensible defaults for a deferred run
+        max_connection=4,  # Allow multi-threading
+        batch_size=200,
     )
-    console.print(Panel(summary_text, title="Import Complete", expand=False))
-    return True
+
+    console = Console()
+    if success:
+        console.print(
+            Panel(
+                f"Two-pass import for [cyan]{model_name}[/cyan] finished.",
+                title="[bold green]Import Complete[/bold green]",
+                expand=False,
+            )
+        )
+    else:
+        _show_error_panel(
+            "Import Failed",
+            "The deferred import process failed. Check logs for details.",
+        )
+
+    return success
