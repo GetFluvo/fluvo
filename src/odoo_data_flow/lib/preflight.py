@@ -4,7 +4,7 @@ These checks are run before the main import process to catch common,
 systemic errors early (e.g., missing languages, incorrect configuration).
 """
 
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, cast
 
 import polars as pl
 from polars.exceptions import ColumnNotFoundError
@@ -145,8 +145,103 @@ def language_check(
         return False
 
 
+def _get_odoo_fields(config: str, model: str) -> Optional[dict[str, Any]]:
+    """Fetches the field schema for a given model from Odoo.
+
+    Args:
+        config: The path to the connection configuration file.
+        model: The target Odoo model name.
+
+    Returns:
+        A dictionary of the model's fields, or None on failure.
+    """
+    try:
+        connection: Any = conf_lib.get_connection_from_config(config_file=config)
+        model_obj = connection.get_model(model)
+        # FIX: Use `cast` to inform mypy of the expected return type.
+        return cast(dict[str, Any], model_obj.fields_get())
+    except Exception as e:
+        _show_error_panel(
+            "Odoo Connection Error",
+            f"Could not connect to Odoo to get model fields. Error: {e}",
+        )
+        return None
+
+
+def _get_csv_header(filename: str, separator: str) -> Optional[list[str]]:
+    """Reads the header from a CSV file.
+
+    Args:
+        filename: The path to the source CSV file.
+        separator: The delimiter used in the CSV file.
+
+    Returns:
+        A list of strings representing the header, or None on failure.
+    """
+    try:
+        return pl.read_csv(filename, separator=separator, n_rows=0).columns
+    except Exception as e:
+        _show_error_panel("File Read Error", f"Could not read CSV header. Error: {e}")
+        return None
+
+
+def _validate_header(
+    csv_header: list[str], odoo_fields: dict[str, Any], model: str
+) -> bool:
+    """Validates that all CSV columns exist as fields on the Odoo model."""
+    odoo_field_names = set(odoo_fields.keys())
+    missing_fields = [
+        field
+        for field in csv_header
+        if (field.split("/")[0] not in odoo_field_names) or (field.endswith("/.id"))
+    ]
+
+    if missing_fields:
+        error_message = "The following columns do not exist on the Odoo model:\n"
+        for field in missing_fields:
+            error_message += f"  - '{field}' is not a valid field on model '{model}'\n"
+        _show_error_panel("Invalid Fields Found", error_message)
+        return False
+    return True
+
+
+def _detect_and_plan_deferrals(
+    csv_header: list[str],
+    odoo_fields: dict[str, Any],
+    model: str,
+    import_plan: Optional[dict[str, Any]],
+    kwargs: dict[str, Any],
+) -> bool:
+    """Detects deferrable fields and updates the import plan."""
+    deferrable_fields = []
+    for field_name in csv_header:
+        clean_field_name = field_name.replace("/id", "")
+        if clean_field_name in odoo_fields:
+            field_info = odoo_fields[clean_field_name]
+            is_m2o_self = (
+                field_info.get("type") == "many2one"
+                and field_info.get("relation") == model
+            )
+            is_m2m = field_info.get("type") == "many2many"
+            if is_m2o_self or is_m2m:
+                deferrable_fields.append(clean_field_name)
+
+    if deferrable_fields:
+        log.info(f"Detected deferrable fields: {deferrable_fields}")
+        if not kwargs.get("unique_id_field"):
+            _show_error_panel(
+                "Action Required for Two-Pass Import",
+                "Deferrable fields were detected. You must specify the unique ID "
+                "column using the [bold cyan]--unique-id-field[/bold cyan] option.",
+            )
+            return False
+        if import_plan is not None:
+            import_plan["deferred_fields"] = deferrable_fields
+    return True
+
+
 @register_check
-def field_existence_check(  # noqa: C901
+def field_existence_check(
     preflight_mode: "PreflightMode",
     model: str,
     filename: str,
@@ -168,71 +263,21 @@ def field_existence_check(  # noqa: C901
         True if all checks pass, False otherwise.
     """
     log.info(f"Running pre-flight check: Verifying fields for model '{model}'...")
-
-    try:
-        csv_header = pl.read_csv(
-            filename, separator=kwargs.get("separator", ";"), n_rows=0
-        ).columns
-    except Exception as e:
-        _show_error_panel("File Read Error", f"Could not read CSV header. Error: {e}")
+    csv_header = _get_csv_header(filename, kwargs.get("separator", ";"))
+    if not csv_header:
         return False
 
-    try:
-        connection: Any = conf_lib.get_connection_from_config(config_file=config)
-        model_obj = connection.get_model(model)
-        odoo_fields = model_obj.fields_get()
-        odoo_field_names = set(odoo_fields.keys())
-
-    except Exception as e:
-        _show_error_panel(
-            "Odoo Connection Error",
-            f"Could not connect to Odoo to get model fields. Error: {e}",
-        )
+    odoo_fields = _get_odoo_fields(config, model)
+    if not odoo_fields:
         return False
 
-    # Add a check to specifically reject the export-only '/.id' syntax.
-    missing_fields = [
-        field
-        for field in csv_header
-        if (field.split("/")[0] not in odoo_field_names) or (field.endswith("/.id"))
-    ]
-
-    if missing_fields:
-        error_message = (
-            "The following columns in your import file do not exist "
-            "on the Odoo model:\n"
-        )
-        for field in missing_fields:
-            error_message += f"  - '{field}' is not a valid field on model '{model}'\n"
-        _show_error_panel("Invalid Fields Found", error_message)
+    if not _validate_header(csv_header, odoo_fields, model):
         return False
 
-    # --- NEW: Logic to detect deferrable fields ---
-    deferrable_fields = []
-    for field_name in csv_header:
-        clean_field_name = field_name.replace("/id", "")
-        if clean_field_name in odoo_fields:
-            field_info = odoo_fields[clean_field_name]
-            field_type = field_info.get("type")
-            relation = field_info.get("relation")
-            if (field_type == "many2one" and relation == model) or (
-                field_type == "many2many"
-            ):
-                deferrable_fields.append(clean_field_name)
-
-    if deferrable_fields:
-        log.info(f"Detected deferrable fields: {deferrable_fields}")
-        if not kwargs.get("unique_id_field"):
-            _show_error_panel(
-                "Action Required for Two-Pass Import",
-                "Deferrable fields (e.g., parent_id, many2many) were detected.\n"
-                "To handle these, you must specify the unique ID column of your "
-                "file using the [bold cyan]--unique-id-field[/bold cyan] option.",
-            )
-            return False
-        if import_plan is not None:
-            import_plan["deferred_fields"] = deferrable_fields
-    # --- END NEW ---
+    if not _detect_and_plan_deferrals(
+        csv_header, odoo_fields, model, import_plan, kwargs
+    ):
+        return False
 
     log.info("Pre-flight Check Successful: All columns are valid fields on the model.")
     return True
