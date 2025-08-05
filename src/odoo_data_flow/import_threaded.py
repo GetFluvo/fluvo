@@ -152,9 +152,6 @@ def _prepare_pass_2_data(
     return pass_2_data_to_write
 
 
-# In src/odoo_data_flow/import_threaded.py
-
-
 def _recursive_create_batches(  # noqa: C901
     current_data: list[list[Any]],
     group_cols: list[str],
@@ -165,9 +162,6 @@ def _recursive_create_batches(  # noqa: C901
     level: int = 0,
 ) -> Generator[tuple[Any, list[list[Any]]], None, None]:
     """Recursively creates batches of data, handling grouping and o2m."""
-    if not isinstance(group_cols, (list, tuple)):
-        group_cols = []
-
     if not group_cols:
         # Base case: No more grouping, handle o2m or simple batching
         current_batch: list[list[Any]] = []
@@ -565,53 +559,6 @@ def _orchestrate_pass_1(
     return results
 
 
-def _prepare_pass_2_data(
-    all_data: list[list[Any]],
-    header: list[str],
-    unique_id_field_index: int,
-    id_map: dict[str, int],
-    deferred_fields: list[str],
-) -> list[tuple[int, dict[str, Any]]]:
-    """Prepares the list of write operations for Pass 2.
-
-    Iterates through the original data, using the ID map from Pass 1 to
-    resolve relational fields and construct a list of payloads suitable for
-    Odoo's `write` method.
-
-    Args:
-        all_data (list[list[Any]]): The complete data from the source file.
-        header (list[str]): The complete header from the source file.
-        unique_id_field_index (int): The column index of the unique identifier.
-        id_map (dict[str, int]): The map of source IDs to database IDs from Pass 1.
-        deferred_fields (list[str]): A list of the relational fields to process.
-        force_create (bool): If True, bypasses the `load` method and uses
-            the `create` method directly. Used for fail mode.
-
-    Returns:
-        list[tuple[int, dict[str, Any]]]: A list of write payloads, where each
-        item is a tuple containing the database ID of the record to update
-        and a dictionary of the values to write.
-    """
-    pass_2_data_to_write = []
-    for row in all_data:
-        source_id = row[unique_id_field_index]
-        db_id = id_map.get(source_id)
-        if not db_id:
-            continue
-
-        update_vals = {}
-        for field in deferred_fields:
-            if field in header:
-                field_index = header.index(field)
-                related_source_id = row[field_index]
-                related_db_id = id_map.get(related_source_id)
-                if related_source_id and related_db_id:
-                    update_vals[field] = related_db_id
-        if update_vals:
-            pass_2_data_to_write.append((db_id, update_vals))
-    return pass_2_data_to_write
-
-
 def _orchestrate_pass_2(
     progress: Progress,
     model_obj: Any,
@@ -790,8 +737,8 @@ def import_data(
             max_connection,
             batch_size,
             o2m,
-            force_create,
             split_by_cols,
+            force_create,
         )
         if not pass_1_results.get("success"):
             return False
