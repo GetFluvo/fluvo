@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
-from odoo_data_flow.import_threaded import import_data
+from odoo_data_flow.import_threaded import _create_batches, import_data
 
 
 class TestImportDataRefactored:
@@ -94,3 +94,50 @@ class TestImportDataRefactored:
 
         # Assert
         assert result is False
+
+
+class TestBatchingHelpers:
+    """Tests for the batch creation helper functions."""
+
+    def test_create_batches_handles_o2m_format(self) -> None:
+        """Test _create_batches with the o2m flag enabled.
+
+        Verifies that records with empty key fields are correctly grouped with
+        their preceding parent record into a single batch.
+        """
+        # --- Arrange ---
+        header = ["id", "name", "line_item"]
+        data = [
+            ["order1", "Order One", "item_A"],
+            ["", "", "item_B"],  # Child of order1
+            ["order2", "Order Two", "item_C"],
+            ["", "", "item_D"],  # Child of order2
+            ["", "", "item_E"],  # Child of order2
+            ["order3", "Order Three", "item_F"],
+        ]
+
+        # --- Act ---
+        batches = list(
+            _create_batches(
+                data=data,
+                split_by_cols=None,  # Not grouping by column value
+                header=header,
+                batch_size=10,  # Batch size is large enough to not interfere
+                o2m=True,
+            )
+        )
+
+        # --- Assert ---
+        assert len(batches) == 3
+        assert batches[0][1] == [
+            ["order1", "Order One", "item_A"],
+            ["", "", "item_B"],
+        ]
+        assert batches[1][1] == [
+            ["order2", "Order Two", "item_C"],
+            ["", "", "item_D"],
+            ["", "", "item_E"],
+        ]
+        assert batches[2][1] == [
+            ["order3", "Order Three", "item_F"],
+        ]

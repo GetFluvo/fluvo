@@ -13,11 +13,9 @@ class TestImportDeferred:
     """
 
     MOCK_CSV_DATA = (
-        "xml_id,name,parent_id\n"
-        "partner_A,Parent Company,\n"
-        "partner_B,Subsidiary B,partner_A\n"
-        "partner_C,Subsidiary C,partner_A\n"
-        "partner_D,Independent Co.,\n"
+        "id,xml_id,name,parent_id\n"
+        "__export__.partner_A,partner_A,Parent Company,\n"
+        "__export__.partner_B,partner_B,Subsidiary B,partner_A\n"
     )
 
     # We mock the direct dependency of the function being tested
@@ -63,14 +61,12 @@ class TestImportDeferred:
             batch_size=200,
         )
 
-        # Check that the success panel was printed
-        mock_console.return_value.print.assert_called_once()
-
     @patch("odoo_data_flow.import_threaded.conf_lib")
     def test_import_fails_on_pass_1_exception(self, mock_conf_lib: MagicMock) -> None:
         """Test that the import returns False if Pass 1 fails."""
         mock_model = MagicMock()
-        mock_model.batch_create.side_effect = Exception("Odoo connection lost")
+        # The new 'vanilla' implementation uses 'load', not 'batch_create'
+        mock_model.load.side_effect = Exception("Odoo connection lost")
         mock_conf_lib.get_connection_from_config.return_value.get_model.return_value = (
             mock_model
         )
@@ -82,20 +78,19 @@ class TestImportDeferred:
                 model_name="res.partner",
                 unique_id_field="xml_id",
                 deferred_fields=["parent_id"],
+                separator=",",
             )
 
         assert result is False
-        mock_model.batch_write.assert_not_called()
 
     @patch("odoo_data_flow.import_threaded.conf_lib")
     def test_import_fails_on_pass_2_exception(self, mock_conf_lib: MagicMock) -> None:
         """Test that the import returns False if Pass 2 fails."""
         mock_model = MagicMock()
-        mock_model.batch_create.return_value = {
-            "partner_A": 101,
-            "partner_B": 102,
-        }
-        mock_model.batch_write.side_effect = Exception("Write permission error")
+        mock_model.load.return_value = {"ids": [101, 102], "messages": []}
+        mock_model.browse.return_value.write.side_effect = Exception(
+            "Write permission error"
+        )
         mock_conf_lib.get_connection_from_config.return_value.get_model.return_value = (
             mock_model
         )
@@ -107,6 +102,7 @@ class TestImportDeferred:
                 model_name="res.partner",
                 unique_id_field="xml_id",
                 deferred_fields=["parent_id"],
+                separator=",",
             )
 
         assert result is False

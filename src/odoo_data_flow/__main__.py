@@ -184,15 +184,6 @@ def invoice_v9_cmd(**kwargs: Any) -> None:
     run_invoice_v9_workflow(**kwargs)
 
 
-def split_by_comma(
-    ctx: click.Context, param: click.Parameter, value: Optional[str]
-) -> Optional[tuple[str, ...]]:
-    """Split comma separated values."""
-    if value:
-        return tuple(s.strip() for s in value.split(","))
-    return None
-
-
 # --- Import Command ---
 @cli.command(name="import")
 @click.option(
@@ -255,22 +246,13 @@ def split_by_comma(
 @click.option("-s", "--sep", "separator", default=";", help="CSV separator character.")
 @click.option(
     "--groupby",
-    "split_by_cols",  # Renamed for clarity: plural as it's now a list
     default=None,
-    callback=split_by_comma,  # Use the callback to process the string
-    help="Comma-separated list of columns to group data by "
-    "(e.g., 'parent_id,category_id'). "
+    help="Comma-separated list of columns to group data by to prevent deadlocks."
     "Records with empty values for the first column are processed first, then grouped "
     "by that column. This process repeats for subsequent columns.",
 )
 @click.option(
     "--ignore", default=None, help="Comma-separated list of columns to ignore."
-)
-@click.option(
-    "--check",
-    is_flag=True,
-    default=False,
-    help="Check if records are imported after each batch.",
 )
 @click.option(
     "--context",

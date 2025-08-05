@@ -23,7 +23,6 @@ from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch
 from .logging_config import log
 
-# --- Set a large CSV field size limit safely ---
 try:
     csv.field_size_limit(sys.maxsize)
 except OverflowError:
@@ -70,6 +69,8 @@ def _read_data_file(
         return [], []
     except Exception as e:
         log.error(f"Failed to read file {file_path}: {e}")
+        if isinstance(e, ValueError):
+            raise
         return [], []
 
 
@@ -95,41 +96,19 @@ def _filter_ignored_columns(
     """
     if not ignore:
         return header, data
-    indices_to_keep = [i for i, h in enumerate(header) if h not in ignore]
+    ignore_set = set(ignore)
+    indices_to_keep = [
+        i for i, h in enumerate(header) if h.split("/")[0] not in ignore_set
+    ]
     new_header = [header[i] for i in indices_to_keep]
     new_data = [[row[i] for i in indices_to_keep] for row in data]
     return new_header, new_data
 
 
-def _create_batches(
-    data: list[list[Any]], batch_size: int
-) -> Generator[tuple[int, list[list[Any]]], None, None]:
-    """A generator that yields batches of data by size."""
-    for i, data_batch in enumerate(batch(data, batch_size), 1):
-        yield i, list(data_batch)
-
-
 def _setup_fail_file(
     fail_file: Optional[str], header: list[str], separator: str, encoding: str
 ) -> tuple[Optional[Any], Optional[TextIO]]:
-    """Opens the fail file and returns the writer and file handle.
-
-    This helper function prepares a CSV file for logging failed import
-    records. It creates a `csv.writer` and writes the initial header row,
-    appending an `_ERROR_REASON` column to capture failure details.
-
-    Args:
-        fail_file (Optional[str]): The full path for the output fail file. If
-            None, the function returns immediately.
-        header (list[str]): The header list from the source data file.
-        separator (str): The delimiter to use for the output CSV file.
-        encoding (str): The text encoding to use for the output file.
-
-    Returns:
-        tuple[Optional[Any], Optional[TextIO]]: A tuple containing the
-        `csv.writer` object and the open file handle. Returns `(None, None)`
-        if `fail_file` was not provided or if an `OSError` occurred.
-    """
+    """Opens the fail file and returns the writer and file handle."""
     if not fail_file:
         return None, None
     try:
@@ -137,13 +116,146 @@ def _setup_fail_file(
         fail_writer = csv.writer(
             fail_handle, delimiter=separator, quoting=csv.QUOTE_ALL
         )
-        header_to_write = list(header)
-        header_to_write.append("_ERROR_REASON")
+        header_to_write = [*list(header), "_ERROR_REASON"]
         fail_writer.writerow(header_to_write)
         return fail_writer, fail_handle
     except OSError as e:
         log.error(f"Could not open fail file for writing: {fail_file}. Error: {e}")
         return None, None
+
+
+def _prepare_pass_2_data(
+    all_data: list[list[Any]],
+    header: list[str],
+    unique_id_field_index: int,
+    id_map: dict[str, int],
+    deferred_fields: list[str],
+) -> list[tuple[int, dict[str, Any]]]:
+    """Prepares the list of write operations for Pass 2."""
+    pass_2_data_to_write = []
+    for row in all_data:
+        source_id = row[unique_id_field_index]
+        db_id = id_map.get(source_id)
+        if not db_id:
+            continue
+
+        update_vals = {}
+        for field in deferred_fields:
+            if field in header:
+                field_index = header.index(field)
+                related_source_id = row[field_index]
+                related_db_id = id_map.get(related_source_id)
+                if related_source_id and related_db_id:
+                    update_vals[field] = related_db_id
+        if update_vals:
+            pass_2_data_to_write.append((db_id, update_vals))
+    return pass_2_data_to_write
+
+
+# In src/odoo_data_flow/import_threaded.py
+
+
+def _recursive_create_batches(  # noqa: C901
+    current_data: list[list[Any]],
+    group_cols: list[str],
+    header: list[str],
+    batch_size: int,
+    o2m: bool,
+    batch_prefix: str = "",
+    level: int = 0,
+) -> Generator[tuple[Any, list[list[Any]]], None, None]:
+    """Recursively creates batches of data, handling grouping and o2m."""
+    if not isinstance(group_cols, (list, tuple)):
+        group_cols = []
+
+    if not group_cols:
+        # Base case: No more grouping, handle o2m or simple batching
+        current_batch: list[list[Any]] = []
+        try:
+            id_index = header.index("id")
+        except ValueError:
+            # If no 'id' column, o2m cannot work, so just batch by size
+            for i, data_batch in enumerate(batch(current_data, batch_size)):
+                yield (f"{batch_prefix}-{i}", list(data_batch))
+            return
+
+        for row in current_data:
+            is_new_parent = o2m and row[id_index] and current_batch
+            is_batch_full = not o2m and len(current_batch) >= batch_size
+
+            if is_new_parent or is_batch_full:
+                yield (current_batch[0][id_index], current_batch)
+                current_batch = []
+
+            current_batch.append(row)
+
+        if current_batch:
+            yield (current_batch[0][id_index], current_batch)
+        return
+
+    current_group_col, remaining_group_cols = group_cols[0], group_cols[1:]
+    try:
+        split_index = header.index(current_group_col)
+    except ValueError:
+        log.error(
+            f"Grouping column '{current_group_col}' not found. Cannot use --groupby."
+        )
+        return
+
+    current_data.sort(
+        key=lambda r: (
+            r[split_index] is None or r[split_index] == "",
+            r[split_index],
+        )
+    )
+    current_batch, current_split_value, group_counter = [], None, 0
+    for row in current_data:
+        row_split_value = row[split_index]
+        if not current_batch:
+            current_split_value = row_split_value
+        elif row_split_value != current_split_value:
+            yield from _recursive_create_batches(
+                current_batch,
+                remaining_group_cols,
+                header,
+                batch_size,
+                o2m,
+                f"{batch_prefix}{level}-{group_counter}-"
+                f"{current_split_value or 'empty'}",
+            )
+            current_batch, group_counter, current_split_value = (
+                [],
+                group_counter + 1,
+                row_split_value,
+            )
+        current_batch.append(row)
+
+    if current_batch:
+        yield from _recursive_create_batches(
+            current_batch,
+            remaining_group_cols,
+            header,
+            batch_size,
+            o2m,
+            f"{batch_prefix}{level}-{group_counter}-{current_split_value or 'empty'}",
+        )
+
+
+def _create_batches(
+    data: list[list[Any]],
+    split_by_cols: Optional[list[str]],
+    header: list[str],
+    batch_size: int,
+    o2m: bool,
+) -> Generator[tuple[int, list[list[Any]]], None, None]:
+    """A generator that yields batches of data, starting the recursive batching."""
+    if not data:
+        return
+    for i, (_, batch_data) in enumerate(
+        _recursive_create_batches(data, split_by_cols or [], header, batch_size, o2m),
+        start=1,
+    ):
+        yield i, batch_data
 
 
 class RPCThreadImport(RpcThread):
@@ -157,33 +269,41 @@ class RPCThreadImport(RpcThread):
         writer: Optional[Any] = None,
     ) -> None:
         super().__init__(max_connection)
-        self.progress = progress
-        self.task_id = task_id
-        self.writer = writer
-        self.abort_flag = False
+        self.progress, self.task_id, self.writer, self.abort_flag = (
+            progress,
+            task_id,
+            writer,
+            False,
+        )
 
 
 def _create_batch_individually(
     model: Any,
     batch_lines: list[list[Any]],
     batch_header: list[str],
-    unique_id_field_index: int,
+    uid_index: int,
 ) -> dict[str, Any]:
     """Fallback to create records one-by-one to get detailed errors."""
     id_map: dict[str, int] = {}
     failed_lines: list[list[Any]] = []
+    error_summary = "Fell back to create"
     for line in batch_lines:
-        source_id = line[unique_id_field_index]
+        source_id = line[uid_index]
         vals = dict(zip(batch_header, line))
         try:
             new_record = model.create(vals)
             id_map[source_id] = new_record.id
         except Exception as create_error:
             error_message = str(create_error).replace("\n", " | ")
-            failed_line = list(line)
-            failed_line.append(error_message)
+            failed_line = [*list(line), error_message]
             failed_lines.append(failed_line)
-    return {"id_map": id_map, "failed_lines": failed_lines}
+            if "Fell back to create" in error_summary:
+                error_summary = error_message
+    return {
+        "id_map": id_map,
+        "failed_lines": failed_lines,
+        "error_summary": error_summary,
+    }
 
 
 def _execute_load_batch(
@@ -214,42 +334,32 @@ def _execute_load_batch(
         successful records) and `failed_lines` (a list of rows for
         records that failed the `create` fallback).
     """
-    model = thread_state["model"]
-    context = thread_state["context"]
-    unique_id_field_index = thread_state["unique_id_field_index"]
-    force_create = thread_state.get("force_create", False)
+    model, context = thread_state["model"], thread_state["context"]
+    uid_index = thread_state["unique_id_field_index"]
 
-    if force_create:
+    if thread_state.get("force_create"):
         log.info(f"Batch {batch_number}: Fail mode active, using `create` method.")
-        return _create_batch_individually(
-            model, batch_lines, batch_header, unique_id_field_index
-        )
+        return _create_batch_individually(model, batch_lines, batch_header, uid_index)
 
     try:
-        if force_create:
-            raise ValueError("Fail mode is active, forcing create method.")
         log.debug(f"Attempting `load` for batch {batch_number}...")
         res = model.load(batch_header, batch_lines, context=context)
         if res.get("messages"):
-            raise ValueError("Batch failed with messages, falling back to create.")
+            error = res["messages"][0].get("message", "Batch load failed.")
+            raise ValueError(error)
+
         created_ids = res.get("ids", [])
         if len(created_ids) != len(batch_lines):
-            raise ValueError("Record count mismatch, falling back to create.")
+            raise ValueError("Record count mismatch.")
 
-        id_map: dict[str, int] = {}
-        for i, line in enumerate(batch_lines):
-            source_id = line[unique_id_field_index]
-            id_map[source_id] = created_ids[i]
+        id_map = {line[uid_index]: created_ids[i] for i, line in enumerate(batch_lines)}
         return {"id_map": id_map, "failed_lines": []}
     except Exception as e:
         log.warning(
             f"Batch {batch_number} failed with `load` ('{e}'). "
-            "Falling back to slower, single-record `create` method for this batch."
+            f"Falling back to `create`."
         )
-
-        return _create_batch_individually(
-            model, batch_lines, batch_header, unique_id_field_index
-        )
+        return _create_batch_individually(model, batch_lines, batch_header, uid_index)
 
 
 def _execute_write_batch(
@@ -277,15 +387,13 @@ def _execute_write_batch(
         with a `failed_writes` key. The value is a list of tuples for
         each failed write, including the original data and the error message.
     """
-    model = thread_state["model"]
-    failed_writes = []
+    model, failed_writes = thread_state["model"], []
     log.debug(f"Executing write batch {batch_number}...")
     for db_id, vals in batch_writes:
         try:
             model.browse(db_id).write(vals)
         except Exception as e:
-            error_message = str(e).replace("\n", " | ")
-            failed_writes.append((db_id, vals, error_message))
+            failed_writes.append((db_id, vals, str(e).replace("\n", " | ")))
     return {"failed_writes": failed_writes}
 
 
@@ -317,57 +425,61 @@ def _run_threaded_pass(
         dict[str, Any]: A dictionary containing the aggregated results from all
         worker threads, such as `id_map` and `failed_lines`.
     """
-    future_to_batch_size = {}
-    for batch_number, batch_data in batches:
-        if rpc_thread.abort_flag:
-            break
-        future = rpc_thread.spawn_thread(
-            target_func,
-            [
-                thread_state,
-                batch_data,
-                thread_state.get("batch_header"),
-                batch_number,
-            ],
+    future_to_batch_size = {
+        rpc_thread.spawn_thread(target_func, [thread_state, data, header, num]): len(
+            data
         )
-        future_to_batch_size[future] = len(batch_data)
+        for num, data in batches
+        if not rpc_thread.abort_flag
+        for header in [thread_state.get("batch_header")]
+    }
 
-    aggregated_results: dict[str, Any] = {
+    aggregated: dict[str, Any] = {
         "id_map": {},
         "failed_lines": [],
         "failed_writes": [],
-        "error_summary": None,
     }
+    consecutive_failures = 0
     for future in concurrent.futures.as_completed(future_to_batch_size):
         if rpc_thread.abort_flag:
             break
         try:
             result = future.result()
-            # Aggregate all results from the worker
-            aggregated_results["id_map"].update(result.get("id_map", {}))
+            is_total_failure = not result.get("id_map") and (
+                result.get("failed_lines") or result.get("failed_writes")
+            )
+            if is_total_failure:
+                consecutive_failures += 1
+                if consecutive_failures >= 3:
+                    log.error(
+                        "Aborting import: Multiple consecutive batches have failed."
+                    )
+                    rpc_thread.abort_flag = True
+            else:
+                consecutive_failures = 0
+
+            aggregated["id_map"].update(result.get("id_map", {}))
+            aggregated["failed_writes"].extend(result.get("failed_writes", []))
             failed_lines = result.get("failed_lines", [])
             if failed_lines:
-                aggregated_results["failed_lines"].extend(failed_lines)
+                aggregated["failed_lines"].extend(failed_lines)
                 if rpc_thread.writer:
                     rpc_thread.writer.writerows(failed_lines)
 
             error_summary = result.get("error_summary")
-            if error_summary:
-                aggregated_results["error_summary"] = error_summary
-                if len(error_summary) > 70:
-                    error_summary = error_summary[:67] + "..."
-
             rpc_thread.progress.update(
                 rpc_thread.task_id,
                 advance=future_to_batch_size[future],
-                last_error=f"Last Error: {error_summary}" if error_summary else "",
+                last_error=f"Last Error: {error_summary}"
+                if error_summary and len(error_summary) < 70
+                else "",
             )
         except Exception as e:
             log.error(f"A worker thread failed unexpectedly: {e}", exc_info=True)
             rpc_thread.abort_flag = True
 
     rpc_thread.executor.shutdown(wait=True)
-    return aggregated_results
+    return aggregated
 
 
 def _orchestrate_pass_1(
@@ -382,6 +494,8 @@ def _orchestrate_pass_1(
     fail_writer: Optional[Any],
     max_connection: int,
     batch_size: int,
+    o2m: bool,
+    split_by_cols: Optional[list[str]],
     force_create: bool = False,
 ) -> dict[str, Any]:
     """Orchestrates the multi-threaded Pass 1 (load/create).
@@ -406,8 +520,10 @@ def _orchestrate_pass_1(
         fail_writer (Optional[Any]): The CSV writer object for recording failures.
         max_connection (int): The number of parallel worker threads to use.
         batch_size (int): The number of records to process in each batch.
+        o2m (bool): Enables one-to-many batching logic.
         force_create (bool): If True, bypasses the `load` method and uses
             the `create` method directly. Used for fail mode.
+        split_by_cols: The column names to group records by to avoid concurrent updates.
 
     Returns:
         dict[str, Any]: A dictionary containing the results of the pass,
@@ -439,7 +555,9 @@ def _orchestrate_pass_1(
         "batch_header": pass_1_header,
         "force_create": force_create,
     }
-    pass_1_batches = _create_batches(pass_1_data, batch_size)
+    pass_1_batches = _create_batches(
+        pass_1_data, split_by_cols, pass_1_header, batch_size, o2m
+    )
     results = _run_threaded_pass(
         rpc_pass_1, _execute_load_batch, pass_1_batches, thread_state_1
     )
@@ -584,6 +702,8 @@ def import_data(
     batch_size: int = 10,
     skip: int = 0,
     force_create: bool = False,
+    o2m: bool = False,
+    split_by_cols: Optional[list[str]] = None,
 ) -> bool:
     """Orchestrates a robust, multi-threaded, two-pass import process.
 
@@ -619,6 +739,9 @@ def import_data(
         skip (int): The number of lines to skip at the top of the source file.
         force_create (bool): If True, bypasses the `load` method and uses
             the `create` method directly. Used for fail mode.
+        o2m (bool): Enables special handling for one-to-many imports where
+            child lines follow a parent record.
+        split_by_cols: The column names to group records by to avoid concurrent updates.
 
     Returns:
         bool: True if the entire import process completed without any
@@ -648,6 +771,8 @@ def import_data(
         "[progress.percentage]{task.percentage:>3.0f}%",
         "•",
         TextColumn("[green]{task.completed} of {task.total} records"),
+        "•",
+        TextColumn("[bold red]{task.fields[last_error]}"),
     )
 
     overall_success = False
@@ -664,12 +789,15 @@ def import_data(
             fail_writer,
             max_connection,
             batch_size,
+            o2m,
+            force_create,
+            split_by_cols,
         )
         if not pass_1_results.get("success"):
             return False
 
         if not _deferred:
-            return True  # Successful single-pass import
+            return True
 
         overall_success = _orchestrate_pass_2(
             progress,
