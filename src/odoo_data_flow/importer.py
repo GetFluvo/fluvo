@@ -23,6 +23,16 @@ from .lib.internal.ui import _show_error_panel
 from .logging_config import log
 
 
+def _count_lines(filepath: str) -> int:
+    """Counts the number of lines in a file, returning 0 if it doesn't exist."""
+    try:
+        # This method streams the file without loading it all into memory.
+        with open(filepath) as f:
+            return sum(1 for _ in f)
+    except FileNotFoundError:
+        return 0
+
+
 def _get_fail_filename(model: str, is_fail_run: bool) -> str:
     """Generates a standardized filename for failed records.
 
@@ -110,7 +120,12 @@ def _orchestrate_import(
     file_to_process = filename
     if fail:
         fail_path = Path(filename).parent / _get_fail_filename(model, False)
-        if not fail_path.exists() or fail_path.stat().st_size <= 50:
+
+        # Performant Check: Count lines only once and store the result.
+        line_count = _count_lines(str(fail_path))
+
+        # A file with 1 line (the header) or less has no data records to process.
+        if line_count <= 1:
             Console().print(
                 Panel(
                     f"No records to retry in '{fail_path}'.",
@@ -118,8 +133,14 @@ def _orchestrate_import(
                 )
             )
             return
+
+        # New Feature: Log the number of records being recovered.
+        record_count = line_count - 1
+        log.info(
+            f"Running in --fail mode. Attempting to recover {record_count} "
+            f"records from: {fail_path}"
+        )
         file_to_process = str(fail_path)
-        log.info(f"Running in --fail mode from: {file_to_process}")
 
     import_plan: dict[str, Any] = {}
     if not no_preflight_checks:
@@ -256,7 +277,8 @@ def run_import(
         encoding (str): The file encoding of the source file.
         o2m (bool): If True, enables special handling for one-to-many file
             formats where child records follow their parent on subsequent lines.
-        groupby (Optional[str]): A comma-separated string of columns to group records by.
+        groupby (Optional[str]): A comma-separated string of columns to
+            group records by.
     """
     log.info("Starting data import process from file...")
 

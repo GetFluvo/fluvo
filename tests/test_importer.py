@@ -90,3 +90,44 @@ class TestRunImport:
             mock_console_class.return_value.print.assert_called_once()
 
         mock_import_data.assert_not_called()
+
+    @patch("odoo_data_flow.importer.log")
+    @patch("ast.literal_eval", return_value={})
+    @patch("odoo_data_flow.importer._run_preflight_checks", return_value=True)
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    def test_fail_mode_with_records_logs_count_and_proceeds(
+        self,
+        mock_import_data: MagicMock,
+        mock_preflight_checks: MagicMock,  # Argument for the new patch
+        mock_eval: MagicMock,
+        mock_log: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Tests that fail mode with records logs the count and continues."""
+        source_file = tmp_path / "res_partner.csv"
+        source_file.touch()
+
+        fail_file = tmp_path / "res_partner_fail.csv"
+        # Simulate a file with a header and 5 data rows
+        fail_file.write_text("id,name\n1,a\n2,b\n3,c\n4,d\n5,e\n")
+        record_count = 5
+
+        run_import(
+            config="dummy.conf",
+            filename=str(source_file),
+            model="res.partner",
+            fail=True,
+        )
+
+        # Assert the new log message was generated
+        expected_log = (
+            f"Running in --fail mode. Attempting to recover {record_count} "
+            f"records from: {fail_file}"
+        )
+        mock_log.info.assert_any_call(expected_log)
+
+        # Assert that our mocked pre-flight check was called
+        mock_preflight_checks.assert_called_once()
+
+        # Assert the import process continued as expected
+        mock_import_data.assert_called_once()

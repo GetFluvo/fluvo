@@ -70,18 +70,24 @@ def language_check(
     headless: bool,
     **kwargs: Any,
 ) -> bool:
-    """Pre-flight check to verify that all required languages are installed.
+    """Pre-flight check to verify that all required languages are installed."""
+    if preflight_mode == PreflightMode.FAIL_MODE:
+        log.debug("Skipping language pre-flight check in --fail mode.")
+        return True
 
-    Scans the 'lang' column for `res.partner` and `res.users` imports.
-    """
     if model not in ("res.partner", "res.users"):
         return True
 
     log.info("Running pre-flight check: Verifying required languages...")
 
     try:
+        # FIX 2: Add `truncate_ragged_lines` to handle malformed CSV files.
         required_languages = (
-            pl.read_csv(filename, separator=kwargs.get("separator", ";"))
+            pl.read_csv(
+                filename,
+                separator=kwargs.get("separator", ";"),
+                truncate_ragged_lines=True,
+            )
             .get_column("lang")
             .unique()
             .drop_nulls()
@@ -105,29 +111,22 @@ def language_check(
     if not missing_languages:
         log.info("All required languages are installed.")
         return True
-    if preflight_mode == PreflightMode.FAIL_MODE:
-        log.warning(
-            f"Fail mode: Missing languages detected "
-            f"({', '.join(sorted(list(missing_languages)))}). "
-            f"Language installation will be skipped. Proceeding with import, "
-            f"but errors may occur."
+
+    # This part of the logic now only runs in NORMAL mode.
+    console = Console(stderr=True, style="bold yellow")
+    message = (
+        "The following required languages are not installed in the target "
+        f"database:\n\n"
+        f"[bold red]{', '.join(sorted(list(missing_languages)))}[/bold red]"
+        f"\n\nThis is likely to cause the import to fail."
+    )
+    console.print(
+        Panel(
+            message,
+            title="Missing Languages Detected",
+            border_style="yellow",
         )
-        return True  # Allow import to continue in fail mode
-    else:  # NORMAL Mode
-        console = Console(stderr=True, style="bold yellow")
-        message = (
-            "The following required languages are not installed in the target "
-            f"database:\n\n"
-            f"[bold red]{', '.join(sorted(list(missing_languages)))}[/bold red]"
-            f"\n\nThis is likely to cause the import to fail."
-        )
-        console.print(
-            Panel(
-                message,
-                title="Missing Languages Detected",
-                border_style="yellow",
-            )
-        )
+    )
 
     if headless:
         log.info("--headless mode detected. Auto-confirming language installation.")
@@ -282,13 +281,18 @@ def field_existence_check(
     if not odoo_fields:
         return False
 
+    # Step 1: Validate that all columns in the CSV exist on the Odoo model.
+    # This check is crucial and should run in both NORMAL and FAIL modes.
     if not _validate_header(csv_header, odoo_fields, model):
         return False
 
-    if not _detect_and_plan_deferrals(
-        csv_header, odoo_fields, model, import_plan, kwargs
-    ):
-        return False
+    # Step 2: Detect deferrable fields and plan a two-pass strategy.
+    # This should ONLY run in NORMAL mode, as fail runs are always single-pass.
+    if preflight_mode == PreflightMode.NORMAL:
+        if not _detect_and_plan_deferrals(
+            csv_header, odoo_fields, model, import_plan, kwargs
+        ):
+            return False
 
     log.info("Pre-flight Check Successful: All columns are valid fields on the model.")
     return True

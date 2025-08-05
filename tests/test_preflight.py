@@ -249,32 +249,26 @@ class TestLanguageCheck:
         assert result is True
         mock_confirm.assert_not_called()
         mock_installer.assert_called_once_with("dummy.conf", ["fr_FR"])
+        # In tests/test_preflight.py
 
-    @patch("odoo_data_flow.lib.preflight.log.warning")
-    @patch("odoo_data_flow.lib.preflight.Confirm.ask")  # Ensure this is not called
-    @patch(
-        "odoo_data_flow.lib.actions.language_installer.run_language_installation"
-    )  # Ensure this is not called
-    def test_language_check_fail_mode_skips_install(
+    # Replace the old test_language_check_fail_mode_skips_install with this one.
+    @patch("odoo_data_flow.lib.preflight.log.debug")  # Note: patching log.debug now
+    @patch("odoo_data_flow.lib.preflight.Confirm.ask")
+    @patch("odoo_data_flow.lib.actions.language_installer.run_language_installation")
+    def test_language_check_fail_mode_skips_entire_check(
         self,
         mock_install: MagicMock,
         mock_confirm: MagicMock,
-        mock_log_warning: MagicMock,
+        mock_log_debug: MagicMock,  # Renamed from mock_log_warning
         mock_polars_read_csv: MagicMock,
         mock_conf_lib: MagicMock,
     ) -> None:
-        """Test no language check in fail mode.
+        """Test the skipped language check in fail mode.
 
-        Tests that in FAIL_MODE, language installation is skipped
-        and the import is allowed to continue.
+        Tests that in FAIL_MODE, the language check is skipped entirely,
+        preventing file reads or Odoo calls.
         """
-        mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value = [  # noqa E501
-            "fr_FR"
-        ]
-        mock_conf_lib.return_value.get_model.return_value.search_read.return_value = [
-            {"code": "en_US"}
-        ]
-
+        # ACT: Run the check in fail mode.
         result = preflight.language_check(
             preflight_mode=PreflightMode.FAIL_MODE,
             model="res.partner",
@@ -283,13 +277,19 @@ class TestLanguageCheck:
             headless=False,
         )
 
-        assert result is True  # Should allow import to continue
-        mock_log_warning.assert_called_once()
-        assert (
-            "Fail mode: Missing languages detected" in mock_log_warning.call_args[0][0]
+        # ASSERT: Check for the new, correct behavior.
+        assert result is True, "The check should return True in fail mode"
+
+        # 1. Assert that the correct debug message was logged.
+        mock_log_debug.assert_called_once_with(
+            "Skipping language pre-flight check in --fail mode."
         )
-        mock_confirm.assert_not_called()
+
+        # 2. Assert that the function exited before doing any real work.
+        mock_polars_read_csv.assert_not_called()
+        mock_conf_lib.assert_not_called()
         mock_install.assert_not_called()
+        mock_confirm.assert_not_called()
 
 
 class TestFieldExistenceCheck:
