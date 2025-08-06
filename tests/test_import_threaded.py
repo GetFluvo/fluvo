@@ -1,14 +1,17 @@
 """Tests for the refactored, low-level, multi-threaded import logic."""
 
-from unittest.mock import MagicMock, patch
-
-from rich.progress import Progress
-
+from unittest.mock import MagicMock, patch, ANY
 from odoo_data_flow.import_threaded import (
     _create_batches,
-    _orchestrate_pass_2,
     import_data,
+    _orchestrate_pass_2,
+    _format_odoo_error,
+    _read_data_file,
+    _setup_fail_file,
+    _create_batch_individually,
 )
+from rich.progress import Progress
+import pytest
 
 
 class TestImportDataRefactored:
@@ -201,17 +204,15 @@ class TestPass2Batching:
         # Assert
         # We expect two separate write calls because the vals are different
         assert mock_run_pass.call_count == 1
-
+        
         # Get the batches that were passed to the runner
         call_args = mock_run_pass.call_args[0]
-        batches = list(call_args[2])  # The batches iterable
-
-        assert len(batches) == 3  # Three unique sets of values to write
+        batches = list(call_args[2]) # The batches iterable
+        
+        assert len(batches) == 3 # Three unique sets of values to write
 
         # Convert batches to a more easily searchable dict
-        batch_dict = {
-            frozenset(vals.items()): ids for (ids, vals) in [b[1] for b in batches]
-        }
+        batch_dict = {frozenset(vals.items()): ids for (ids, vals) in [b[1] for b in batches]}
 
         # Check group 1: parent=p1, user=u1
         group1_key = frozenset({"parent_id": 101, "user_id": 201}.items())
@@ -234,7 +235,7 @@ class TestPass2Batching:
         # Arrange
         mock_fail_writer = MagicMock()
         mock_model = MagicMock()
-
+        
         header = ["id", "name", "parent_id"]
         all_data = [["c1", "C1", "p1"], ["c2", "C2", "p1"]]
         id_map = {"c1": 1, "c2": 2, "p1": 101}
@@ -247,7 +248,7 @@ class TestPass2Batching:
                 (2, {"parent_id": 101}, "Access Error"),
             ],
         }
-        mock_run_pass.return_value = (failed_write_result, False)  # result, aborted
+        mock_run_pass.return_value = (failed_write_result, False) # result, aborted
 
         # Act
         with Progress() as progress:
@@ -261,17 +262,71 @@ class TestPass2Batching:
                 id_map,
                 deferred_fields,
                 mock_fail_writer,
-                MagicMock(),  # fail_handle
+                MagicMock(), # fail_handle
                 max_connection=1,
                 batch_size=10,
             )
 
         # Assert
-        assert result is False  # The orchestration should report failure
+        assert result is False # The orchestration should report failure
         mock_fail_writer.writerows.assert_called_once()
-
+        
         # Check that the rows written to the fail file are correct
         failed_rows = mock_fail_writer.writerows.call_args[0][0]
         assert len(failed_rows) == 2
         assert failed_rows[0] == ["c1", "C1", "p1", "Access Error"]
         assert failed_rows[1] == ["c2", "C2", "p1", "Access Error"]
+
+
+class TestImportThreadedEdgeCases:
+    """Tests for edge cases and error handling in import_threaded.py."""
+
+    def test_format_odoo_error_fallback(self) -> None:
+        """Test that _format_odoo_error handles non-dictionary strings."""
+        error_string = "A simple error message"
+        formatted = _format_odoo_error(error_string)
+        assert formatted == "A simple error message"
+
+    def test_read_data_file_not_found(self) -> None:
+        """Test that _read_data_file handles a FileNotFoundError."""
+        header, data = _read_data_file("non_existent_file.csv", ",", "utf-8", 0)
+        assert header == []
+        assert data == []
+
+    @patch("builtins.open", side_effect=ValueError("bad file"))
+    def test_read_data_file_general_exception(self, mock_open: MagicMock) -> None:
+        """Test that _read_data_file handles a general exception."""
+        with pytest.raises(ValueError):
+            _read_data_file("any.csv", ",", "utf-8", 0)
+
+    @patch("builtins.open", side_effect=OSError("Permission denied"))
+    def test_setup_fail_file_os_error(self, mock_open: MagicMock) -> None:
+        """Test that _setup_fail_file handles an OSError."""
+        writer, handle = _setup_fail_file("fail.csv", ["id"], ",", "utf-8")
+        assert writer is None
+        assert handle is None
+
+    def test_create_batch_individually_malformed_row(self) -> None:
+        """Test that _create_batch_individually handles rows with incorrect column counts."""
+        mock_model = MagicMock()
+        batch_header = ["id", "name"]
+        # This row has only one column, but the header has two
+        batch_lines = [["record1"]]
+        
+        result = _create_batch_individually(mock_model, batch_lines, batch_header, 0)
+        
+        assert len(result["failed_lines"]) == 1
+        assert "malformed" in result["failed_lines"][0][-1]
+        assert result["error_summary"] == "Malformed CSV row detected"
+
+    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config", side_effect=Exception("Conn fail"))
+    def test_import_data_connection_failure(self, mock_get_conn: MagicMock) -> None:
+        """Test that import_data handles a connection failure gracefully."""
+        # Arrange
+        with patch("odoo_data_flow.import_threaded._read_data_file", return_value=(["id"], [["a"]])):
+            # Act
+            success, count = import_data("dummy.conf", "res.partner", "id", "dummy.csv")
+            
+            # Assert
+            assert success is False
+            assert count == 0
