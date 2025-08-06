@@ -443,62 +443,47 @@ def _execute_load_batch(
 
 def _execute_write_batch(
     thread_state: dict[str, Any],
-    batch_writes: list[tuple[int, dict[str, Any]]],
+    batch_writes: tuple[list[int], dict[str, Any]],
     batch_number: int,
 ) -> dict[str, Any]:
-    """Executes a batch of write operations.
+    """Executes a batch of write operations for a group of records.
 
-    This is the core worker function for Pass 2 of a deferred import. It
-    iterates through a list of pre-prepared write payloads and calls the
-    standard Odoo `write` method for each record. Any exceptions during
-    the write are caught and collected for reporting.
+    This is the core worker function for Pass 2. It takes a list of database
+    IDs and a single dictionary of values and updates all records in one RPC call.
 
     Args:
         thread_state (dict[str, Any]): Shared state from the orchestrator,
             containing the Odoo model object.
-        batch_writes (list[tuple[int, dict[str, Any]]]): A list of write
-            payloads for this batch. Each item is a tuple of
-            `(database_id, {values_to_write})`.
+        batch_writes (tuple[list[int], dict[str, Any]]): A tuple containing
+            the list of database IDs and the dictionary of values to write.
         batch_number (int): The identifier for this batch, used for logging.
 
     Returns:
         dict[str, Any]: A dictionary containing the results of the batch,
-        with a `failed_writes` key. The value is a list of tuples for
-        each failed write, including the original data and the error message.
+        with a `failed_writes` key if the operation failed.
     """
     model = thread_state["model"]
-    failed_writes = []
-    successful_writes = 0
-    error_summary: Optional[str] = None
-    for db_id, vals in batch_writes:
-        try:
-            recordset = model.browse([db_id]).sudo()
-            # Add a check to ensure we got a usable object from Odoo
-            if not hasattr(recordset, "write"):
-                raise TypeError(
-                    f"Odoo's browse method returned an invalid object of type "
-                    f"'{type(recordset).__name__}' for ID {db_id}. Expected a "
-                    f"recordset object. This may indicate an Odoo-side issue."
-                )
-            recordset.write(vals)
-            successful_writes += 1
-        except Exception as e:
-            error_message = str(e).replace("\n", " | ")
-            failed_writes.append((db_id, vals, error_message))
-            if error_summary is None:
-                error_summary = error_message
-    return {
-        "failed_writes": failed_writes,
-        "error_summary": error_summary,
-        "successful_writes": successful_writes,
-        "success": not failed_writes,  # Success is true only if no writes failed
-    }
+    ids, vals = batch_writes
+    try:
+        # The core of the fix: use model.write(ids, vals) for batch updates.
+        model.write(ids, vals)
+        return {"failed_writes": [], "successful_writes": len(ids), "success": True}
+    except Exception as e:
+        error_message = str(e).replace("\n", " | ")
+        # If the batch fails, all IDs in it are considered failed.
+        failed_writes = [(db_id, vals, error_message) for db_id in ids]
+        return {
+            "failed_writes": failed_writes,
+            "error_summary": error_message,
+            "successful_writes": 0,
+            "success": False,
+        }
 
 
 def _run_threaded_pass(  # noqa: C901
     rpc_thread: RPCThreadImport,
     target_func: Any,
-    batches: Iterable[tuple[int, list[Any]]],
+    batches: Iterable[tuple[int, Any]],
     thread_state: dict[str, Any],
 ) -> tuple[dict[str, Any], bool]:
     """Orchestrates a multi-threaded pass and aggregates results.
@@ -513,9 +498,9 @@ def _run_threaded_pass(  # noqa: C901
             the thread pool and progress bar.
         target_func (Any): The worker function to be executed in each thread
             (e.g., `_execute_load_batch`).
-        batches (Iterable[tuple[int, list[Any]]]): An iterable that yields
+        batches (Iterable[tuple[int, Any]]): An iterable that yields
             batches of data, where each item is a tuple of `(batch_number,
-            batch_data)`.
+            batch_data)`. The type of `batch_data` can vary between passes.
         thread_state (dict[str, Any]): A dictionary of shared state to be
             passed to each worker function.
 
@@ -524,16 +509,17 @@ def _run_threaded_pass(  # noqa: C901
         the aggregated results from all
         worker threads, such as `id_map` and `failed_lines`.
     """
+    # This logic is brittle but preserved to minimize unrelated changes.
+    # It dynamically constructs arguments based on the target function name.
     futures = {
         rpc_thread.spawn_thread(
             target_func,
             [thread_state, data, num]
             if target_func.__name__ == "_execute_write_batch"
-            else [thread_state, data, header, num],
+            else [thread_state, data, thread_state.get("batch_header"), num],
         )
         for num, data in batches
         if not rpc_thread.abort_flag
-        for header in [thread_state.get("batch_header")]
     }
 
     aggregated: dict[str, Any] = {
@@ -731,9 +717,8 @@ def _orchestrate_pass_2(
 
     This function manages the second pass of a deferred import. It prepares
     the data for updating relational fields by using the ID map from Pass 1.
-    It then runs the `write` operations in parallel and handles any
-    failures by reconstructing the original source records and logging them
-    to the fail file.
+    It then groups records that have the exact same update payload and runs
+    the `write` operations in parallel batches for maximum efficiency.
 
     Args:
         progress (Progress): The rich Progress instance for updating the UI.
@@ -762,7 +747,26 @@ def _orchestrate_pass_2(
         log.info("No valid relations found to update in Pass 2. Import complete.")
         return True
 
-    pass_2_batches = list(enumerate(batch(pass_2_data_to_write, batch_size), 1))
+    # --- Grouping Logic ---
+    from collections import defaultdict
+
+    grouped_writes = defaultdict(list)
+    for db_id, vals in pass_2_data_to_write:
+        # The key must be hashable, so we convert the dict to a frozenset of items.
+        vals_key = frozenset(vals.items())
+        grouped_writes[vals_key].append(db_id)
+
+    # --- Batching Logic ---
+    pass_2_batches = []
+    for vals_key, ids in grouped_writes.items():
+        vals = dict(vals_key)
+        # Chunk the list of IDs into sub-batches of the desired size.
+        for id_chunk in batch(ids, batch_size):
+            pass_2_batches.append((list(id_chunk), vals))
+
+    if not pass_2_batches:
+        return True
+
     num_batches = len(pass_2_batches)
     pass_2_task = progress.add_task(
         f"Pass 2/2: Updating [bold]{model_name}[/bold] relations",
@@ -774,9 +778,13 @@ def _orchestrate_pass_2(
     )
     thread_state_2 = {"model": model_obj, "progress": progress}
     pass_2_results, aborted = _run_threaded_pass(
-        rpc_pass_2, _execute_write_batch, pass_2_batches, thread_state_2
+        rpc_pass_2,
+        _execute_write_batch,
+        list(enumerate(pass_2_batches, 1)),
+        thread_state_2,
     )
-    failed_writes = pass_2_results["failed_writes"]
+
+    failed_writes = pass_2_results.get("failed_writes", [])
     if fail_writer and failed_writes:
         log.warning("Writing failed Pass 2 records to fail file...")
         reverse_id_map = {v: k for k, v in id_map.items()}
@@ -788,7 +796,8 @@ def _orchestrate_pass_2(
                 original_row = list(source_data_map[source_id])
                 original_row.append(error_message)
                 failed_lines.append(original_row)
-        fail_writer.writerows(failed_lines)
+        if failed_lines:
+            fail_writer.writerows(failed_lines)
 
     # Pass 2 is successful ONLY if not aborted AND no writes failed.
     return not aborted and not failed_writes

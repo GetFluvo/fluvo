@@ -273,11 +273,8 @@ class TestRunImport:
         # Pass 1: `load` is called on data without the parent_id column
         mock_model.load.return_value = {"ids": [10, 20], "messages": []}
 
-        # Pass 2: `browse` will be called, and it should return an object
-        # that has a `write` method.
-        mock_recordset = MagicMock()
-        mock_model.browse.return_value.sudo.return_value = mock_recordset
-
+        # Pass 2: The `write` method should be called directly on the model
+        # with the appropriate IDs and values.
         mock_get_conn.return_value.get_model.return_value = mock_model
 
         # 2. ACT
@@ -287,12 +284,10 @@ class TestRunImport:
             unique_id_field="id",
             file_csv=str(source_file),
             deferred_fields=["parent_id"],
+            separator=";",
         )
 
         # 3. ASSERT
-        # Not only was the process successful, but the correct Odoo methods were called.
         assert success is True
-        # Assert Pass 2 browsed for the correct record (the child)
-        mock_model.browse.assert_called_once_with([20])
-        # Assert the write call on that record had the correct resolved parent ID
-        mock_recordset.write.assert_called_once_with({"parent_id": 10})
+        # Assert Pass 2 called `write` with the child ID and resolved parent ID
+        mock_model.write.assert_called_once_with([20], {"parent_id": 10})
