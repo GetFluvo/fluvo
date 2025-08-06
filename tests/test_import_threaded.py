@@ -23,6 +23,7 @@ class TestImportDataRefactored:
         mock_run_pass.return_value = {
             "id_map": {"xml_a": 101},
             "failed_lines": [],
+            "success": True,
         }
         mock_get_conn.return_value.get_model.return_value = MagicMock()
 
@@ -58,8 +59,12 @@ class TestImportDataRefactored:
             {
                 "id_map": {"xml_a": 101, "xml_b": 102},
                 "failed_lines": [],
+                "success": True,
             },  # Pass 1
-            {"failed_writes": []},  # Pass 2
+            {
+                "failed_writes": [],
+                "success": True,
+            },  # Pass 2
         ]
         mock_get_conn.return_value.get_model.return_value = MagicMock()
 

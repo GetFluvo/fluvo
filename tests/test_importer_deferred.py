@@ -67,6 +67,7 @@ class TestImportDeferred:
         mock_model = MagicMock()
         # The new 'vanilla' implementation uses 'load', not 'batch_create'
         mock_model.load.side_effect = Exception("Odoo connection lost")
+        mock_model.create.side_effect = Exception("Odoo still down")
         mock_conf_lib.get_connection_from_config.return_value.get_model.return_value = (
             mock_model
         )

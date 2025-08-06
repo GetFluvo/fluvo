@@ -225,6 +225,7 @@ def _orchestrate_import(
             Panel(
                 f"Import for [cyan]{model}[/cyan] finished successfully.",
                 title="[bold green]Import Complete[/bold green]",
+                border_style="green",
             )
         )
     else:
@@ -427,5 +428,6 @@ def run_import_deferred(
             "Import Failed",
             "The deferred import process failed. Check logs for details.",
         )
+        return False
 
     return success
