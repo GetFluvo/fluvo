@@ -36,16 +36,16 @@ def mock_show_error_panel() -> Generator[MagicMock, None, None]:
 class TestInternalHelpers:
     """Tests for internal helper functions in the preflight module."""
 
-    @patch("odoo_data_flow.lib.preflight.log.error")
+    @patch("odoo_data_flow.lib.preflight._show_error_panel")
     def test_get_installed_languages_connection_fails(
-        self, mock_log_error: MagicMock, mock_conf_lib: MagicMock
+        self, mock_show_error_panel: MagicMock, mock_conf_lib: MagicMock
     ) -> None:
         """Tests that _get_installed_languages handles a connection error."""
         mock_conf_lib.side_effect = Exception("Connection Error")
         result = preflight._get_installed_languages("dummy.conf")
-        assert result == set()
-        mock_log_error.assert_called_once()
-        assert "Could not fetch installed languages" in mock_log_error.call_args[0][0]
+        assert result is None
+        mock_show_error_panel.assert_called_once()
+        assert "Odoo Connection Error" in mock_show_error_panel.call_args[0][0]
 
 
 class TestLanguageCheck:

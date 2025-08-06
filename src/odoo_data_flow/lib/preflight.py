@@ -49,7 +49,7 @@ def connection_check(
         return False
 
 
-def _get_installed_languages(config_file: str) -> set[str]:
+def _get_installed_languages(config_file: str) -> Optional[set[str]]:
     """Connects to Odoo and returns the set of installed language codes."""
     try:
         connection = conf_lib.get_connection_from_config(config_file)
@@ -57,8 +57,20 @@ def _get_installed_languages(config_file: str) -> set[str]:
         installed_langs_data = lang_obj.search_read([("active", "=", True)], ["code"])
         return {lang["code"] for lang in installed_langs_data}
     except Exception as e:
-        log.error(f"Could not fetch installed languages from Odoo. Error: {e}")
-        return set()
+        error_message = str(e)
+        title = "Odoo Connection Error"
+        friendly_message = (
+            "Could not fetch installed languages from Odoo. This usually means "
+            "the connection details in your configuration file are incorrect.\n\n"
+            "Please verify the following:\n"
+            "  - [bold]hostname[/bold] is correct\n"
+            "  - [bold]database[/bold] name is correct\n"
+            "  - [bold]login[/bold] (username) is correct\n"
+            "  - [bold]password[/bold] is correct\n\n"
+            f"[bold]Original Error:[/bold] {error_message}"
+        )
+        _show_error_panel(title, friendly_message)
+        return None
 
 
 @register_check
@@ -106,6 +118,9 @@ def language_check(
         return True
 
     installed_languages = _get_installed_languages(config)
+    if installed_languages is None:
+        return False  # Connection failed, error already shown.
+
     missing_languages = set(required_languages) - installed_languages
 
     if not missing_languages:
