@@ -292,20 +292,24 @@ def field_existence_check(
     if not csv_header:
         return False
 
+    # FIX: Filter the header based on the ignore list BEFORE validation.
+    ignore_list = kwargs.get("ignore", [])
+    header_to_validate = [h for h in csv_header if h not in ignore_list]
+
     odoo_fields = _get_odoo_fields(config, model)
     if not odoo_fields:
         return False
 
     # Step 1: Validate that all columns in the CSV exist on the Odoo model.
     # This check is crucial and should run in both NORMAL and FAIL modes.
-    if not _validate_header(csv_header, odoo_fields, model):
+    if not _validate_header(header_to_validate, odoo_fields, model):
         return False
 
     # Step 2: Detect deferrable fields and plan a two-pass strategy.
     # This should ONLY run in NORMAL mode, as fail runs are always single-pass.
     if preflight_mode == PreflightMode.NORMAL:
         if not _detect_and_plan_deferrals(
-            csv_header, odoo_fields, model, import_plan, kwargs
+            header_to_validate, odoo_fields, model, import_plan, kwargs
         ):
             return False
 

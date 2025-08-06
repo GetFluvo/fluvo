@@ -497,3 +497,20 @@ class TestFieldExistenceCheck:
         # --- Assert ---
         # The check should pass because 'parent_id' is a valid field
         assert result is True
+
+    def test_field_check_respects_ignore_list(
+        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Tests that the check ignores columns in the ignore list."""
+        mock_polars_read_csv.return_value.columns = ["id", "name", "_ERROR_REASON"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {"id": {}, "name": {}}
+
+        result = preflight.field_existence_check(
+            preflight_mode=PreflightMode.FAIL_MODE,
+            model="res.partner",
+            filename="file.csv",
+            config="",
+            ignore=["_ERROR_REASON"],
+        )
+        assert result is True
