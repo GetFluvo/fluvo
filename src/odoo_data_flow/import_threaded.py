@@ -878,7 +878,20 @@ def import_data(
         connection = conf_lib.get_connection_from_config(config_file)
         model_obj = connection.get_model(model)
     except Exception as e:
-        log.error(f"Setup failed: {e}")
+        from .lib.internal.ui import _show_error_panel
+        error_message = str(e)
+        title = "Odoo Connection Error"
+        friendly_message = (
+            "Could not connect to Odoo. This usually means the connection "
+            "details in your configuration file are incorrect.\n\n"
+            "Please verify the following:\n"
+            "  - [bold]hostname[/bold] is correct\n"
+            "  - [bold]database[/bold] name is correct\n"
+            "  - [bold]login[/bold] (username) is correct\n"
+            "  - [bold]password[/bold] is correct\n\n"
+            f"[bold]Original Error:[/bold] {error_message}"
+        )
+        _show_error_panel(title, friendly_message)
         return False, 0
     fail_writer, fail_handle = _setup_fail_file(fail_file, header, separator, encoding)
     console = Console()

@@ -330,3 +330,18 @@ class TestImportThreadedEdgeCases:
             # Assert
             assert success is False
             assert count == 0
+
+    @patch("odoo_data_flow.lib.internal.ui._show_error_panel")
+    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config", side_effect=Exception("Conn fail"))
+    def test_import_data_connection_failure_shows_panel(self, mock_get_conn: MagicMock, mock_show_error: MagicMock) -> None:
+        """Test that import_data shows the error panel on connection failure."""
+        # Arrange
+        with patch("odoo_data_flow.import_threaded._read_data_file", return_value=(["id"], [["a"]])):
+            # Act
+            import_data("dummy.conf", "res.partner", "id", "dummy.csv")
+            
+            # Assert
+            mock_show_error.assert_called_once()
+            call_args, _ = mock_show_error.call_args
+            assert call_args[0] == "Odoo Connection Error"
+            assert "Could not connect to Odoo" in call_args[1]
