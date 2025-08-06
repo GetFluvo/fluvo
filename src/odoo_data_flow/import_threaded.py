@@ -142,9 +142,7 @@ def _setup_fail_file(
         fail_writer.writerow(header_to_write)
         return fail_writer, fail_handle
     except OSError as e:
-        log.error(
-            f"Could not open fail file for writing: {fail_file}. Error: {e}"
-        )
+        log.error(f"Could not open fail file for writing: {fail_file}. Error: {e}")
         return None, None
 
 
@@ -157,6 +155,16 @@ def _prepare_pass_2_data(
 ) -> list[tuple[int, dict[str, Any]]]:
     """Prepares the list of write operations for Pass 2."""
     pass_2_data_to_write = []
+
+    # FIX: Pre-calculate a map of deferred field names (e.g., 'parent_id')
+    # to their actual index in the header.
+    deferred_field_indices = {}
+    deferred_fields_set = set(deferred_fields)
+    for i, column_name in enumerate(header):
+        field_base_name = column_name.split("/")[0]
+        if field_base_name in deferred_fields_set:
+            deferred_field_indices[field_base_name] = i
+
     for row in all_data:
         source_id = row[unique_id_field_index]
         db_id = id_map.get(source_id)
@@ -164,16 +172,19 @@ def _prepare_pass_2_data(
             continue
 
         update_vals = {}
-        for field in deferred_fields:
-            if field in header:
-                field_index = header.index(field)
+        # Use the pre-calculated map to find the values to write.
+        for field_name, field_index in deferred_field_indices.items():
+            if field_index < len(row):
                 related_source_id = row[field_index]
-                related_db_id = id_map.get(related_source_id)
-                if related_source_id and related_db_id:
-                    update_vals[field] = related_db_id
+                if related_source_id:  # Ensure there is a value to look up
+                    related_db_id = id_map.get(related_source_id)
+                    if related_db_id:
+                        update_vals[field_name] = related_db_id
+
         if update_vals:
             pass_2_data_to_write.append((db_id, update_vals))
-    return pass_2_data_to_write
+
+    return pass_2_data_to_write  # This fixed it
 
 
 def _recursive_create_batches(  # noqa: C901
@@ -270,9 +281,7 @@ def _create_batches(
     if not data:
         return
     for i, (_, batch_data) in enumerate(
-        _recursive_create_batches(
-            data, split_by_cols or [], header, batch_size, o2m
-        ),
+        _recursive_create_batches(data, split_by_cols or [], header, batch_size, o2m),
         start=1,
     ):
         yield i, batch_data
@@ -367,9 +376,7 @@ def _execute_load_batch(
         progress.console.print(
             f"Batch {batch_number}: Fail mode active, using `create` method."
         )
-        return _create_batch_individually(
-            model, batch_lines, batch_header, uid_index
-        )
+        return _create_batch_individually(model, batch_lines, batch_header, uid_index)
 
     try:
         log.debug(f"Attempting `load` for batch {batch_number}...")
@@ -382,10 +389,7 @@ def _execute_load_batch(
         if len(created_ids) != len(batch_lines):
             raise ValueError("Record count mismatch.")
 
-        id_map = {
-            line[uid_index]: created_ids[i]
-            for i, line in enumerate(batch_lines)
-        }
+        id_map = {line[uid_index]: created_ids[i] for i, line in enumerate(batch_lines)}
         return {"id_map": id_map, "failed_lines": []}
     except Exception as e:
         clean_error = str(e).strip().replace("\n", " ")
@@ -394,9 +398,7 @@ def _execute_load_batch(
             f"[yellow]WARN:[/] Batch {batch_number} failed `load` ('{clean_error}'). "
             f"Falling back to `create`."
         )
-        return _create_batch_individually(
-            model, batch_lines, batch_header, uid_index
-        )
+        return _create_batch_individually(model, batch_lines, batch_header, uid_index)
 
 
 def _execute_write_batch(
@@ -469,7 +471,8 @@ def _run_threaded_pass(  # noqa: C901
             passed to each worker function.
 
     Returns:
-        tuple[dict[str, Any], bool]: A typle and a dictionary containing the aggregated results from all
+        tuple[dict[str, Any], bool]: A typle and a dictionary containing
+        the aggregated results from all
         worker threads, such as `id_map` and `failed_lines`.
     """
     futures = {
@@ -491,9 +494,7 @@ def _run_threaded_pass(  # noqa: C901
     }
     consecutive_failures = 0
     successful_batches = 0
-    original_description = rpc_thread.progress.tasks[
-        rpc_thread.task_id
-    ].description
+    original_description = rpc_thread.progress.tasks[rpc_thread.task_id].description
 
     try:
         for future in concurrent.futures.as_completed(futures):
@@ -502,8 +503,7 @@ def _run_threaded_pass(  # noqa: C901
             try:
                 result = future.result()
                 is_successful_batch = (
-                    result.get("id_map")
-                    or result.get("successful_writes", 0) > 0
+                    result.get("id_map") or result.get("successful_writes", 0) > 0
                 )
                 if is_successful_batch:
                     successful_batches += 1
@@ -512,14 +512,14 @@ def _run_threaded_pass(  # noqa: C901
                     consecutive_failures += 1
                     if consecutive_failures >= 50:
                         log.error(
-                            f"Aborting import: Multiple ({consecutive_failures}) consecutive batches have failed."
+                            f"Aborting import: Multiple "
+                            f"({consecutive_failures}) consecutive batches have"
+                            f" failed."
                         )
                         rpc_thread.abort_flag = True
 
                 aggregated["id_map"].update(result.get("id_map", {}))
-                aggregated["failed_writes"].extend(
-                    result.get("failed_writes", [])
-                )
+                aggregated["failed_writes"].extend(result.get("failed_writes", []))
                 failed_lines = result.get("failed_lines", [])
                 if failed_lines:
                     aggregated["failed_lines"].extend(failed_lines)
@@ -536,25 +536,22 @@ def _run_threaded_pass(  # noqa: C901
                 rpc_thread.progress.update(rpc_thread.task_id, advance=1)
 
             except Exception as e:
-                log.error(
-                    f"A worker thread failed unexpectedly: {e}", exc_info=True
-                )
+                log.error(f"A worker thread failed unexpectedly: {e}", exc_info=True)
                 rpc_thread.abort_flag = True
                 rpc_thread.progress.console.print(
                     f"[bold red]Worker Failed: {e}[/bold red]"
                 )
                 rpc_thread.progress.update(
                     rpc_thread.task_id,
-                    description="[bold red]FAIL:[/bold red] Worker failed unexpectedly.",
+                    description="[bold red]FAIL:[/bold red] "
+                    "Worker failed unexpectedly.",
                     refresh=True,
                 )
                 raise
     except KeyboardInterrupt:
         log.warning("Ctrl+C detected! Aborting import gracefully...")
         rpc_thread.abort_flag = True
-        rpc_thread.progress.console.print(
-            "[bold yellow]Aborted by user[/bold yellow]"
-        )
+        rpc_thread.progress.console.print("[bold yellow]Aborted by user[/bold yellow]")
         rpc_thread.progress.update(
             rpc_thread.task_id,
             description="[bold yellow]Aborted by user[/bold yellow]",
@@ -624,9 +621,7 @@ def _orchestrate_pass_1(
             including the `id_map` ({source_id: db_id}), a list of any
             `failed_lines`, and a `success` boolean flag.
     """
-    rpc_pass_1 = RPCThreadImport(
-        max_connection, progress, TaskID(0), fail_writer
-    )
+    rpc_pass_1 = RPCThreadImport(max_connection, progress, TaskID(0), fail_writer)
     pass_1_header, pass_1_data = _filter_ignored_columns(
         deferred_fields + ignore, header, all_data
     )
@@ -640,9 +635,7 @@ def _orchestrate_pass_1(
         return {"success": False}
 
     pass_1_batches = list(
-        _create_batches(
-            pass_1_data, split_by_cols, pass_1_header, batch_size, o2m
-        )
+        _create_batches(pass_1_data, split_by_cols, pass_1_header, batch_size, o2m)
     )
     num_batches = len(pass_1_batches)
     pass_1_task = progress.add_task(
@@ -712,9 +705,7 @@ def _orchestrate_pass_2(
     )
 
     if not pass_2_data_to_write:
-        log.info(
-            "No valid relations found to update in Pass 2. Import complete."
-        )
+        log.info("No valid relations found to update in Pass 2. Import complete.")
         return True
 
     pass_2_batches = list(enumerate(batch(pass_2_data_to_write, batch_size), 1))
@@ -724,9 +715,7 @@ def _orchestrate_pass_2(
         total=num_batches,
         last_error="",
     )
-    rpc_pass_2 = RPCThreadImport(
-        max_connection, progress, pass_2_task, fail_writer
-    )
+    rpc_pass_2 = RPCThreadImport(max_connection, progress, pass_2_task, fail_writer)
     thread_state_2 = {"model": model_obj, "progress": progress}
     pass_2_results, aborted = _run_threaded_pass(
         rpc_pass_2, _execute_write_batch, pass_2_batches, thread_state_2
@@ -831,9 +820,7 @@ def import_data(
     except Exception as e:
         log.error(f"Setup failed: {e}")
         return False, 0
-    fail_writer, fail_handle = _setup_fail_file(
-        fail_file, header, separator, encoding
-    )
+    fail_writer, fail_handle = _setup_fail_file(fail_file, header, separator, encoding)
     console = Console()
     progress = Progress(
         SpinnerColumn(),

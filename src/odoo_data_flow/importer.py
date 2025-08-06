@@ -27,8 +27,7 @@ from .logging_config import log
 def _count_lines(filepath: str) -> int:
     """Counts the number of lines in a file, returning 0 if it doesn't exist."""
     try:
-        # This method streams the file without loading it all into memory.
-        with open(filepath) as f:
+        with open(filepath, encoding="utf-8") as f:
             return sum(1 for _ in f)
     except FileNotFoundError:
         return 0
@@ -255,7 +254,7 @@ def run_import(
     context: str = "{'tracking_disable' : True}",
     encoding: str = "utf-8",
     o2m: bool = False,
-    groupby: Optional[str] = None,  # Only one argument for grouping
+    groupby: Optional[str] = None,
 ) -> None:
     """Main entry point for the import command.
 
@@ -361,9 +360,7 @@ def run_import_for_migration(
             writer.writerow(header)
             writer.writerows(data)
             tmp_path = tmp.name
-
         log.info(f"In-memory data written to temporary file: {tmp_path}")
-
         import_threaded.import_data(
             config_file=config,
             model=model,
@@ -416,7 +413,6 @@ def run_import_deferred(
         batch_size=200,
     )
     elapsed = time.time() - start_time
-
     console = Console()
     if success:
         log.info(
@@ -435,6 +431,4 @@ def run_import_deferred(
             "Import Failed",
             "The deferred import process failed. Check logs for details.",
         )
-        return False
-
     return success
