@@ -472,7 +472,7 @@ def _execute_write_batch(
     error_summary: Optional[str] = None
     for db_id, vals in batch_writes:
         try:
-            recordset = model.browse([db_id])
+            recordset = model.browse([db_id]).sudo()
             # Add a check to ensure we got a usable object from Odoo
             if not hasattr(recordset, "write"):
                 raise TypeError(

@@ -276,7 +276,7 @@ class TestRunImport:
         # Pass 2: `browse` will be called, and it should return an object
         # that has a `write` method.
         mock_recordset = MagicMock()
-        mock_model.browse.return_value = mock_recordset
+        mock_model.browse.return_value.sudo.return_value = mock_recordset
 
         mock_get_conn.return_value.get_model.return_value = mock_model
 
