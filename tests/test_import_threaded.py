@@ -2,7 +2,13 @@
 
 from unittest.mock import MagicMock, patch
 
-from odoo_data_flow.import_threaded import _create_batches, import_data
+from rich.progress import Progress
+
+from odoo_data_flow.import_threaded import (
+    _create_batches,
+    _orchestrate_pass_2,
+    import_data,
+)
 
 
 class TestImportDataRefactored:
@@ -145,3 +151,127 @@ class TestBatchingHelpers:
         assert batches[2][1] == [
             ["order3", "Order Three", "item_F"],
         ]
+
+
+class TestPass2Batching:
+    """Tests for the Pass 2 batching and writing logic."""
+
+    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    def test_pass_2_groups_writes_correctly(self, mock_run_pass: MagicMock) -> None:
+        """Verify that Pass 2 groups records by identical write values."""
+        # Arrange
+        mock_run_pass.return_value = ({}, False)  # Simulate a successful run
+        mock_model = MagicMock()
+        header = ["id", "name", "parent_id", "user_id"]
+        all_data = [
+            ["c1", "C1", "p1", "u1"],
+            ["c2", "C2", "p1", "u1"],
+            ["c3", "C3", "p2", "u1"],
+            ["c4", "C4", "p2", "u2"],
+        ]
+        id_map = {
+            "c1": 1,
+            "c2": 2,
+            "c3": 3,
+            "c4": 4,
+            "p1": 101,
+            "p2": 102,
+            "u1": 201,
+            "u2": 202,
+        }
+        deferred_fields = ["parent_id", "user_id"]
+
+        # Act
+        with Progress() as progress:
+            _orchestrate_pass_2(
+                progress,
+                mock_model,
+                "res.partner",
+                header,
+                all_data,
+                "id",
+                id_map,
+                deferred_fields,
+                None,
+                None,
+                max_connection=1,
+                batch_size=10,
+            )
+
+        # Assert
+        # We expect two separate write calls because the vals are different
+        assert mock_run_pass.call_count == 1
+
+        # Get the batches that were passed to the runner
+        call_args = mock_run_pass.call_args[0]
+        batches = list(call_args[2])  # The batches iterable
+
+        assert len(batches) == 3  # Three unique sets of values to write
+
+        # Convert batches to a more easily searchable dict
+        batch_dict = {
+            frozenset(vals.items()): ids for (ids, vals) in [b[1] for b in batches]
+        }
+
+        # Check group 1: parent=p1, user=u1
+        group1_key = frozenset({"parent_id": 101, "user_id": 201}.items())
+        assert group1_key in batch_dict
+        assert sorted(batch_dict[group1_key]) == [1, 2]
+
+        # Check group 2: parent=p2, user=u1
+        group2_key = frozenset({"parent_id": 102, "user_id": 201}.items())
+        assert group2_key in batch_dict
+        assert batch_dict[group2_key] == [3]
+
+        # Check group 3: parent=p2, user=u2
+        group3_key = frozenset({"parent_id": 102, "user_id": 202}.items())
+        assert group3_key in batch_dict
+        assert batch_dict[group3_key] == [4]
+
+    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    def test_pass_2_handles_failed_batch(self, mock_run_pass: MagicMock) -> None:
+        """Verify that a failed batch write in Pass 2 is handled correctly."""
+        # Arrange
+        mock_fail_writer = MagicMock()
+        mock_model = MagicMock()
+
+        header = ["id", "name", "parent_id"]
+        all_data = [["c1", "C1", "p1"], ["c2", "C2", "p1"]]
+        id_map = {"c1": 1, "c2": 2, "p1": 101}
+        deferred_fields = ["parent_id"]
+
+        # Simulate a failure from the threaded runner for this batch
+        failed_write_result = {
+            "failed_writes": [
+                (1, {"parent_id": 101}, "Access Error"),
+                (2, {"parent_id": 101}, "Access Error"),
+            ],
+        }
+        mock_run_pass.return_value = (failed_write_result, False)  # result, aborted
+
+        # Act
+        with Progress() as progress:
+            result = _orchestrate_pass_2(
+                progress,
+                mock_model,
+                "res.partner",
+                header,
+                all_data,
+                "id",
+                id_map,
+                deferred_fields,
+                mock_fail_writer,
+                MagicMock(),  # fail_handle
+                max_connection=1,
+                batch_size=10,
+            )
+
+        # Assert
+        assert result is False  # The orchestration should report failure
+        mock_fail_writer.writerows.assert_called_once()
+
+        # Check that the rows written to the fail file are correct
+        failed_rows = mock_fail_writer.writerows.call_args[0][0]
+        assert len(failed_rows) == 2
+        assert failed_rows[0] == ["c1", "C1", "p1", "Access Error"]
+        assert failed_rows[1] == ["c2", "C2", "p1", "Access Error"]

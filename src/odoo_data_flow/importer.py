@@ -206,8 +206,9 @@ def run_import(  # noqa: C901
     # Determine the import strategy to set the correct execution parameters.
 
     # A. Fail-mode runs must be processed one-by-one to ensure accuracy.
-    # B. Two-pass imports use fully batch for maximum perforamance on pass 1 the relational
-    #    updates in Pass 2 to ensure failures can be tracked correctly.
+    # B. Two-pass imports uses batches for maximum perforamance on pass 1.
+    #    The relational updates are done in batches in Pass 2 to ensure
+    #    optimal performance.
     # C. Single-pass imports can run fully batched for maximum performance.
     if fail:
         log.info("Single-record batching enabled for this import strategy.")
