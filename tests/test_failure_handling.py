@@ -39,6 +39,7 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
 
     mock_model = MagicMock()
     mock_model.load.side_effect = Exception("Generic batch error")
+    mock_model.browse.return_value.env.ref.return_value = None
 
     def create_side_effect(vals: dict[str, Any]) -> Any:
         if vals["id"] == "rec_02":
@@ -75,3 +76,62 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
         assert len(rows) == 2  # Header + one failed record
         assert rows[1][0] == "rec_02"
         assert "Validation Error" in rows[1][3]
+
+
+def test_create_fallback_handles_malformed_rows(tmp_path: Path) -> None:
+    """Test that the fallback handles malformed rows.
+
+    Tests that the create fallback is resilient to malformed CSV rows
+    that have fewer columns than the header.
+    """
+    # 1. ARRANGE
+    source_file = tmp_path / "source.csv"
+    fail_file = tmp_path / "source_fail.csv"
+    model_name = "res.partner"
+    header = ["id", "name", "value"]  # Expects 3 columns
+    source_data = [
+        ["rec_ok", "Good Record", "100"],
+        ["rec_bad", "Bad Record"],  # This row is malformed (only 2 columns)
+    ]
+    with open(source_file, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        writer.writerows(source_data)
+
+    mock_model = MagicMock()
+    mock_model.load.side_effect = Exception("Load fails, trigger fallback")
+    mock_model.browse.return_value.env.ref.return_value = (
+        None  # Ensure create is attempted
+    )
+
+    # 2. ACT
+    with patch(
+        "odoo_data_flow.import_threaded.conf_lib.get_connection_from_config"
+    ) as mock_get_conn:
+        mock_get_conn.return_value.get_model.return_value = mock_model
+        result, _ = import_threaded.import_data(
+            config_file="dummy.conf",
+            model=model_name,
+            unique_id_field="id",
+            file_csv=str(source_file),
+            fail_file=str(fail_file),
+            separator=",",
+        )
+
+    # 3. ASSERT
+    # The import should be considered a success since one record was processed
+    assert result is True
+    # The create method should only have been called for the one good record
+    mock_model.create.assert_called_once()
+    assert mock_model.create.call_args[0][0]["id"] == "rec_ok"
+
+    # The fail file should exist and contain the malformed row with the correct error
+    assert fail_file.exists()
+    with open(fail_file) as f:
+        reader = csv.reader(f, delimiter=",")
+        fail_content = list(reader)
+
+    assert len(fail_content) == 2  # Header + one failed row
+    failed_row = fail_content[1]
+    assert failed_row[0] == "rec_bad"
+    assert "Row has 2 columns, but header has 3" in failed_row[-1]

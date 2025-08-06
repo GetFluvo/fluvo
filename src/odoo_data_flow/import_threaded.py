@@ -296,12 +296,20 @@ class RPCThreadImport(RpcThread):
         progress: Progress,
         task_id: TaskID,
         writer: Optional[Any] = None,
+        fail_handle: Optional[TextIO] = None,
     ) -> None:
         super().__init__(max_connection)
-        self.progress, self.task_id, self.writer, self.abort_flag = (
+        (
+            self.progress,
+            self.task_id,
+            self.writer,
+            self.fail_handle,
+            self.abort_flag,
+        ) = (
             progress,
             task_id,
             writer,
+            fail_handle,
             False,
         )
 
@@ -316,11 +324,37 @@ def _create_batch_individually(
     id_map: dict[str, int] = {}
     failed_lines: list[list[Any]] = []
     error_summary = "Fell back to create"
+    header_len = len(batch_header)
+
     for line in batch_lines:
+        # --- Defensive check for malformed rows ---
+        if len(line) < header_len:
+            error_message = (
+                f"Row has {len(line)} columns, but header has {header_len}. "
+                "Skipping malformed row."
+            )
+            failed_lines.append([*list(line), error_message])
+            if "Fell back to create" in error_summary:
+                error_summary = "Malformed CSV row detected"
+            continue  # Skip to the next line
+
         source_id = line[uid_index]
-        vals = dict(zip(batch_header, line))
         try:
-            new_record = model.create(vals)
+            # 1. SEARCH BEFORE CREATE
+            existing_record = model.browse().env.ref(
+                f"__export__.{source_id}", raise_if_not_found=False
+            )
+
+            if existing_record:
+                id_map[source_id] = existing_record.id
+                continue
+
+            # 2. PREPARE FOR CREATE
+            vals = dict(zip(batch_header, line))
+            clean_vals = {k: v for k, v in vals.items() if "/" not in k}
+
+            # 3. CREATE
+            new_record = model.create(clean_vals)
             id_map[source_id] = new_record.id
         except Exception as create_error:
             error_message = str(create_error).replace("\n", " | ")
@@ -363,10 +397,9 @@ def _execute_load_batch(
         successful records) and `failed_lines` (a list of rows for
         records that failed the `create` fallback).
     """
-    # Retrieve progress object from the shared state
     model, context, progress = (
         thread_state["model"],
-        thread_state["context"],
+        thread_state.get("context", {"tracking_disable": True}),
         thread_state["progress"],
     )
     uid_index = thread_state["unique_id_field_index"]
@@ -376,7 +409,9 @@ def _execute_load_batch(
         progress.console.print(
             f"Batch {batch_number}: Fail mode active, using `create` method."
         )
-        return _create_batch_individually(model, batch_lines, batch_header, uid_index)
+        result = _create_batch_individually(model, batch_lines, batch_header, uid_index)
+        result["success"] = bool(result.get("id_map"))
+        return result
 
     try:
         log.debug(f"Attempting `load` for batch {batch_number}...")
@@ -390,7 +425,8 @@ def _execute_load_batch(
             raise ValueError("Record count mismatch.")
 
         id_map = {line[uid_index]: created_ids[i] for i, line in enumerate(batch_lines)}
-        return {"id_map": id_map, "failed_lines": []}
+        # This is the successful "happy path" for the `load` method.
+        return {"id_map": id_map, "failed_lines": [], "success": True}
     except Exception as e:
         clean_error = str(e).strip().replace("\n", " ")
         # Use the rich console to print warnings without breaking the layout
@@ -398,7 +434,11 @@ def _execute_load_batch(
             f"[yellow]WARN:[/] Batch {batch_number} failed `load` ('{clean_error}'). "
             f"Falling back to `create`."
         )
-        return _create_batch_individually(model, batch_lines, batch_header, uid_index)
+        # Fallback to create
+        result = _create_batch_individually(model, batch_lines, batch_header, uid_index)
+        # The batch is a success if at least one record was created in the fallback.
+        result["success"] = bool(result.get("id_map"))
+        return result
 
 
 def _execute_write_batch(
@@ -432,7 +472,15 @@ def _execute_write_batch(
     error_summary: Optional[str] = None
     for db_id, vals in batch_writes:
         try:
-            model.browse(db_id).write(vals)
+            recordset = model.browse([db_id])
+            # Add a check to ensure we got a usable object from Odoo
+            if not hasattr(recordset, "write"):
+                raise TypeError(
+                    f"Odoo's browse method returned an invalid object of type "
+                    f"'{type(recordset).__name__}' for ID {db_id}. Expected a "
+                    f"recordset object. This may indicate an Odoo-side issue."
+                )
+            recordset.write(vals)
             successful_writes += 1
         except Exception as e:
             error_message = str(e).replace("\n", " | ")
@@ -443,6 +491,7 @@ def _execute_write_batch(
         "failed_writes": failed_writes,
         "error_summary": error_summary,
         "successful_writes": successful_writes,
+        "success": not failed_writes,  # Success is true only if no writes failed
     }
 
 
@@ -498,13 +547,9 @@ def _run_threaded_pass(  # noqa: C901
 
     try:
         for future in concurrent.futures.as_completed(futures):
-            if rpc_thread.abort_flag:
-                break
             try:
                 result = future.result()
-                is_successful_batch = (
-                    result.get("id_map") or result.get("successful_writes", 0) > 0
-                )
+                is_successful_batch = result.get("success", False)
                 if is_successful_batch:
                     successful_batches += 1
                     consecutive_failures = 0
@@ -523,8 +568,9 @@ def _run_threaded_pass(  # noqa: C901
                 failed_lines = result.get("failed_lines", [])
                 if failed_lines:
                     aggregated["failed_lines"].extend(failed_lines)
-                    if rpc_thread.writer:
+                    if rpc_thread.writer and rpc_thread.fail_handle:
                         rpc_thread.writer.writerows(failed_lines)
+                        rpc_thread.fail_handle.flush()  # Force write to disk
 
                 error_summary = result.get("error_summary")
                 if error_summary:
@@ -548,6 +594,8 @@ def _run_threaded_pass(  # noqa: C901
                     refresh=True,
                 )
                 raise
+            if rpc_thread.abort_flag:
+                break
     except KeyboardInterrupt:
         log.warning("Ctrl+C detected! Aborting import gracefully...")
         rpc_thread.abort_flag = True
@@ -582,6 +630,7 @@ def _orchestrate_pass_1(
     ignore: list[str],
     context: dict[str, Any],
     fail_writer: Optional[Any],
+    fail_handle: Optional[TextIO],
     max_connection: int,
     batch_size: int,
     o2m: bool,
@@ -609,6 +658,7 @@ def _orchestrate_pass_1(
             by the user.
         context (dict[str, Any]): The context dictionary for the Odoo RPC call.
         fail_writer (Optional[Any]): The CSV writer object for recording failures.
+        fail_handle (Optional[TextIO]): The file handle for the fail file.
         max_connection (int): The number of parallel worker threads to use.
         batch_size (int): The number of records to process in each batch.
         o2m (bool): Enables one-to-many batching logic.
@@ -621,7 +671,9 @@ def _orchestrate_pass_1(
             including the `id_map` ({source_id: db_id}), a list of any
             `failed_lines`, and a `success` boolean flag.
     """
-    rpc_pass_1 = RPCThreadImport(max_connection, progress, TaskID(0), fail_writer)
+    rpc_pass_1 = RPCThreadImport(
+        max_connection, progress, TaskID(0), fail_writer, fail_handle
+    )
     pass_1_header, pass_1_data = _filter_ignored_columns(
         deferred_fields + ignore, header, all_data
     )
@@ -671,6 +723,7 @@ def _orchestrate_pass_2(
     id_map: dict[str, int],
     deferred_fields: list[str],
     fail_writer: Optional[Any],
+    fail_handle: Optional[TextIO],
     max_connection: int,
     batch_size: int,
 ) -> bool:
@@ -692,6 +745,7 @@ def _orchestrate_pass_2(
         id_map (dict[str, int]): The map of source IDs to database IDs from Pass 1.
         deferred_fields (list[str]): The list of fields to update in this pass.
         fail_writer (Optional[Any]): The CSV writer for the fail file.
+        fail_handle (Optional[TextIO]): The file handle for the fail file.
         max_connection (int): The number of parallel worker threads to use.
         batch_size (int): The number of records per write batch.
 
@@ -715,7 +769,9 @@ def _orchestrate_pass_2(
         total=num_batches,
         last_error="",
     )
-    rpc_pass_2 = RPCThreadImport(max_connection, progress, pass_2_task, fail_writer)
+    rpc_pass_2 = RPCThreadImport(
+        max_connection, progress, pass_2_task, fail_writer, fail_handle
+    )
     thread_state_2 = {"model": model_obj, "progress": progress}
     pass_2_results, aborted = _run_threaded_pass(
         rpc_pass_2, _execute_write_batch, pass_2_batches, thread_state_2
@@ -733,11 +789,6 @@ def _orchestrate_pass_2(
                 original_row.append(error_message)
                 failed_lines.append(original_row)
         fail_writer.writerows(failed_lines)
-
-    # --- ADD THIS DEBUGGING LINE ---
-    log.error(f"FINAL CHECK: aborted={aborted}, failed_writes={failed_writes}")
-    print(f"FINAL CHECK: aborted={aborted}, failed_writes={failed_writes}")
-    # --------------------------------
 
     # Pass 2 is successful ONLY if not aborted AND no writes failed.
     return not aborted and not failed_writes
@@ -804,7 +855,7 @@ def import_data(
         critical, process-halting errors, False otherwise.
     """
     _context, _deferred, _ignore = (
-        context or {},
+        context or {"tracking_disable": True},
         deferred_fields or [],
         ignore or [],
     )
@@ -849,33 +900,41 @@ def import_data(
                 _ignore,
                 _context,
                 fail_writer,
+                fail_handle,
                 max_connection,
                 batch_size,
                 o2m,
                 split_by_cols,
                 force_create,
             )
-            if not pass_1_results.get("success", False):
+            # A pass is only successful if it wasn't aborted.
+            pass_1_successful = pass_1_results.get("success", False)
+            if not pass_1_successful:
                 return False, record_count
 
-            if not _deferred:
-                return True, record_count
+            # If we get here, Pass 1 was not aborted. Now determine final status.
+            id_map = pass_1_results.get("id_map", {})
+            pass_2_successful = True  # Assume success if no Pass 2 is needed.
 
-            overall_success = _orchestrate_pass_2(
-                progress,
-                model_obj,
-                model,
-                header,
-                all_data,
-                unique_id_field,
-                pass_1_results["id_map"],
-                _deferred,
-                fail_writer,
-                max_connection,
-                batch_size,
-            )
+            if _deferred:
+                pass_2_successful = _orchestrate_pass_2(
+                    progress,
+                    model_obj,
+                    model,
+                    header,
+                    all_data,
+                    unique_id_field,
+                    id_map,
+                    _deferred,
+                    fail_writer,
+                    fail_handle,
+                    max_connection,
+                    batch_size,
+                )
+
         finally:
             if fail_handle:
                 fail_handle.close()
 
+    overall_success = pass_1_successful and pass_2_successful
     return overall_success, record_count

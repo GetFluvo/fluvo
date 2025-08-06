@@ -8,6 +8,7 @@ import tasks to the multi-threaded `import_threaded` module.
 import ast
 import csv
 import os
+import re
 import tempfile
 import time
 from datetime import datetime
@@ -31,6 +32,18 @@ def _count_lines(filepath: str) -> int:
             return sum(1 for _ in f)
     except FileNotFoundError:
         return 0
+
+
+def _infer_model_from_filename(filename: str) -> Optional[str]:
+    """Tries to guess the Odoo model from a CSV filename."""
+    basename = Path(filename).stem
+    # Remove common suffixes like _fail, _transformed, etc.
+    clean_name = re.sub(r"(_fail|_transformed|\d+)$", "", basename)
+    # Convert underscores to dots
+    model_name = clean_name.replace("_", ".")
+    if "." in model_name:
+        return model_name
+    return None
 
 
 def _get_fail_filename(model: str, is_fail_run: bool) -> str:
@@ -73,11 +86,11 @@ def _run_preflight_checks(
     return True
 
 
-def _orchestrate_import(
+def run_import(  # noqa: C901
     config: str,
     filename: str,
-    model: str,
-    deferred_fields: Optional[str],
+    model: Optional[str],
+    deferred_fields: Optional[list[str]],
     unique_id_field: Optional[str],
     no_preflight_checks: bool,
     headless: bool,
@@ -86,37 +99,64 @@ def _orchestrate_import(
     skip: int,
     fail: bool,
     separator: str,
-    ignore: Optional[str],
+    ignore: Optional[list[str]],
     context: str,
     encoding: str,
     o2m: bool,
-    split_by_cols: Optional[list[str]],
+    groupby: Optional[list[str]],
 ) -> None:
-    """Orchestrates the main import workflow, including pre-flight and routing.
+    """Main entry point for the import command, handling all orchestration.
 
-    This function contains the core logic for running pre-flight checks and then
-    deciding whether to run a standard single-pass import or a two-pass
-    deferred import based on user input and automatic detection.
+    This function serves as the primary orchestrator for the import process.
+    It handles model name inference, argument parsing, fail-mode logic,
+    pre-flight checks, and routing to the correct import strategy (single-pass
+    or two-pass deferred).
 
     Args:
         config (str): Path to the connection configuration file.
         filename (str): Path to the source CSV file to import.
-        model (str): The target Odoo model.
-        deferred_fields (Optional[str]): A comma-separated string of fields to defer.
+        model (Optional[str]): The target Odoo model. Inferred from filename
+            if not set.
+        deferred_fields (Optional[list[str]]): A list of fields to defer to a
+            second pass.
         unique_id_field (Optional[str]): The name of the unique ID column.
         no_preflight_checks (bool): If True, skips all pre-flight checks.
         headless (bool): If True, runs in non-interactive mode.
         worker (int): The number of simultaneous connections to use.
         batch_size (int): The number of records per batch.
         skip (int): The number of initial lines to skip.
-        fail (bool): If True, runs in fail mode.
+        fail (bool): If True, runs in fail mode, processing a _fail.csv file.
         separator (str): The delimiter used in the CSV file.
-        ignore (Optional[str]): A comma-separated string of columns to ignore.
-        context (str): A string representation of the Odoo context dictionary.
+        ignore (Optional[list[str]]): A list of columns to ignore
+            from the import.
+        context (dict[str, Any]): The Odoo context dictionary to use for the
+            import.
         encoding (str): The file encoding of the source file.
         o2m (bool): If True, enables special handling for one-to-many files.
-        split_by_cols (Optional[list[str]]): A list of column names to group records by.
+        groupby (Optional[list[str]]): A list of columns to group data by.
     """
+    try:
+        # If context is an empty string, default to an empty dict
+        parsed_context = ast.literal_eval(context) if context else {}
+        if not isinstance(parsed_context, dict):
+            raise TypeError(
+                'Context must be a dictionary-like string, e.g., \'{"key": "value"}\''
+            )
+    except Exception as e:
+        _show_error_panel(
+            "Invalid Context", f"Could not parse the --context argument: {e}"
+        )
+        return
+    log.info("Starting data import process from file...")
+    if not model:
+        model = _infer_model_from_filename(filename)
+        if not model:
+            _show_error_panel(
+                "Model Not Found",
+                "Could not infer model from filename. Please use the --model option.",
+            )
+            return
+
     file_to_process = filename
     if fail:
         fail_path = Path(filename).parent / _get_fail_filename(model, False)
@@ -129,12 +169,18 @@ def _orchestrate_import(
                 )
             )
             return
-        record_count = line_count - 1
         log.info(
-            f"Running in --fail mode. Attempting to recover {record_count} "
-            f"records from: {fail_path}"
+            f"Running in --fail mode. Retrying {line_count - 1} records from: "
+            f"{fail_path}"
         )
         file_to_process = str(fail_path)
+        # When in fail mode, we must ignore the _ERROR_REASON column that was
+        # added to the fail file so it isn't sent to Odoo.
+        if ignore is None:
+            ignore = []
+        if "_ERROR_REASON" not in ignore:
+            log.info("Ignoring the internal '_ERROR_REASON' column for re-import.")
+            ignore.append("_ERROR_REASON")
 
     import_plan: dict[str, Any] = {}
     if not no_preflight_checks:
@@ -152,180 +198,66 @@ def _orchestrate_import(
         ):
             return
 
-    final_deferred = (
-        deferred_fields.split(",")
-        if deferred_fields
-        else import_plan.get("deferred_fields", [])
-    )
+    # Determine final arguments for the core import engine
+    final_deferred = deferred_fields or import_plan.get("deferred_fields", [])
     final_uid_field = unique_id_field or import_plan.get("unique_id_field") or "id"
 
-    if final_deferred and not fail:
-        log.info(f"Using two-pass strategy for deferred fields: {final_deferred}")
-        run_import_deferred(
-            config=config,
-            filename=file_to_process,
-            model_name=model,
-            unique_id_field=final_uid_field,
-            deferred_fields=final_deferred,
-            encoding=encoding,
-            separator=separator,
-        )
-        return
+    fail_output_file = str(Path(filename).parent / _get_fail_filename(model, fail))
+    # Determine the import strategy to set the correct execution parameters.
 
-    log.info("Using standard single-pass import strategy.")
-    try:
-        parsed_context = ast.literal_eval(context)
-        if not isinstance(parsed_context, dict):
-            raise TypeError("Context must be a dictionary.")
-    except Exception as e:
-        _show_error_panel("Invalid Context", f"Invalid --context dictionary: {e}")
-        return
-
-    ignore_list = ignore.split(",") if ignore else []
-
+    # A. Fail-mode runs must be processed one-by-one to ensure accuracy.
+    # B. Two-pass imports use fully batch for maximum perforamance on pass 1 the relational
+    #    updates in Pass 2 to ensure failures can be tracked correctly.
+    # C. Single-pass imports can run fully batched for maximum performance.
     if fail:
-        max_conn, batch_size_run, force_create = 1, 1, True
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        fail_output_file = str(
-            Path(filename).parent / f"{model.replace('.', '_')}_{timestamp}_failed.csv"
-        )
+        log.info("Single-record batching enabled for this import strategy.")
+        max_conn = 1
+        batch_size_run = 1
+        # force_create is a specific flag for fail-recovery mode only.
+        force_create = True if fail else False
     else:
-        max_conn, batch_size_run, force_create = (
-            int(worker),
-            int(batch_size),
-            False,
-        )
-        fail_output_file = str(Path(filename).parent / _get_fail_filename(model, False))
+        # This is a standard, normal-mode import.
+        max_conn = worker
+        batch_size_run = batch_size
+        force_create = False
 
     start_time = time.time()
     success, count = import_threaded.import_data(
         config_file=config,
         model=model,
-        unique_id_field=(unique_id_field or "id"),
+        unique_id_field=final_uid_field,
         file_csv=file_to_process,
+        deferred_fields=final_deferred,
         context=parsed_context,
         fail_file=fail_output_file,
         encoding=encoding,
         separator=separator,
-        ignore=ignore_list,
+        ignore=ignore or [],
         max_connection=max_conn,
         batch_size=batch_size_run,
-        skip=int(skip),
+        skip=skip,
         force_create=force_create,
         o2m=o2m,
-        split_by_cols=split_by_cols,
+        split_by_cols=groupby,
     )
     elapsed = time.time() - start_time
 
-    console = Console()
-    if success:
-        log.info(
-            f"{count} records processed for model '{model}'. "
-            f"Total time: {elapsed:.2f}s."
-        )
-        console.print(
+    fail_file_was_created = _count_lines(fail_output_file) > 1
+    is_truly_successful = success and not fail_file_was_created
+
+    if is_truly_successful:
+        log.info(f"{count} records processed. Total time: {elapsed:.2f}s.")
+        Console().print(
             Panel(
                 f"Import for [cyan]{model}[/cyan] finished successfully.",
                 title="[bold green]Import Complete[/bold green]",
-                border_style="green",
             )
         )
     else:
         _show_error_panel(
             "Import Failed",
-            "The import process failed or was aborted. Check logs for details.",
+            "The import process failed. Check logs for details.",
         )
-
-
-def run_import(
-    config: str,
-    filename: str,
-    model: Optional[str] = None,
-    deferred_fields: Optional[str] = None,
-    unique_id_field: Optional[str] = None,
-    no_preflight_checks: bool = False,
-    headless: bool = False,
-    worker: int = 1,
-    batch_size: int = 10,
-    skip: int = 0,
-    fail: bool = False,
-    separator: str = ";",
-    ignore: Optional[str] = None,
-    context: str = "{'tracking_disable' : True}",
-    encoding: str = "utf-8",
-    o2m: bool = False,
-    groupby: Optional[str] = None,
-) -> None:
-    """Main entry point for the import command.
-
-    This function is a wrapper that handles initial setup (like model name
-    inference) and then delegates the core logic to the `_orchestrate_import`
-    helper function.
-
-    Args:
-        config (str): Path to the connection configuration file.
-        filename (str): Path to the source CSV file to import.
-        model (Optional[str]): The target Odoo model. Inferred from filename if not set.
-        deferred_fields (Optional[str]): A comma-separated string of fields to defer.
-        unique_id_field (Optional[str]): The name of the unique ID column.
-        no_preflight_checks (bool): If True, skips all pre-flight checks.
-        headless (bool): If True, runs in non-interactive mode.
-        worker (int): The number of simultaneous connections to use.
-        batch_size (int): The number of records per batch.
-        skip (int): The number of initial lines to skip.
-        fail (bool): If True, runs in fail mode.
-        separator (str): The delimiter used in the CSV file.
-        ignore (Optional[str]): A comma-separated string of columns to ignore.
-        context (str): A string representation of the Odoo context dictionary.
-        encoding (str): The file encoding of the source file.
-        o2m (bool): If True, enables special handling for one-to-many file
-            formats where child records follow their parent on subsequent lines.
-        groupby (Optional[str]): A comma-separated string of columns to
-            group records by.
-    """
-    log.info("Starting data import process from file...")
-
-    final_model = model
-    # FIX: Restore the validation logic for inferred model names.
-    if not final_model:
-        base_name = os.path.basename(filename)
-        inferred_model = Path(base_name).stem.replace("_", ".")
-        if not inferred_model or inferred_model.startswith("."):
-            _show_error_panel(
-                "Model Not Found",
-                f"Could not infer model from filename '{base_name}'. "
-                "Please use the --model option.",
-            )
-            return  # Exit early as intended
-        final_model = inferred_model
-        log.info(f"No model provided. Inferred model '{final_model}' from filename.")
-
-    if fail and deferred_fields:
-        _show_error_panel(
-            "Invalid Arguments", "Cannot use --fail with --deferred-fields."
-        )
-        return
-
-    split_by_cols_list = [c.strip() for c in groupby.split(",")] if groupby else None
-    _orchestrate_import(
-        config=config,
-        filename=filename,
-        model=final_model,
-        deferred_fields=deferred_fields,
-        unique_id_field=unique_id_field,
-        no_preflight_checks=no_preflight_checks,
-        headless=headless,
-        worker=worker,
-        batch_size=batch_size,
-        skip=skip,
-        fail=fail,
-        separator=separator,
-        ignore=ignore,
-        context=context,
-        encoding=encoding,
-        o2m=o2m,
-        split_by_cols=split_by_cols_list,
-    )
 
 
 def run_import_for_migration(
@@ -375,60 +307,3 @@ def run_import_for_migration(
             os.remove(tmp_path)
 
     log.info("In-memory import process finished.")
-
-
-def run_import_deferred(
-    config: str,
-    filename: str,
-    model_name: str,
-    unique_id_field: str,
-    deferred_fields: list[str],
-    encoding: str = "utf-8",
-    separator: str = ";",
-) -> bool:
-    """Performs a two-pass import from a CSV file to handle deferred relations.
-
-    Args:
-        config (str): Path to the connection configuration file.
-        filename (str): Path to the source CSV file.
-        model_name (str): The technical name of the Odoo model.
-        unique_id_field (str): The column in the CSV that uniquely identifies each row.
-        deferred_fields (list[str]): A list of column names for the second pass.
-        encoding (str): The file encoding of the source file.
-        separator (str): The delimiter used in the CSV file.
-
-    Returns:
-        bool: True if the import process completes successfully, False otherwise.
-    """
-    start_time = time.time()
-    success, count = import_threaded.import_data(
-        config_file=config,
-        model=model_name,
-        unique_id_field=unique_id_field,
-        file_csv=filename,
-        deferred_fields=deferred_fields,
-        encoding=encoding,
-        separator=separator,
-        max_connection=4,
-        batch_size=200,
-    )
-    elapsed = time.time() - start_time
-    console = Console()
-    if success:
-        log.info(
-            f"{count} records processed for model '{model_name}'. "
-            f"Total time: {elapsed:.2f}s."
-        )
-        console.print(
-            Panel(
-                f"Two-pass import for [cyan]{model_name}[/cyan] finished.",
-                title="[bold green]Import Complete[/bold green]",
-                expand=False,
-            )
-        )
-    else:
-        _show_error_panel(
-            "Import Failed",
-            "The deferred import process failed. Check logs for details.",
-        )
-    return success

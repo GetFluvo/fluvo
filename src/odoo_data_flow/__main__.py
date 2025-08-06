@@ -257,7 +257,7 @@ def invoice_v9_cmd(**kwargs: Any) -> None:
 @click.option(
     "--context",
     default="{'tracking_disable': True}",
-    help="Odoo context as a dictionary string.",
+    help="Odoo context as a JSON string e.g., '{\"key\": true}'.",
 )
 @click.option(
     "--o2m",
