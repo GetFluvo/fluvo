@@ -20,15 +20,15 @@ class TestImportDataRefactored:
         """Test a successful single-pass import (no deferred fields)."""
         # Arrange
         mock_read_file.return_value = (["id", "name"], [["xml_a", "A"]])
-        mock_run_pass.return_value = {
-            "id_map": {"xml_a": 101},
-            "failed_lines": [],
-            "success": True,
-        }
+        mock_run_pass.return_value = (
+            {"id_map": {"xml_a": 101}, "failed_lines": []},  # results dict
+            False,  # aborted = False
+        )
+
         mock_get_conn.return_value.get_model.return_value = MagicMock()
 
         # Act
-        result = import_data(
+        result, _ = import_data(
             config_file="dummy.conf",
             model="res.partner",
             unique_id_field="id",
@@ -56,15 +56,14 @@ class TestImportDataRefactored:
         )
         # Simulate results for Pass 1 and Pass 2
         mock_run_pass.side_effect = [
-            {
-                "id_map": {"xml_a": 101, "xml_b": 102},
-                "failed_lines": [],
-                "success": True,
-            },  # Pass 1
-            {
-                "failed_writes": [],
-                "success": True,
-            },  # Pass 2
+            (
+                {"id_map": {"xml_a": 101, "xml_b": 102}, "failed_lines": []},
+                False,
+            ),  # Pass 1 (results, aborted)
+            (
+                {"failed_writes": []},
+                False,
+            ),  # Pass 2 (results, aborted)
         ]
         mock_get_conn.return_value.get_model.return_value = MagicMock()
 
@@ -78,7 +77,7 @@ class TestImportDataRefactored:
         )
 
         # Assert
-        assert result is True
+        assert result[0] is True
         assert mock_run_pass.call_count == 2  # Both passes should run
 
     @patch("odoo_data_flow.import_threaded._read_data_file")
@@ -90,7 +89,7 @@ class TestImportDataRefactored:
         mock_read_file.return_value = (["name"], [["A"]])  # No 'id' column
 
         # Act
-        result = import_data(
+        result, _ = import_data(
             config_file="dummy.conf",
             model="res.partner",
             unique_id_field="id",  # We expect 'id' but it's not there

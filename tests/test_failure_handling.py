@@ -53,7 +53,7 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
 
     # --- Act ---
     # Capture the return value of the import process
-    result = import_threaded.import_data(
+    result, _ = import_threaded.import_data(
         config_file="dummy.conf",
         model=model_name,
         unique_id_field="id",

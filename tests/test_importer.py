@@ -112,6 +112,7 @@ class TestRunImport:
         fail_file.write_text("id,name\n1,a\n2,b\n3,c\n4,d\n5,e\n")
         record_count = 5
 
+        mock_import_data.return_value = (True, record_count)
         run_import(
             config="dummy.conf",
             filename=str(source_file),

@@ -9,6 +9,7 @@ import ast
 import csv
 import os
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -120,11 +121,7 @@ def _orchestrate_import(
     file_to_process = filename
     if fail:
         fail_path = Path(filename).parent / _get_fail_filename(model, False)
-
-        # Performant Check: Count lines only once and store the result.
         line_count = _count_lines(str(fail_path))
-
-        # A file with 1 line (the header) or less has no data records to process.
         if line_count <= 1:
             Console().print(
                 Panel(
@@ -133,8 +130,6 @@ def _orchestrate_import(
                 )
             )
             return
-
-        # New Feature: Log the number of records being recovered.
         record_count = line_count - 1
         log.info(
             f"Running in --fail mode. Attempting to recover {record_count} "
@@ -144,11 +139,13 @@ def _orchestrate_import(
 
     import_plan: dict[str, Any] = {}
     if not no_preflight_checks:
+        validation_filename = filename if fail else file_to_process
         if not _run_preflight_checks(
             preflight_mode=PreflightMode.FAIL_MODE if fail else PreflightMode.NORMAL,
             import_plan=import_plan,
             model=model,
             filename=file_to_process,
+            validation_filename=validation_filename,
             config=config,
             headless=headless,
             separator=separator,
@@ -201,7 +198,8 @@ def _orchestrate_import(
         )
         fail_output_file = str(Path(filename).parent / _get_fail_filename(model, False))
 
-    success = import_threaded.import_data(
+    start_time = time.time()
+    success, count = import_threaded.import_data(
         config_file=config,
         model=model,
         unique_id_field=(unique_id_field or "id"),
@@ -218,9 +216,14 @@ def _orchestrate_import(
         o2m=o2m,
         split_by_cols=split_by_cols,
     )
+    elapsed = time.time() - start_time
 
     console = Console()
     if success:
+        log.info(
+            f"{count} records processed for model '{model}'. "
+            f"Total time: {elapsed:.2f}s."
+        )
         console.print(
             Panel(
                 f"Import for [cyan]{model}[/cyan] finished successfully.",
@@ -400,9 +403,8 @@ def run_import_deferred(
     Returns:
         bool: True if the import process completes successfully, False otherwise.
     """
-    log.info(f"Starting two-pass deferred import for model '{model_name}'...")
-
-    success = import_threaded.import_data(
+    start_time = time.time()
+    success, count = import_threaded.import_data(
         config_file=config,
         model=model_name,
         unique_id_field=unique_id_field,
@@ -410,12 +412,17 @@ def run_import_deferred(
         deferred_fields=deferred_fields,
         encoding=encoding,
         separator=separator,
-        max_connection=4,  # TODO
-        batch_size=200,  # TODO
+        max_connection=4,
+        batch_size=200,
     )
+    elapsed = time.time() - start_time
 
     console = Console()
     if success:
+        log.info(
+            f"{count} records processed for model '{model_name}'. "
+            f"Total time: {elapsed:.2f}s."
+        )
         console.print(
             Panel(
                 f"Two-pass import for [cyan]{model_name}[/cyan] finished.",
