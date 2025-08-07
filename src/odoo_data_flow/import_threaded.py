@@ -11,6 +11,7 @@ import sys
 import time  # noqa
 from collections.abc import Generator, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed  # noqa
+from json import JSONDecodeError
 from typing import Any, Optional, TextIO
 
 from rich.console import Console
@@ -490,8 +491,8 @@ def _execute_load_batch(
                 "server timed out or blocked the request due to its size or content. Check the "
                 "server/proxy logs and configuration (e.g., timeout, client_max_body_size, WAF rules)."
             )
-            # Try to get the raw response text from the exception if it's available
-            raw_response = getattr(e, "body", "Not available")
+            # The standard library's JSONDecodeError holds the invalid text in the 'doc' attribute.
+            raw_response = getattr(e, "doc", "Raw response not available in exception.")
             progress.console.print(
                 f"[bold red]Network/Proxy Error:[/] {error_msg}\n"
                 f"[bold]Server Response:[/bold]\n{raw_response[:500]}..."
