@@ -371,7 +371,7 @@ class TestImportThreadedEdgeCases:
         )
 
         assert len(result["failed_lines"]) == 1
-        assert "malformed" in result["failed_lines"][0][-1]
+        assert "Row has 1 columns, but header has 2" in result["failed_lines"][0][-1]
         assert result["error_summary"] == "Malformed CSV row detected"
 
     @patch("odoo_data_flow.import_threaded.concurrent.futures.as_completed", side_effect=KeyboardInterrupt)

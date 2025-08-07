@@ -137,3 +137,56 @@ def test_create_fallback_handles_malformed_rows(tmp_path: Path) -> None:
     failed_row = fail_content[1]
     assert failed_row[0] == "rec_bad"
     assert "Row has 2 columns, but header has 3" in failed_row[-1]
+
+
+@patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> None:
+    """Test fallback handling with a dirty CSV containing various errors."""
+    # 1. ARRANGE
+    source_file = tmp_path / "dirty.csv"
+    fail_file = tmp_path / "dirty_fail.csv"
+    model_name = "res.partner"
+    header = ["id", "name", "email"]
+    # CSV content with various issues
+    dirty_data = [
+        ["ok_1", "Normal Record", "ok1@test.com"],
+        ["bad_cols"],  # Malformed row, too few columns
+        ["ok_2", "Another Good One", "ok2@test.com"],
+        [],  # Empty row
+    ]
+    with open(source_file, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        writer.writerows(dirty_data)
+
+    mock_model = MagicMock()
+    mock_model.load.side_effect = Exception("Load fails, forcing fallback")
+    mock_model.browse.return_value.env.ref.return_value = None  # Force create
+    mock_get_conn.return_value.get_model.return_value = mock_model
+
+    # 2. ACT
+    result, _ = import_threaded.import_data(
+        config_file="dummy.conf",
+        model=model_name,
+        unique_id_field="id",
+        file_csv=str(source_file),
+        fail_file=str(fail_file),
+        separator=",",
+    )
+
+    # 3. ASSERT
+    assert result is True  # Process should succeed as good records exist
+    assert mock_model.create.call_count == 2  # Called for ok_1 and ok_2
+
+    # Verify the content of the fail file
+    assert fail_file.exists()
+    with open(fail_file, encoding="utf-8") as f:
+        reader = csv.reader(f)
+        failed_rows = list(reader)
+
+    assert len(failed_rows) == 3  # Header + 2 failed rows
+    # Check the error message for the row with bad columns
+    assert failed_rows[1][0] == "bad_cols"
+    assert "Row has 1 columns, but header has 3" in failed_rows[1][-1]
+    # Check the error message for the empty row
+    assert "Row has 0 columns, but header has 3" in failed_rows[2][-1]

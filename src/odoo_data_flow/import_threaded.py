@@ -345,20 +345,14 @@ def _create_batch_individually(
     header_len = len(batch_header)
     ignore_set = set(ignore_list)
 
-    for line in batch_lines:
-        # --- Defensive check for malformed rows ---
-        if len(line) < header_len:
-            error_message = (
-                f"Row has {len(line)} columns, but header has {header_len}. "
-                "Skipping malformed row."
-            )
-            failed_lines.append([*list(line), error_message])
-            if "Fell back to create" in error_summary:
-                error_summary = "Malformed CSV row detected"
-            continue  # Skip to the next line
-
-        source_id = line[uid_index]
+    for i, line in enumerate(batch_lines):
         try:
+            if len(line) != header_len:
+                raise IndexError(
+                    f"Row has {len(line)} columns, but header has {header_len}."
+                )
+
+            source_id = line[uid_index]
             # 1. SEARCH BEFORE CREATE
             existing_record = model.browse().env.ref(
                 f"__export__.{source_id}", raise_if_not_found=False
@@ -379,6 +373,14 @@ def _create_batch_individually(
             # 3. CREATE
             new_record = model.create(clean_vals, context=context)
             id_map[source_id] = new_record.id
+        except IndexError as e:
+            error_message = (
+                f"Malformed row detected (row {i + 1} in batch): {e}"
+            )
+            failed_lines.append([*list(line), error_message])
+            if "Fell back to create" in error_summary:
+                error_summary = "Malformed CSV row detected"
+            continue
         except Exception as create_error:
             error_message = str(create_error).replace("\n", " | ")
             failed_line = [*list(line), error_message]
@@ -390,6 +392,7 @@ def _create_batch_individually(
         "failed_lines": failed_lines,
         "error_summary": error_summary,
     }
+
 
 
 def _execute_load_batch(
