@@ -268,6 +268,11 @@ def invoice_v9_cmd(**kwargs: Any) -> None:
 @click.option("--encoding", default="utf-8", help="Encoding of the data file.")
 def import_cmd(**kwargs: Any) -> None:
     """Runs the data import process."""
+    try:
+        kwargs["context"] = ast.literal_eval(kwargs.get("context", "{}"))
+    except (ValueError, SyntaxError) as e:
+        log.error(f"Invalid --context dictionary provided: {e}")
+        return
     run_import(**kwargs)
 
 

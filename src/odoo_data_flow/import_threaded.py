@@ -319,6 +319,7 @@ def _create_batch_individually(
     batch_lines: list[list[Any]],
     batch_header: list[str],
     uid_index: int,
+    context: dict[str, Any],
 ) -> dict[str, Any]:
     """Fallback to create records one-by-one to get detailed errors."""
     id_map: dict[str, int] = {}
@@ -354,7 +355,7 @@ def _create_batch_individually(
             clean_vals = {k: v for k, v in vals.items() if "/" not in k}
 
             # 3. CREATE
-            new_record = model.create(clean_vals)
+            new_record = model.with_context(context).create(clean_vals)
             id_map[source_id] = new_record.id
         except Exception as create_error:
             error_message = str(create_error).replace("\n", " | ")
@@ -409,7 +410,9 @@ def _execute_load_batch(
         progress.console.print(
             f"Batch {batch_number}: Fail mode active, using `create` method."
         )
-        result = _create_batch_individually(model, batch_lines, batch_header, uid_index)
+        result = _create_batch_individually(
+            model, batch_lines, batch_header, uid_index, context
+        )
         result["success"] = bool(result.get("id_map"))
         return result
 
@@ -435,7 +438,9 @@ def _execute_load_batch(
             f"Falling back to `create`."
         )
         # Fallback to create
-        result = _create_batch_individually(model, batch_lines, batch_header, uid_index)
+        result = _create_batch_individually(
+            model, batch_lines, batch_header, uid_index, context
+        )
         # The batch is a success if at least one record was created in the fallback.
         result["success"] = bool(result.get("id_map"))
         return result
@@ -463,10 +468,11 @@ def _execute_write_batch(
         with a `failed_writes` key if the operation failed.
     """
     model = thread_state["model"]
+    context = thread_state.get("context", {})  # Get context
     ids, vals = batch_writes
     try:
         # The core of the fix: use model.write(ids, vals) for batch updates.
-        model.write(ids, vals)
+        model.with_context(context).write(ids, vals)
         return {"failed_writes": [], "successful_writes": len(ids), "success": True}
     except Exception as e:
         error_message = str(e).replace("\n", " | ")
@@ -708,6 +714,7 @@ def _orchestrate_pass_2(
     unique_id_field: str,
     id_map: dict[str, int],
     deferred_fields: list[str],
+    context: dict[str, Any],
     fail_writer: Optional[Any],
     fail_handle: Optional[TextIO],
     max_connection: int,
@@ -729,6 +736,7 @@ def _orchestrate_pass_2(
         unique_id_field (str): The name of the unique identifier column.
         id_map (dict[str, int]): The map of source IDs to database IDs from Pass 1.
         deferred_fields (list[str]): The list of fields to update in this pass.
+        context (dict[str, Any]): The context dictionary for the Odoo RPC call.
         fail_writer (Optional[Any]): The CSV writer for the fail file.
         fail_handle (Optional[TextIO]): The file handle for the fail file.
         max_connection (int): The number of parallel worker threads to use.
@@ -776,7 +784,7 @@ def _orchestrate_pass_2(
     rpc_pass_2 = RPCThreadImport(
         max_connection, progress, pass_2_task, fail_writer, fail_handle
     )
-    thread_state_2 = {"model": model_obj, "progress": progress}
+    thread_state_2 = {"model": model_obj, "progress": progress, "context": context}
     pass_2_results, aborted = _run_threaded_pass(
         rpc_pass_2,
         _execute_write_batch,
@@ -879,6 +887,7 @@ def import_data(
         model_obj = connection.get_model(model)
     except Exception as e:
         from .lib.internal.ui import _show_error_panel
+
         error_message = str(e)
         title = "Odoo Connection Error"
         friendly_message = (
@@ -948,6 +957,7 @@ def import_data(
                     unique_id_field,
                     id_map,
                     _deferred,
+                    _context,
                     fail_writer,
                     fail_handle,
                     max_connection,

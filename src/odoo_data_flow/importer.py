@@ -5,7 +5,6 @@ It handles file I/O, pre-flight checks, and the delegation of the core
 import tasks to the multi-threaded `import_threaded` module.
 """
 
-import ast
 import csv
 import os
 import re
@@ -100,7 +99,7 @@ def run_import(  # noqa: C901
     fail: bool,
     separator: str,
     ignore: Optional[list[str]],
-    context: str,
+    context: dict[str, Any],
     encoding: str,
     o2m: bool,
     groupby: Optional[list[str]],
@@ -135,18 +134,6 @@ def run_import(  # noqa: C901
         o2m (bool): If True, enables special handling for one-to-many files.
         groupby (Optional[list[str]]): A list of columns to group data by.
     """
-    try:
-        # If context is an empty string, default to an empty dict
-        parsed_context = ast.literal_eval(context) if context else {}
-        if not isinstance(parsed_context, dict):
-            raise TypeError(
-                'Context must be a dictionary-like string, e.g., \'{"key": "value"}\''
-            )
-    except Exception as e:
-        _show_error_panel(
-            "Invalid Context", f"Could not parse the --context argument: {e}"
-        )
-        return
     log.info("Starting data import process from file...")
     if not model:
         model = _infer_model_from_filename(filename)
@@ -229,7 +216,7 @@ def run_import(  # noqa: C901
         unique_id_field=final_uid_field,
         file_csv=file_to_process,
         deferred_fields=final_deferred,
-        context=parsed_context,
+        context=context,
         fail_file=fail_output_file,
         encoding=encoding,
         separator=separator,

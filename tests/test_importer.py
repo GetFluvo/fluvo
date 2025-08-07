@@ -36,9 +36,7 @@ class TestRunImport:
         "groupby": [],
     }
 
-    @patch(
-        "odoo_data_flow.importer._infer_model_from_filename", return_value=None
-    )
+    @patch("odoo_data_flow.importer._infer_model_from_filename", return_value=None)
     @patch("odoo_data_flow.importer._show_error_panel")
     def test_run_import_no_model_fails(
         self, mock_show_error: MagicMock, mock_infer: MagicMock, tmp_path: Path
@@ -70,9 +68,7 @@ class TestRunImport:
         fail_file.touch()
 
         test_args = self.DEFAULT_ARGS.copy()
-        test_args.update(
-            {"filename": str(tmp_path / "res.partner.csv"), "fail": True}
-        )
+        test_args.update({"filename": str(tmp_path / "res.partner.csv"), "fail": True})
 
         run_import(**test_args)
         mock_import_data.assert_not_called()
@@ -109,21 +105,15 @@ class TestRunImport:
         mock_import_data.assert_called_once()
 
     @patch("odoo_data_flow.importer.import_threaded.import_data")
-    def test_run_import_routes_correctly(
-        self, mock_import_data: MagicMock
-    ) -> None:
+    def test_run_import_routes_correctly(self, mock_import_data: MagicMock) -> None:
         """Tests that a standard call correctly delegates to the core engine."""
         mock_import_data.return_value = (True, 123)
         test_args = self.DEFAULT_ARGS.copy()
-        test_args["deferred_fields"] = [
-            "parent_id"
-        ]  # Test with deferred fields
+        test_args["deferred_fields"] = ["parent_id"]  # Test with deferred fields
         run_import(**test_args)
         mock_import_data.assert_called_once()
         # Assert that the PARSED list is passed
-        assert mock_import_data.call_args.kwargs["deferred_fields"] == [
-            "parent_id"
-        ]
+        assert mock_import_data.call_args.kwargs["deferred_fields"] == ["parent_id"]
 
     @patch(
         "odoo_data_flow.importer.import_threaded.conf_lib.get_connection_from_config"
@@ -149,6 +139,7 @@ class TestRunImport:
             writer.writerows(source_data)
 
         mock_model = MagicMock()
+        mock_model.with_context.return_value = mock_model
         # 1. Simulate the initial batch `load` failing
         mock_model.load.return_value = {
             "ids": [],
@@ -205,9 +196,7 @@ class TestRunImport:
         source_file = tmp_path / "res.partner.csv"
         source_file.touch()
         fail_file = tmp_path / "res.partner_fail.csv"
-        fail_file.write_text(
-            "id,name,_ERROR_REASON\n"
-        )  # File with only a header
+        fail_file.write_text("id,name,_ERROR_REASON\n")  # File with only a header
 
         test_args = self.DEFAULT_ARGS.copy()
         test_args.update(
@@ -286,6 +275,7 @@ class TestRunImport:
             writer.writerows(source_data)
 
         mock_model = MagicMock()
+        mock_model.with_context.return_value = mock_model
         # Pass 1: `load` is called on data without the parent_id column
         mock_model.load.return_value = {"ids": [10, 20], "messages": []}
 
@@ -320,24 +310,13 @@ class TestRunImportEdgeCases:
         # Check that a timestamp like _20230401_123055_ is present
         assert any(char.isdigit() for char in filename)
 
-    @patch("odoo_data_flow.importer._show_error_panel")
-    def test_run_import_invalid_context_fails(
-        self, mock_show_error: MagicMock
-    ) -> None:
-        """Tests that run_import fails gracefully with an invalid context argument."""
-        args = TestRunImport.DEFAULT_ARGS.copy()
-        args["context"] = "not_a_dictionary"
-        run_import(**args)
-        mock_show_error.assert_called_once()
-        call_args, _ = mock_show_error.call_args
-        assert call_args[0] == "Invalid Context"
-        assert "Could not parse the --context argument" in call_args[1]
+    
 
     @patch("odoo_data_flow.importer.import_threaded.import_data")
     def test_run_import_fail_mode_ignore_is_none(
         self, mock_import_data: MagicMock, tmp_path: Path
     ) -> None:
-        """Tests that fail mode works correctly when the initial `ignore` list is None."""
+        """Test fail mode with no ignore list."""
         fail_file = tmp_path / "res_partner_fail.csv"
         fail_file.write_text("id,name,_ERROR_REASON\n1,a,error")
 

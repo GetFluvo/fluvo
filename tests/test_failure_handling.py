@@ -38,6 +38,7 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
         writer.writerows(source_data)
 
     mock_model = MagicMock()
+    mock_model.with_context.return_value = mock_model
     mock_model.load.side_effect = Exception("Generic batch error")
     mock_model.browse.return_value.env.ref.return_value = None
 
@@ -99,6 +100,7 @@ def test_create_fallback_handles_malformed_rows(tmp_path: Path) -> None:
         writer.writerows(source_data)
 
     mock_model = MagicMock()
+    mock_model.with_context.return_value = mock_model
     mock_model.load.side_effect = Exception("Load fails, trigger fallback")
     mock_model.browse.return_value.env.ref.return_value = (
         None  # Ensure create is attempted
