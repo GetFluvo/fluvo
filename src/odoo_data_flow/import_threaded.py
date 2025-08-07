@@ -481,6 +481,28 @@ def _execute_load_batch(
         id_map = {line[uid_index]: created_ids[i] for i, line in enumerate(batch_lines)}
         # This is the successful "happy path" for the `load` method.
         return {"id_map": id_map, "failed_lines": [], "success": True}
+    except ValueError as e:
+        # This is a special case to catch non-JSON responses from the server,
+        # which often happens when a proxy/firewall returns an HTML error page.
+        if "Expecting value" in str(e):
+            error_msg = (
+                "Received a non-JSON response from the server. This often means a proxy "
+                "server timed out or blocked the request due to its size. Check the "
+                "server/proxy logs and configuration (e.g., timeout, client_max_body_size)."
+            )
+            progress.console.print(f"[bold red]Network/Proxy Error:[/] {error_msg}")
+            # Fall through to the `create` fallback, but the root cause is likely the server environment.
+
+        clean_error = str(e).strip().replace("\n", " ")
+        progress.console.print(
+            f"[yellow]WARN:[/] Batch {batch_number} failed `load` ('{clean_error}'). "
+            f"Falling back to `create`."
+        )
+        result = _create_batch_individually(
+            model, batch_lines, batch_header, uid_index, context, ignore_list
+        )
+        result["success"] = bool(result.get("id_map"))
+        return result
     except Exception as e:
         clean_error = str(e).strip().replace("\n", " ")
         # Use the rich console to print warnings without breaking the layout
