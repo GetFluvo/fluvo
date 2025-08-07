@@ -53,8 +53,9 @@ class TestRunImport:
     ) -> None:
         """Tests that a non-deferred call routes to import_data."""
         # --- Provide a valid return value for the mock ---
-        mock_import_data.return_value = (True, 123)
+        mock_import_data.return_value = (True, {"total_records": 123})
         test_args = self.DEFAULT_ARGS.copy()
+        test_args["context"] = {}
         run_import(**test_args)
         mock_import_data.assert_called_once()
 
@@ -91,9 +92,10 @@ class TestRunImport:
         record_count = 5
 
         # --- FIX: Add this line to set the mock's return value ---
-        mock_import_data.return_value = (True, record_count)
+        mock_import_data.return_value = (True, {"total_records": record_count})
 
         test_args = self.DEFAULT_ARGS.copy()
+        test_args["context"] = {}
         test_args.update(
             {
                 "filename": str(source_file),
@@ -107,8 +109,9 @@ class TestRunImport:
     @patch("odoo_data_flow.importer.import_threaded.import_data")
     def test_run_import_routes_correctly(self, mock_import_data: MagicMock) -> None:
         """Tests that a standard call correctly delegates to the core engine."""
-        mock_import_data.return_value = (True, 123)
+        mock_import_data.return_value = (True, {"total_records": 123})
         test_args = self.DEFAULT_ARGS.copy()
+        test_args["context"] = {}
         test_args["deferred_fields"] = ["parent_id"]  # Test with deferred fields
         run_import(**test_args)
         mock_import_data.assert_called_once()
@@ -237,7 +240,7 @@ class TestRunImport:
         mock_get_conn.return_value.get_model.return_value = mock_model
 
         # 2. ACT
-        success, count = import_threaded.import_data(
+        success, stats = import_threaded.import_data(
             config_file="dummy.conf",
             model="res.partner",
             unique_id_field="id",
@@ -247,7 +250,7 @@ class TestRunImport:
 
         # 3. ASSERT
         assert success is True
-        assert count == 2
+        assert stats["total_records"] == 2
         # The file is created proactively, so we check that it exists
         # but only contains the header.
         assert fail_file.exists()
@@ -327,7 +330,7 @@ class TestRunImportEdgeCases:
             }
         )
 
-        mock_import_data.return_value = (True, 1)
+        mock_import_data.return_value = (True, {"total_records": 1})
         run_import(**args)
 
         # Assert that the core import function was called with the error column ignored

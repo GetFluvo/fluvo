@@ -274,7 +274,7 @@ class TestPass2Batching:
             )
 
         # Assert
-        assert result is False  # The orchestration should report failure
+        assert result[0] is False  # The orchestration should report failure
         mock_fail_writer.writerows.assert_called_once()
 
         # Check that the rows written to the fail file are correct
@@ -343,7 +343,7 @@ class TestImportThreadedEdgeCases:
 
             # Assert
             assert success is False
-            assert count == 0
+            assert count == {}
 
     @patch("odoo_data_flow.lib.internal.ui._show_error_panel")
     @patch(

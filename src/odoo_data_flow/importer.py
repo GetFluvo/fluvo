@@ -211,7 +211,7 @@ def run_import(  # noqa: C901
         force_create = False
 
     start_time = time.time()
-    success, count = import_threaded.import_data(
+    success, stats = import_threaded.import_data(
         config_file=config,
         model=model,
         unique_id_field=final_uid_field,
@@ -235,13 +235,31 @@ def run_import(  # noqa: C901
     is_truly_successful = success and not fail_file_was_created
 
     if is_truly_successful:
-        log.info(f"{count} records processed. Total time: {elapsed:.2f}s.")
-        Console().print(
-            Panel(
-                f"Import for [cyan]{model}[/cyan] finished successfully.",
-                title="[bold green]Import Complete[/bold green]",
-            )
+        log.info(
+            f"{stats.get('total_records', 0)} records processed. "
+            f"Total time: {elapsed:.2f}s."
         )
+        if final_deferred:  # It was a two-pass import
+            summary = (
+                f"Records: {stats.get('total_records', 0)}, "
+                f"Created: {stats.get('created_records', 0)}, "
+                f"Updated: {stats.get('updated_relations', 0)}"
+            )
+            title = f"[bold green]Import Complete for [cyan]{model}[/cyan][/bold green]"
+            Console().print(
+                Panel(
+                    summary,
+                    title=title,
+                    expand=False,
+                )
+            )
+        else:  # Single pass
+            Console().print(
+                Panel(
+                    f"Import for [cyan]{model}[/cyan] finished successfully.",
+                    title="[bold green]Import Complete[/bold green]",
+                )
+            )
     else:
         _show_error_panel(
             "Import Failed",

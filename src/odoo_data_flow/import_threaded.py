@@ -532,6 +532,7 @@ def _run_threaded_pass(  # noqa: C901
         "id_map": {},
         "failed_lines": [],
         "failed_writes": [],
+        "successful_writes": 0,
     }
     consecutive_failures = 0
     successful_batches = 0
@@ -557,6 +558,7 @@ def _run_threaded_pass(  # noqa: C901
 
                 aggregated["id_map"].update(result.get("id_map", {}))
                 aggregated["failed_writes"].extend(result.get("failed_writes", []))
+                aggregated["successful_writes"] += result.get("successful_writes", 0)
                 failed_lines = result.get("failed_lines", [])
                 if failed_lines:
                     aggregated["failed_lines"].extend(failed_lines)
@@ -719,7 +721,7 @@ def _orchestrate_pass_2(
     fail_handle: Optional[TextIO],
     max_connection: int,
     batch_size: int,
-) -> bool:
+) -> tuple[bool, int]:
     """Orchestrates the multi-threaded Pass 2 (write).
 
     This function manages the second pass of a deferred import. It prepares
@@ -753,7 +755,7 @@ def _orchestrate_pass_2(
 
     if not pass_2_data_to_write:
         log.info("No valid relations found to update in Pass 2. Import complete.")
-        return True
+        return True, 0
 
     # --- Grouping Logic ---
     from collections import defaultdict
@@ -773,7 +775,7 @@ def _orchestrate_pass_2(
             pass_2_batches.append((list(id_chunk), vals))
 
     if not pass_2_batches:
-        return True
+        return True, 0
 
     num_batches = len(pass_2_batches)
     pass_2_task = progress.add_task(
@@ -808,7 +810,8 @@ def _orchestrate_pass_2(
             fail_writer.writerows(failed_lines)
 
     # Pass 2 is successful ONLY if not aborted AND no writes failed.
-    return not aborted and not failed_writes
+    successful_writes = pass_2_results.get("successful_writes", 0)
+    return not aborted and not failed_writes, successful_writes
 
 
 def import_data(
@@ -828,7 +831,7 @@ def import_data(
     force_create: bool = False,
     o2m: bool = False,
     split_by_cols: Optional[list[str]] = None,
-) -> tuple[bool, int]:
+) -> tuple[bool, dict[str, int]]:
     """Orchestrates a robust, multi-threaded, two-pass import process.
 
     This is the main entry point for the low-level import engine. It manages
@@ -880,7 +883,7 @@ def import_data(
     record_count = len(all_data)
 
     if not header:
-        return False, 0
+        return False, {}
 
     try:
         connection = conf_lib.get_connection_from_config(config_file)
@@ -901,7 +904,7 @@ def import_data(
             f"[bold]Original Error:[/bold] {error_message}"
         )
         _show_error_panel(title, friendly_message)
-        return False, 0
+        return False, {}
     fail_writer, fail_handle = _setup_fail_file(fail_file, header, separator, encoding)
     console = Console()
     progress = Progress(
@@ -941,14 +944,15 @@ def import_data(
             # A pass is only successful if it wasn't aborted.
             pass_1_successful = pass_1_results.get("success", False)
             if not pass_1_successful:
-                return False, record_count
+                return False, {}
 
             # If we get here, Pass 1 was not aborted. Now determine final status.
             id_map = pass_1_results.get("id_map", {})
             pass_2_successful = True  # Assume success if no Pass 2 is needed.
+            updates_made = 0
 
             if _deferred:
-                pass_2_successful = _orchestrate_pass_2(
+                pass_2_successful, updates_made = _orchestrate_pass_2(
                     progress,
                     model_obj,
                     model,
@@ -969,4 +973,9 @@ def import_data(
                 fail_handle.close()
 
     overall_success = pass_1_successful and pass_2_successful
-    return overall_success, record_count
+    stats = {
+        "total_records": record_count,
+        "created_records": len(id_map),
+        "updated_relations": updates_made,
+    }
+    return overall_success, stats
