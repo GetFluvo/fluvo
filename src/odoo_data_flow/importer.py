@@ -100,7 +100,7 @@ def run_import(  # noqa: C901
     fail: bool,
     separator: str,
     ignore: Optional[list[str]],
-    context: Any,  # Accept Any type
+    context: Any,  # Accept Any type for robustness
     encoding: str,
     o2m: bool,
     groupby: Optional[list[str]],
@@ -154,8 +154,6 @@ def run_import(  # noqa: C901
             f"{fail_path}"
         )
         file_to_process = str(fail_path)
-        # When in fail mode, we must ignore the _ERROR_REASON column that was
-        # added to the fail file so it isn't sent to Odoo.
         if ignore is None:
             ignore = []
         if "_ERROR_REASON" not in ignore:
@@ -179,26 +177,16 @@ def run_import(  # noqa: C901
         ):
             return
 
-    # Determine final arguments for the core import engine
     final_deferred = deferred_fields or import_plan.get("deferred_fields", [])
     final_uid_field = unique_id_field or import_plan.get("unique_id_field") or "id"
-
     fail_output_file = str(Path(filename).parent / _get_fail_filename(model, fail))
-    # Determine the import strategy to set the correct execution parameters.
 
-    # A. Fail-mode runs must be processed one-by-one to ensure accuracy.
-    # B. Two-pass imports uses batches for maximum perforamance on pass 1.
-    #    The relational updates are done in batches in Pass 2 to ensure
-    #    optimal performance.
-    # C. Single-pass imports can run fully batched for maximum performance.
     if fail:
         log.info("Single-record batching enabled for this import strategy.")
         max_conn = 1
         batch_size_run = 1
-        # force_create is a specific flag for fail-recovery mode only.
-        force_create = True if fail else False
+        force_create = True
     else:
-        # This is a standard, normal-mode import.
         max_conn = worker
         batch_size_run = batch_size
         force_create = False

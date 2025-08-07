@@ -371,8 +371,7 @@ def _create_batch_individually(
             }
 
             # 3. CREATE
-            record_id = model.env.context = context
-            new_record = model.create(clean_vals)
+            new_record = model.create(clean_vals, context=context)
             id_map[source_id] = new_record.id
         except IndexError as e:
             error_message = f"Malformed row detected (row {i + 1} in batch): {e}"
