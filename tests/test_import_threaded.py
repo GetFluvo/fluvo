@@ -157,6 +157,20 @@ class TestBatchingHelpers:
             ["order3", "Order Three", "item_F"],
         ]
 
+    def test_create_batches_no_data(self) -> None:
+        """Test that _create_batches handles empty data."""
+        header = ["id", "name"]
+        data = []
+        batches = list(_create_batches(data, None, header, 10, False))
+        assert len(batches) == 0
+
+    def test_create_batches_no_data(self) -> None:
+        """Test that _create_batches handles empty data."""
+        header = ["id", "name"]
+        data = []
+        batches = list(_create_batches(data, None, header, 10, False))
+        assert len(batches) == 0
+
 
 class TestPass2Batching:
     """Tests for the Pass 2 batching and writing logic."""
@@ -283,9 +297,73 @@ class TestPass2Batching:
         assert failed_rows[0] == ["c1", "C1", "p1", "Access Error"]
         assert failed_rows[1] == ["c2", "C2", "p1", "Access Error"]
 
+    def test_orchestrate_pass_2_no_relations(self) -> None:
+        """Test that Pass 2 handles no relations to update."""
+        mock_model = MagicMock()
+        header = ["id", "name"]
+        all_data = [["c1", "C1"], ["c2", "C2"]]
+        id_map = {"c1": 1, "c2": 2}
+        deferred_fields = []
+        with Progress() as progress:
+            result, updates = _orchestrate_pass_2(
+                progress,
+                mock_model,
+                "res.partner",
+                header,
+                all_data,
+                "id",
+                id_map,
+                deferred_fields,
+                {},
+                None,
+                None,
+                1,
+                10,
+            )
+        assert result is True
+        assert updates == 0
+
+    def test_orchestrate_pass_2_no_relations(self) -> None:
+        """Test that Pass 2 handles no relations to update."""
+        mock_model = MagicMock()
+        header = ["id", "name"]
+        all_data = [["c1", "C1"], ["c2", "C2"]]
+        id_map = {"c1": 1, "c2": 2}
+        deferred_fields = []
+        with Progress() as progress:
+            result, updates = _orchestrate_pass_2(
+                progress,
+                mock_model,
+                "res.partner",
+                header,
+                all_data,
+                "id",
+                id_map,
+                deferred_fields,
+                {},
+                None,
+                None,
+                1,
+                10,
+            )
+        assert result is True
+        assert updates == 0
+
 
 class TestImportThreadedEdgeCases:
     """Tests for edge cases and error handling in import_threaded.py."""
+
+    def test_format_odoo_error_not_a_string(self) -> None:
+        """Test that _format_odoo_error handles non-string errors."""
+        error_obj = {"key": "value"}
+        formatted = _format_odoo_error(error_obj)
+        assert formatted == "{'key': 'value'}"
+
+    def test_format_odoo_error_not_a_string(self) -> None:
+        """Test that _format_odoo_error handles non-string errors."""
+        error_obj = {"key": "value"}
+        formatted = _format_odoo_error(error_obj)
+        assert formatted == "{'key': 'value'}"
 
     def test_format_odoo_error_fallback(self) -> None:
         """Test that _format_odoo_error handles non-dictionary strings."""
@@ -344,6 +422,20 @@ class TestImportThreadedEdgeCases:
             # Assert
             assert success is False
             assert count == {}
+
+    @patch("odoo_data_flow.import_threaded._read_data_file", return_value=([], []))
+    def test_import_data_no_header(self, mock_read_file: MagicMock) -> None:
+        """Test that import_data handles a CSV with no header."""
+        success, stats = import_data("dummy.conf", "res.partner", "id", "dummy.csv")
+        assert success is False
+        assert stats == {}
+
+    @patch("odoo_data_flow.import_threaded._read_data_file", return_value=([], []))
+    def test_import_data_no_header(self, mock_read_file: MagicMock) -> None:
+        """Test that import_data handles a CSV with no header."""
+        success, stats = import_data("dummy.conf", "res.partner", "id", "dummy.csv")
+        assert success is False
+        assert stats == {}
 
     @patch("odoo_data_flow.lib.internal.ui._show_error_panel")
     @patch(
