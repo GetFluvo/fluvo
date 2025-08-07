@@ -349,7 +349,9 @@ class TestImportThreadedEdgeCases:
         """Test that a ValueError is raised if the 'id' column is missing."""
         source_file = tmp_path / "source.csv"
         source_file.write_text("name,age\nAlice,30")
-        with pytest.raises(ValueError, match="Source file must contain an 'id' column."):
+        with pytest.raises(
+            ValueError, match="Source file must contain an 'id' column."
+        ):
             _read_data_file(str(source_file), ",", "utf-8", 0)
 
     @patch("builtins.open", side_effect=OSError("Permission denied"))
@@ -374,8 +376,13 @@ class TestImportThreadedEdgeCases:
         assert "Row has 1 columns, but header has 2" in result["failed_lines"][0][-1]
         assert result["error_summary"] == "Malformed CSV row detected"
 
-    @patch("odoo_data_flow.import_threaded.concurrent.futures.as_completed", side_effect=KeyboardInterrupt)
-    def test_run_threaded_pass_keyboard_interrupt(self, mock_as_completed: MagicMock) -> None:
+    @patch(
+        "odoo_data_flow.import_threaded.concurrent.futures.as_completed",
+        side_effect=KeyboardInterrupt,
+    )
+    def test_run_threaded_pass_keyboard_interrupt(
+        self, mock_as_completed: MagicMock
+    ) -> None:
         """Test that a KeyboardInterrupt is handled gracefully."""
         from odoo_data_flow.import_threaded import RPCThreadImport, _run_threaded_pass
 
@@ -464,9 +471,7 @@ class TestRecursiveBatching:
             ["3", "C", "Canada"],
             ["4", "D", "USA"],
         ]
-        batches = list(
-            _recursive_create_batches(data, ["country"], header, 10, False)
-        )
+        batches = list(_recursive_create_batches(data, ["country"], header, 10, False))
         assert len(batches) == 2
         assert batches[0][1][0][2] == "Canada"
         assert batches[1][1][0][2] == "USA"

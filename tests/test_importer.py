@@ -30,7 +30,7 @@ class TestRunImport:
         "fail": False,
         "separator": ",",
         "ignore": [],
-        "context": "{}",
+        "context": {},
         "encoding": "utf-8",
         "o2m": False,
         "groupby": [],
@@ -55,7 +55,7 @@ class TestRunImport:
         # --- Provide a valid return value for the mock ---
         mock_import_data.return_value = (True, {"total_records": 123})
         test_args = self.DEFAULT_ARGS.copy()
-        test_args["context"] = {}
+        test_args["context"] = "{}"
         run_import(**test_args)
         mock_import_data.assert_called_once()
 
@@ -95,7 +95,7 @@ class TestRunImport:
         mock_import_data.return_value = (True, {"total_records": record_count})
 
         test_args = self.DEFAULT_ARGS.copy()
-        test_args["context"] = {}
+        test_args["context"] = "{}"
         test_args.update(
             {
                 "filename": str(source_file),
@@ -111,7 +111,7 @@ class TestRunImport:
         """Tests that a standard call correctly delegates to the core engine."""
         mock_import_data.return_value = (True, {"total_records": 123})
         test_args = self.DEFAULT_ARGS.copy()
-        test_args["context"] = {}
+        test_args["context"] = "{}"
         test_args["deferred_fields"] = ["parent_id"]  # Test with deferred fields
         run_import(**test_args)
         mock_import_data.assert_called_once()
@@ -386,7 +386,11 @@ class TestRunImportEdgeCases:
     @patch("odoo_data_flow.importer._run_preflight_checks", return_value=True)
     @patch("odoo_data_flow.importer.Panel")
     def test_run_import_summary_panel(
-        self, mock_panel: MagicMock, mock_preflight: MagicMock, mock_import_data: MagicMock, tmp_path: Path
+        self,
+        mock_panel: MagicMock,
+        mock_preflight: MagicMock,
+        mock_import_data: MagicMock,
+        tmp_path: Path,
     ) -> None:
         """Tests that the summary panel is displayed with the correct stats."""
         source_file = tmp_path / "source.csv"
@@ -400,4 +404,22 @@ class TestRunImportEdgeCases:
         run_import(**test_args)
         mock_panel.assert_called_once()
         renderable = mock_panel.call_args[0][0]
-        assert "Import for [cyan]res.partner[/cyan] finished successfully." in renderable
+        assert (
+            "Import for [cyan]res.partner[/cyan] finished successfully." in renderable
+        )
+
+
+@patch("odoo_data_flow.importer.import_threaded.import_data")
+def test_run_import_with_vies_disabled(
+    mock_import_data: MagicMock, tmp_path: Path
+) -> None:
+    """Tests that the VIES check is disabled when the context is set."""
+    source_file = tmp_path / "source.csv"
+    source_file.touch()
+    mock_import_data.return_value = (True, {"total_records": 1})
+    test_args = TestRunImport.DEFAULT_ARGS.copy()
+    test_args["filename"] = str(source_file)
+    test_args["context"] = {"vat_check_vies": False}
+    run_import(**test_args)
+    mock_import_data.assert_called_once()
+    assert mock_import_data.call_args.kwargs["context"] == {"vat_check_vies": False}

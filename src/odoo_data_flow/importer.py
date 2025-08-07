@@ -6,6 +6,7 @@ import tasks to the multi-threaded `import_threaded` module.
 """
 
 import csv
+import json
 import os
 import re
 import tempfile
@@ -99,42 +100,34 @@ def run_import(  # noqa: C901
     fail: bool,
     separator: str,
     ignore: Optional[list[str]],
-    context: dict[str, Any],
+    context: Any,  # Accept Any type
     encoding: str,
     o2m: bool,
     groupby: Optional[list[str]],
 ) -> None:
-    """Main entry point for the import command, handling all orchestration.
-
-    This function serves as the primary orchestrator for the import process.
-    It handles model name inference, argument parsing, fail-mode logic,
-    pre-flight checks, and routing to the correct import strategy (single-pass
-    or two-pass deferred).
-
-    Args:
-        config (str): Path to the connection configuration file.
-        filename (str): Path to the source CSV file to import.
-        model (Optional[str]): The target Odoo model. Inferred from filename
-            if not set.
-        deferred_fields (Optional[list[str]]): A list of fields to defer to a
-            second pass.
-        unique_id_field (Optional[str]): The name of the unique ID column.
-        no_preflight_checks (bool): If True, skips all pre-flight checks.
-        headless (bool): If True, runs in non-interactive mode.
-        worker (int): The number of simultaneous connections to use.
-        batch_size (int): The number of records per batch.
-        skip (int): The number of initial lines to skip.
-        fail (bool): If True, runs in fail mode, processing a _fail.csv file.
-        separator (str): The delimiter used in the CSV file.
-        ignore (Optional[list[str]]): A list of columns to ignore
-            from the import.
-        context (dict[str, Any]): The Odoo context dictionary to use for the
-            import.
-        encoding (str): The file encoding of the source file.
-        o2m (bool): If True, enables special handling for one-to-many files.
-        groupby (Optional[list[str]]): A list of columns to group data by.
-    """
+    """Main entry point for the import command, handling all orchestration."""
     log.info("Starting data import process from file...")
+
+    parsed_context: dict[str, Any]
+    if isinstance(context, str):
+        try:
+            parsed_context = json.loads(context)
+            if not isinstance(parsed_context, dict):
+                raise TypeError
+        except (json.JSONDecodeError, TypeError):
+            _show_error_panel(
+                "Invalid Context",
+                "The --context argument must be a valid JSON dictionary string.",
+            )
+            return
+    elif isinstance(context, dict):
+        parsed_context = context
+    else:
+        _show_error_panel(
+            "Invalid Context", "The context must be a dictionary or a JSON string."
+        )
+        return
+
     if not model:
         model = _infer_model_from_filename(filename)
         if not model:
@@ -217,7 +210,7 @@ def run_import(  # noqa: C901
         unique_id_field=final_uid_field,
         file_csv=file_to_process,
         deferred_fields=final_deferred,
-        context=context,
+        context=parsed_context,
         fail_file=fail_output_file,
         encoding=encoding,
         separator=separator,

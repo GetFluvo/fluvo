@@ -11,7 +11,6 @@ import sys
 import time  # noqa
 from collections.abc import Generator, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed  # noqa
-from json import JSONDecodeError
 from typing import Any, Optional, TextIO
 
 from rich.console import Console
@@ -375,9 +374,7 @@ def _create_batch_individually(
             new_record = model.with_context(context).create(clean_vals)
             id_map[source_id] = new_record.id
         except IndexError as e:
-            error_message = (
-                f"Malformed row detected (row {i + 1} in batch): {e}"
-            )
+            error_message = f"Malformed row detected (row {i + 1} in batch): {e}"
             failed_lines.append([*list(line), error_message])
             if "Fell back to create" in error_summary:
                 error_summary = "Malformed CSV row detected"
@@ -393,7 +390,6 @@ def _create_batch_individually(
         "failed_lines": failed_lines,
         "error_summary": error_summary,
     }
-
 
 
 def _execute_load_batch(
@@ -487,11 +483,13 @@ def _execute_load_batch(
         # which often happens when a proxy/firewall returns an HTML error page.
         if "Expecting value" in str(e):
             error_msg = (
-                "Received a non-JSON response from the server. This often means a proxy "
-                "server timed out or blocked the request due to its size or content. Check the "
-                "server/proxy logs and configuration (e.g., timeout, client_max_body_size, WAF rules)."
+                "Received a non-JSON response from the server. This often means a "
+                "proxy server timed out or blocked the request due to its size or "
+                "content. Check the server/proxy logs and configuration (e.g., "
+                "timeout, client_max_body_size, WAF rules)."
             )
-            # The standard library's JSONDecodeError holds the invalid text in the 'doc' attribute.
+            # The standard library's JSONDecodeError holds
+            # the invalid text in the 'doc' attribute.
             raw_response = getattr(e, "doc", "Raw response not available in exception.")
             progress.console.print(
                 f"[bold red]Network/Proxy Error:[/] {error_msg}\n"
@@ -551,7 +549,11 @@ def _execute_write_batch(
     try:
         # The core of the fix: use model.write(ids, vals) for batch updates.
         model.with_context(context).write(ids, vals)
-        return {"failed_writes": [], "successful_writes": len(ids), "success": True}
+        return {
+            "failed_writes": [],
+            "successful_writes": len(ids),
+            "success": True,
+        }
     except Exception as e:
         error_message = str(e).replace("\n", " | ")
         # If the batch fails, all IDs in it are considered failed.
@@ -864,7 +866,11 @@ def _orchestrate_pass_2(
     rpc_pass_2 = RPCThreadImport(
         max_connection, progress, pass_2_task, fail_writer, fail_handle
     )
-    thread_state_2 = {"model": model_obj, "progress": progress, "context": context}
+    thread_state_2 = {
+        "model": model_obj,
+        "progress": progress,
+        "context": context,
+    }
     pass_2_results, aborted = _run_threaded_pass(
         rpc_pass_2,
         _execute_write_batch,
