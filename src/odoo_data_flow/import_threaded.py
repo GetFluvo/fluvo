@@ -475,7 +475,7 @@ def _execute_load_batch(
             raise ValueError(error)
 
         created_ids = res.get("ids", [])
-        if len(created_ids) != len(batch_lines):
+        if len(created_ids) != len(load_lines):
             raise ValueError("Record count mismatch.")
 
         id_map = {line[uid_index]: created_ids[i] for i, line in enumerate(batch_lines)}

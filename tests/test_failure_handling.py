@@ -190,3 +190,36 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
     assert "Row has 1 columns, but header has 3" in failed_rows[1][-1]
     # Check the error message for the empty row
     assert "Row has 0 columns, but header has 3" in failed_rows[2][-1]
+
+
+@patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+def test_load_with_ignored_columns(mock_get_conn: MagicMock, tmp_path: Path) -> None:
+    """Test that the load method is called with correctly filtered data."""
+    # 1. ARRANGE
+    source_file = tmp_path / "source.csv"
+    header = ["id", "name", "age"]
+    data = [["1", "Alice", "30"]]
+    with open(source_file, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        writer.writerows(data)
+
+    mock_model = MagicMock()
+    mock_model.load.return_value = {"ids": [1], "messages": []}
+    mock_get_conn.return_value.get_model.return_value = mock_model
+
+    # 2. ACT
+    import_threaded.import_data(
+        config_file="dummy.conf",
+        model="res.partner",
+        unique_id_field="id",
+        file_csv=str(source_file),
+        ignore=["age"],
+        separator=",",
+    )
+
+    # 3. ASSERT
+    mock_model.load.assert_called_once()
+    load_args = mock_model.load.call_args[0]
+    assert load_args[0] == ["id", "name"]  # Header
+    assert load_args[1] == [["1", "Alice"]]  # Data
