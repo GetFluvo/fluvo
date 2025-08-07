@@ -1,5 +1,6 @@
 """Tests for the refactored, low-level, multi-threaded import logic."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -344,6 +345,13 @@ class TestImportThreadedEdgeCases:
         with pytest.raises(ValueError):
             _read_data_file("any.csv", ",", "utf-8", 0)
 
+    def test_read_data_file_no_id_column(self, tmp_path: Path) -> None:
+        """Test that a ValueError is raised if the 'id' column is missing."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("name,age\nAlice,30")
+        with pytest.raises(ValueError, match="Source file must contain an 'id' column."):
+            _read_data_file(str(source_file), ",", "utf-8", 0)
+
     @patch("builtins.open", side_effect=OSError("Permission denied"))
     def test_setup_fail_file_os_error(self, mock_open: MagicMock) -> None:
         """Test that _setup_fail_file handles an OSError."""
@@ -365,6 +373,19 @@ class TestImportThreadedEdgeCases:
         assert len(result["failed_lines"]) == 1
         assert "malformed" in result["failed_lines"][0][-1]
         assert result["error_summary"] == "Malformed CSV row detected"
+
+    @patch("odoo_data_flow.import_threaded.concurrent.futures.as_completed", side_effect=KeyboardInterrupt)
+    def test_run_threaded_pass_keyboard_interrupt(self, mock_as_completed: MagicMock) -> None:
+        """Test that a KeyboardInterrupt is handled gracefully."""
+        from odoo_data_flow.import_threaded import RPCThreadImport, _run_threaded_pass
+
+        rpc_thread = RPCThreadImport(1, Progress(), MagicMock())
+        rpc_thread.task_id = rpc_thread.progress.add_task("test")
+        target_func = MagicMock()
+        target_func.__name__ = "mock_func"
+        with patch.object(rpc_thread, "spawn_thread", return_value=MagicMock()):
+            _, aborted = _run_threaded_pass(rpc_thread, target_func, [(1, {})], {})
+            assert aborted is True
 
     @patch(
         "odoo_data_flow.import_threaded.conf_lib.get_connection_from_config",
@@ -413,3 +434,74 @@ class TestImportThreadedEdgeCases:
             call_args, _ = mock_show_error.call_args
             assert call_args[0] == "Odoo Connection Error"
             assert "Could not connect to Odoo" in call_args[1]
+
+    def test_filter_ignored_columns(self) -> None:
+        """Test that ignored columns are correctly filtered."""
+        from odoo_data_flow.import_threaded import _filter_ignored_columns
+
+        header = ["id", "name", "age", "city"]
+        data = [
+            ["1", "Alice", "30", "New York"],
+            ["2", "Bob", "25", "London"],
+        ]
+        ignore = ["age", "city"]
+        new_header, new_data = _filter_ignored_columns(ignore, header, data)
+        assert new_header == ["id", "name"]
+        assert new_data == [["1", "Alice"], ["2", "Bob"]]
+
+
+class TestRecursiveBatching:
+    """Tests for the recursive batch creation logic."""
+
+    def test_recursive_batching_single_column(self) -> None:
+        """Test recursive batching with a single grouping column."""
+        from odoo_data_flow.import_threaded import _recursive_create_batches
+
+        header = ["id", "name", "country"]
+        data = [
+            ["1", "A", "USA"],
+            ["2", "B", "USA"],
+            ["3", "C", "Canada"],
+            ["4", "D", "USA"],
+        ]
+        batches = list(
+            _recursive_create_batches(data, ["country"], header, 10, False)
+        )
+        assert len(batches) == 2
+        assert batches[0][1][0][2] == "Canada"
+        assert batches[1][1][0][2] == "USA"
+
+    def test_recursive_batching_multiple_columns(self) -> None:
+        """Test recursive batching with multiple grouping columns."""
+        from odoo_data_flow.import_threaded import _recursive_create_batches
+
+        header = ["id", "name", "country", "state"]
+        data = [
+            ["1", "A", "USA", "CA"],
+            ["2", "B", "USA", "NY"],
+            ["3", "C", "Canada", "QC"],
+            ["4", "D", "USA", "CA"],
+        ]
+        batches = list(
+            _recursive_create_batches(data, ["country", "state"], header, 10, False)
+        )
+        assert len(batches) == 3
+        # Note: The order of batches is not guaranteed, so we check the content
+        # of each batch.
+        batch_contents = [tuple(row) for _, batch_data in batches for row in batch_data]
+        assert ("1", "A", "USA", "CA") in batch_contents
+        assert ("4", "D", "USA", "CA") in batch_contents
+        assert ("2", "B", "USA", "NY") in batch_contents
+        assert ("3", "C", "Canada", "QC") in batch_contents
+
+    def test_recursive_batching_group_col_not_found(self) -> None:
+        """Test that an error is logged if a grouping column is not found."""
+        from odoo_data_flow.import_threaded import _recursive_create_batches
+
+        header = ["id", "name"]
+        data = [["1", "A"]]
+        with patch("odoo_data_flow.import_threaded.log") as mock_log:
+            list(_recursive_create_batches(data, ["non_existent"], header, 10, False))
+            mock_log.error.assert_called_once_with(
+                "Grouping column 'non_existent' not found. Cannot use --groupby."
+            )

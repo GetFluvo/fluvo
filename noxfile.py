@@ -192,7 +192,16 @@ def tests_compiled(session: nox.Session) -> None:
 def coverage(session: nox.Session) -> None:
     """Produce the coverage report."""
     args = session.posargs or ["report"]
-    session.install("pytest", "coverage[toml]", "pytest-cov", "pytest-mock")
+    session.install(
+        "pytest",
+        "coverage[toml]",
+        "pytest-cov",
+        "pytest-mock",
+        "requests",
+        "rich",
+        "polars",
+        "click",
+    )
     session.install("-e", ".")
     session.log("Running pytest with coverage...")
     session.run("pytest", "--cov=src", "--cov-report=xml")

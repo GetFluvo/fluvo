@@ -360,3 +360,44 @@ class TestRunImportEdgeCases:
         assert kwargs["unique_id_field"] == "id"
         assert "tmp" in kwargs["file_csv"]  # Check that a temp file is used
         assert kwargs["context"] == {"tracking_disable": True}
+
+    @patch("odoo_data_flow.importer._show_error_panel")
+    def test_run_import_file_not_found(self, mock_show_error: MagicMock) -> None:
+        """Tests that the import fails if the source file is not found."""
+        test_args = TestRunImport.DEFAULT_ARGS.copy()
+        test_args["filename"] = "non_existent_file.csv"
+        run_import(**test_args)
+        mock_show_error.assert_called_once()
+
+    @patch("odoo_data_flow.importer._show_error_panel")
+    def test_run_import_invalid_json_context(
+        self, mock_show_error: MagicMock, tmp_path: Path
+    ) -> None:
+        """Tests that the import fails if the context is not valid JSON."""
+        source_file = tmp_path / "source.csv"
+        source_file.touch()
+        test_args = TestRunImport.DEFAULT_ARGS.copy()
+        test_args["filename"] = str(source_file)
+        test_args["context"] = "this is not json"
+        run_import(**test_args)
+        mock_show_error.assert_called_once()
+
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    @patch("odoo_data_flow.importer._run_preflight_checks", return_value=True)
+    @patch("odoo_data_flow.importer.Panel")
+    def test_run_import_summary_panel(
+        self, mock_panel: MagicMock, mock_preflight: MagicMock, mock_import_data: MagicMock, tmp_path: Path
+    ) -> None:
+        """Tests that the summary panel is displayed with the correct stats."""
+        source_file = tmp_path / "source.csv"
+        source_file.touch()
+        mock_import_data.return_value = (
+            True,
+            {"total_records": 10, "created_records": 8, "updated_relations": 2},
+        )
+        test_args = TestRunImport.DEFAULT_ARGS.copy()
+        test_args["filename"] = str(source_file)
+        run_import(**test_args)
+        mock_panel.assert_called_once()
+        renderable = mock_panel.call_args[0][0]
+        assert "Import for [cyan]res.partner[/cyan] finished successfully." in renderable
