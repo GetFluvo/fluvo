@@ -52,7 +52,7 @@ def run_diagnostic(config_file: str, num_records: int) -> None:
         console.print("\n[bold]Step 1: Attempting to connect to Odoo...[/bold]")
         connection = conf_lib.get_connection_from_config(config_file)
         model = connection.get_model("res.partner")
-        version = connection.version()
+        version = connection.common.version()
         console.print(
             f"[green]  -> Connection successful![/green]\n"
             f"     - Odoo Version: {version.get('server_serie', 'N/A')}\n"
