@@ -9,7 +9,9 @@ from rich.progress import Progress
 from odoo_data_flow.import_threaded import (
     _create_batch_individually,
     _create_batches,
+    _execute_load_batch,
     _format_odoo_error,
+    _orchestrate_pass_1,
     _orchestrate_pass_2,
     _read_data_file,
     _setup_fail_file,
@@ -110,6 +112,195 @@ class TestImportDataRefactored:
 
         # Assert
         assert result is False
+
+    @patch("odoo_data_flow.import_threaded._create_batches")
+    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    def test_orchestrate_pass_1_sorts_hierarchical_data(
+        self, mock_run_pass: MagicMock, mock_create_batches: MagicMock
+    ) -> None:
+        """Verify Pass 1 sorts data by parent_id if present and not o2m."""
+        mock_run_pass.return_value = ({}, False)
+        header = ["id", "name", "parent_id"]
+        data = [
+            ["child1", "C1", "parent1"],
+            ["parent1", "P1", ""],
+            ["child2", "C2", "parent1"],
+        ]
+
+        with Progress() as progress:
+            _orchestrate_pass_1(
+                progress,
+                MagicMock(),
+                "res.partner",
+                header,
+                data,
+                "id",
+                [],
+                [],
+                {},
+                None,
+                None,
+                1,
+                10,
+                o2m=False,
+                split_by_cols=None,
+            )
+
+        # Check that the data passed to _create_batches was sorted
+        call_args = mock_create_batches.call_args[0]
+        sorted_data = call_args[0]
+        assert sorted_data[0][0] == "parent1"
+        assert sorted_data[1][0] == "child1"
+        assert sorted_data[2][0] == "child2"
+
+    @patch("odoo_data_flow.import_threaded._create_batches")
+    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    def test_orchestrate_pass_1_does_not_sort_for_o2m(
+        self, mock_run_pass: MagicMock, mock_create_batches: MagicMock
+    ) -> None:
+        """Verify Pass 1 does NOT sort data when o2m is True."""
+        mock_run_pass.return_value = ({}, False)
+        header = ["id", "name", "parent_id"]
+        data = [
+            ["child1", "C1", "parent1"],
+            ["parent1", "P1", ""],
+        ]
+
+        with Progress() as progress:
+            _orchestrate_pass_1(
+                progress,
+                MagicMock(),
+                "res.partner",
+                header,
+                data,
+                "id",
+                [],
+                [],
+                {},
+                None,
+                None,
+                1,
+                10,
+                o2m=True,
+                split_by_cols=None,
+            )
+
+        # Check that the data passed to _create_batches was NOT sorted
+        call_args = mock_create_batches.call_args[0]
+        unsorted_data = call_args[0]
+        assert unsorted_data[0][0] == "child1"
+        assert unsorted_data[1][0] == "parent1"
+
+
+class TestExecuteLoadBatch:
+    """Tests for the _execute_load_batch function's resilience features."""
+
+    @patch("odoo_data_flow.import_threaded._create_batch_individually")
+    def test_batch_scales_down_on_memory_error(
+        self, mock_create_individually: MagicMock
+    ) -> None:
+        """Verify batch size is reduced on memory errors and eventually succeeds."""
+        mock_model = MagicMock()
+        # Fail on batches of 4, then 2, then succeed on 1
+        mock_model.load.side_effect = [
+            Exception("out of memory"),
+            Exception("memory error"),
+            {"ids": [1]},
+            {"ids": [2]},
+            {"ids": [3]},
+            {"ids": [4]},
+        ]
+        mock_progress = MagicMock()
+        thread_state = {
+            "model": mock_model,
+            "progress": mock_progress,
+            "unique_id_field_index": 0,
+            "ignore_list": [],
+        }
+        batch_header = ["id", "name"]
+        batch_lines = [
+            ["rec1", "A"],
+            ["rec2", "B"],
+            ["rec3", "C"],
+            ["rec4", "D"],
+        ]
+
+        result = _execute_load_batch(thread_state, batch_lines, batch_header, 1)
+
+        assert result["success"] is True
+        assert len(result["id_map"]) == 4
+        assert result["id_map"] == {"rec1": 1, "rec2": 2, "rec3": 3, "rec4": 4}
+        assert mock_model.load.call_count == 6
+        mock_create_individually.assert_not_called()
+        mock_progress.console.print.assert_any_call(
+            "[yellow]WARN:[/] Batch 1 hit scalable error. "
+            "Reducing chunk size to 2 and retrying."
+        )
+        mock_progress.console.print.assert_any_call(
+            "[yellow]WARN:[/] Batch 1 hit scalable error. "
+            "Reducing chunk size to 1 and retrying."
+        )
+
+    @patch("odoo_data_flow.import_threaded._create_batch_individually")
+    def test_batch_scales_down_on_gateway_error(
+        self, mock_create_individually: MagicMock
+    ) -> None:
+        """Verify batch size is reduced on 502 gateway errors."""
+        mock_model = MagicMock()
+        mock_model.load.side_effect = [
+            Exception("502 Bad Gateway"),
+            {"ids": [1, 2]},
+            {"ids": [3, 4]},
+        ]
+        mock_progress = MagicMock()
+        thread_state = {
+            "model": mock_model,
+            "progress": mock_progress,
+            "unique_id_field_index": 0,
+            "ignore_list": [],
+        }
+        batch_header = ["id", "name"]
+        batch_lines = [["rec1", "A"], ["rec2", "B"], ["rec3", "C"], ["rec4", "D"]]
+
+        result = _execute_load_batch(thread_state, batch_lines, batch_header, 1)
+
+        assert result["success"] is True
+        assert len(result["id_map"]) == 4
+        assert mock_model.load.call_count == 3
+        mock_create_individually.assert_not_called()
+        mock_progress.console.print.assert_called_once_with(
+            "[yellow]WARN:[/] Batch 1 hit scalable error. "
+            "Reducing chunk size to 2 and retrying."
+        )
+
+    @patch("odoo_data_flow.import_threaded._create_batch_individually")
+    def test_batch_falls_back_for_non_scalable_error(
+        self, mock_create_individually: MagicMock
+    ) -> None:
+        """Verify fallback to create for regular errors."""
+        mock_model = MagicMock()
+        mock_model.load.side_effect = [ValueError("Invalid field value")]
+        mock_create_individually.return_value = {
+            "id_map": {"rec1": 1},
+            "failed_lines": [["rec2", "B", "Error"]],
+        }
+        mock_progress = MagicMock()
+        thread_state = {
+            "model": mock_model,
+            "progress": mock_progress,
+            "unique_id_field_index": 0,
+            "ignore_list": [],
+        }
+        batch_header = ["id", "name"]
+        batch_lines = [["rec1", "A"], ["rec2", "B"]]
+
+        result = _execute_load_batch(thread_state, batch_lines, batch_header, 1)
+
+        assert result["success"] is True
+        assert result["id_map"] == {"rec1": 1}
+        assert len(result["failed_lines"]) == 1
+        mock_model.load.assert_called_once()
+        mock_create_individually.assert_called_once()
 
 
 class TestBatchingHelpers:

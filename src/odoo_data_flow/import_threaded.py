@@ -398,27 +398,23 @@ def _execute_load_batch(
     batch_header: list[str],
     batch_number: int,
 ) -> dict[str, Any]:
-    """Executes a batch import with a `load` to `create` fallback.
+    """Executes a batch import with dynamic scaling and `create` fallback.
 
-    This is the core worker function for Pass 1. It first attempts a fast,
-    bulk import using the `load` method. If the entire batch fails for any
-    reason (e.g., a single bad record causes a rollback), it automatically
-    falls back to a slower, record-by-record `create` loop. This strategy
-    combines the speed of `load` for valid batches with the detailed error
-    reporting of `create` for problematic ones.
+    This is the core worker for Pass 1. It processes a given batch of records
+    by first attempting a fast `load`. If a memory or gateway-related error
+    (like a 502) is detected, it automatically reduces the size of the data
+    chunks it sends and retries. For other errors, it falls back to a
+    record-by-record `create` for only the failed chunk.
 
     Args:
-        thread_state (dict[str, Any]): Shared state from the orchestrator,
-            containing the Odoo model object, context, and unique ID index.
+        thread_state (dict[str, Any]): Shared state from the orchestrator.
         batch_lines (list[list[Any]]): The list of data rows for this batch.
         batch_header (list[str]): The list of header columns for this batch.
         batch_number (int): The identifier for this batch, used for logging.
 
     Returns:
-        dict[str, Any]: A dictionary containing the results of the batch,
-        with two keys: `id_map` (a dict of `{source_id: db_id}` for
-        successful records) and `failed_lines` (a list of rows for
-        records that failed the `create` fallback).
+        dict[str, Any]: A dictionary containing the aggregated results for
+        the entire batch, including `id_map` and `failed_lines`.
     """
     model, context, progress = (
         thread_state["model"],
@@ -429,7 +425,6 @@ def _execute_load_batch(
     ignore_list = thread_state.get("ignore_list", [])
 
     if thread_state.get("force_create"):
-        # Use the rich console to print status messages
         progress.console.print(
             f"Batch {batch_number}: Fail mode active, using `create` method."
         )
@@ -439,87 +434,93 @@ def _execute_load_batch(
         result["success"] = bool(result.get("id_map"))
         return result
 
-    # Filter header and data for this batch before `load`
-    if ignore_list:
-        ignore_set = set(ignore_list)
-        indices_to_keep = [
-            i for i, h in enumerate(batch_header) if h.split("/")[0] not in ignore_set
-        ]
-        load_header = [batch_header[i] for i in indices_to_keep]
+    lines_to_process = list(batch_lines)
+    aggregated_id_map: dict[str, int] = {}
+    aggregated_failed_lines: list[list[Any]] = []
+    chunk_size = len(lines_to_process)
 
-        # --- Start of Fix ---
-        # This check is crucial to prevent index errors on malformed rows.
-        # It ensures we don't try to access an index that doesn't exist.
-        max_index_needed = max(indices_to_keep) if indices_to_keep else 0
-        load_lines = []
-        for row in batch_lines:
-            if len(row) > max_index_needed:
-                load_lines.append([row[i] for i in indices_to_keep])
-            else:
-                # Log a warning for the malformed row if you have a logger instance
-                # log.warning(f"Skipping malformed row: {row}")
-                pass  # Or handle the error as appropriate
-        # --- End of Fix ---
-    else:
-        load_header = batch_header
-        load_lines = batch_lines
+    while lines_to_process:
+        current_chunk = lines_to_process[:chunk_size]
+        load_header, load_lines = batch_header, current_chunk
 
-    try:
-        log.debug(f"Attempting `load` for batch {batch_number}...")
-        res = model.load(load_header, load_lines, context=context)
-        if res.get("messages"):
-            error = res["messages"][0].get("message", "Batch load failed.")
-            raise ValueError(error)
+        if ignore_list:
+            ignore_set = set(ignore_list)
+            indices_to_keep = [
+                i
+                for i, h in enumerate(batch_header)
+                if h.split("/")[0] not in ignore_set
+            ]
+            load_header = [batch_header[i] for i in indices_to_keep]
+            max_index = max(indices_to_keep) if indices_to_keep else 0
+            load_lines = [
+                [row[i] for i in indices_to_keep]
+                for row in current_chunk
+                if len(row) > max_index
+            ]
 
-        created_ids = res.get("ids", [])
-        if len(created_ids) != len(load_lines):
-            raise ValueError("Record count mismatch.")
+        if not load_lines:
+            lines_to_process = lines_to_process[chunk_size:]
+            continue
 
-        id_map = {line[uid_index]: created_ids[i] for i, line in enumerate(batch_lines)}
-        # This is the successful "happy path" for the `load` method.
-        return {"id_map": id_map, "failed_lines": [], "success": True}
-    except ValueError as e:
-        # This is a special case to catch non-JSON responses from the server,
-        # which often happens when a proxy/firewall returns an HTML error page.
-        if "Expecting value" in str(e):
-            error_msg = (
-                "Received a non-JSON response from the server. This often means a "
-                "proxy server timed out or blocked the request due to its size or "
-                "content. Check the server/proxy logs and configuration (e.g., "
-                "timeout, client_max_body_size, WAF rules)."
+        try:
+            log.debug(f"Attempting `load` for chunk of batch {batch_number}...")
+            res = model.load(load_header, load_lines, context=context)
+            if res.get("messages"):
+                error = res["messages"][0].get("message", "Batch load failed.")
+                raise ValueError(error)
+
+            created_ids = res.get("ids", [])
+            if len(created_ids) != len(load_lines):
+                raise ValueError("Record count mismatch after load.")
+
+            id_map = {
+                line[uid_index]: created_ids[i] for i, line in enumerate(current_chunk)
+            }
+            aggregated_id_map.update(id_map)
+            lines_to_process = lines_to_process[chunk_size:]
+
+        except Exception as e:
+            error_str = str(e).lower()
+            is_scalable_error = (
+                "memory" in error_str
+                or "out of memory" in error_str
+                or "502" in error_str
+                or "gateway" in error_str
+                or "proxy" in error_str
+                or "timeout" in error_str
             )
-            # The standard library's JSONDecodeError holds
-            # the invalid text in the 'doc' attribute.
-            raw_response = getattr(e, "doc", "Raw response not available in exception.")
+
+            if is_scalable_error and chunk_size > 1:
+                chunk_size = max(1, chunk_size // 2)
+                progress.console.print(
+                    f"[yellow]WARN:[/] Batch {batch_number} hit scalable error. "
+                    f"Reducing chunk size to {chunk_size} and retrying."
+                )
+                continue
+
+            clean_error = str(e).strip().replace("\n", " ")
             progress.console.print(
-                f"[bold red]Network/Proxy Error:[/] {error_msg}\n"
-                f"[bold]Server Response:[/bold]\n{raw_response[:500]}..."
+                f"[yellow]WARN:[/] Batch {batch_number} failed `load` "
+                f"('{clean_error}'). "
+                f"Falling back to `create` for {len(current_chunk)} records."
             )
+            fallback_result = _create_batch_individually(
+                model,
+                current_chunk,
+                batch_header,
+                uid_index,
+                context,
+                ignore_list,
+            )
+            aggregated_id_map.update(fallback_result.get("id_map", {}))
+            aggregated_failed_lines.extend(fallback_result.get("failed_lines", []))
+            lines_to_process = lines_to_process[chunk_size:]
 
-        clean_error = str(e).strip().replace("\n", " ")
-        progress.console.print(
-            f"[yellow]WARN:[/] Batch {batch_number} failed `load` ('{clean_error}'). "
-            f"Falling back to `create`."
-        )
-        result = _create_batch_individually(
-            model, batch_lines, batch_header, uid_index, context, ignore_list
-        )
-        result["success"] = bool(result.get("id_map"))
-        return result
-    except Exception as e:
-        clean_error = str(e).strip().replace("\n", " ")
-        # Use the rich console to print warnings without breaking the layout
-        progress.console.print(
-            f"[yellow]WARN:[/] Batch {batch_number} failed `load` ('{clean_error}'). "
-            f"Falling back to `create`."
-        )
-        # Fallback to create
-        result = _create_batch_individually(
-            model, batch_lines, batch_header, uid_index, context, ignore_list
-        )
-        # The batch is a success if at least one record was created in the fallback.
-        result["success"] = bool(result.get("id_map"))
-        return result
+    return {
+        "id_map": aggregated_id_map,
+        "failed_lines": aggregated_failed_lines,
+        "success": True,
+    }
 
 
 def _execute_write_batch(
@@ -549,7 +550,11 @@ def _execute_write_batch(
     try:
         # The core of the fix: use model.write(ids, vals) for batch updates.
         model.write(ids, vals, context=context)
-        return {"failed_writes": [], "successful_writes": len(ids), "success": True}
+        return {
+            "failed_writes": [],
+            "successful_writes": len(ids),
+            "success": True,
+        }
     except Exception as e:
         error_message = str(e).replace("\n", " | ")
         # If the batch fails, all IDs in it are considered failed.
@@ -746,6 +751,15 @@ def _orchestrate_pass_1(
     )
     pass_1_header, pass_1_data = header, all_data
     pass_1_ignore_list = deferred_fields + ignore
+
+    # Conditionally sort data for hierarchical imports, but NOT for o2m.
+    if not o2m and "parent_id" in pass_1_header:
+        log.info("Parent ID found, sorting data for hierarchical import.")
+        parent_id_index = pass_1_header.index("parent_id")
+        # Sort by parent_id presence (empty ones first), then by parent_id value.
+        pass_1_data.sort(
+            key=lambda row: (row[parent_id_index] != "", row[parent_id_index])
+        )
 
     try:
         pass_1_uid_index = pass_1_header.index(unique_id_field)
