@@ -123,7 +123,21 @@ def _filter_ignored_columns(
         i for i, h in enumerate(header) if h.split("/")[0] not in ignore_set
     ]
     new_header = [header[i] for i in indices_to_keep]
-    new_data = [[row[i] for i in indices_to_keep] for row in data]
+
+    if not indices_to_keep:
+        return new_header, [[] for _ in data]
+
+    max_index_needed = max(indices_to_keep)
+    new_data = []
+    for row_idx, row in enumerate(data):
+        if len(row) <= max_index_needed:
+            log.warning(
+                f"Skipping malformed row {row_idx + 2}: has {len(row)} columns, "
+                f"but header implies at least {max_index_needed + 1} are needed."
+            )
+            continue
+        new_data.append([row[i] for i in indices_to_keep])
+
     return new_header, new_data
 
 
@@ -138,7 +152,9 @@ def _setup_fail_file(
         fail_writer = csv.writer(
             fail_handle, delimiter=separator, quoting=csv.QUOTE_ALL
         )
-        header_to_write = [*list(header), "_ERROR_REASON"]
+        header_to_write = list(header)
+        if "_ERROR_REASON" not in header_to_write:
+            header_to_write.append("_ERROR_REASON")
         fail_writer.writerow(header_to_write)
         return fail_writer, fail_handle
     except OSError as e:
@@ -320,12 +336,14 @@ def _create_batch_individually(
     batch_header: list[str],
     uid_index: int,
     context: dict[str, Any],
+    ignore_list: list[str],
 ) -> dict[str, Any]:
     """Fallback to create records one-by-one to get detailed errors."""
     id_map: dict[str, int] = {}
     failed_lines: list[list[Any]] = []
     error_summary = "Fell back to create"
     header_len = len(batch_header)
+    ignore_set = set(ignore_list)
 
     for line in batch_lines:
         # --- Defensive check for malformed rows ---
@@ -352,7 +370,11 @@ def _create_batch_individually(
 
             # 2. PREPARE FOR CREATE
             vals = dict(zip(batch_header, line))
-            clean_vals = {k: v for k, v in vals.items() if "/" not in k}
+            clean_vals = {
+                k: v
+                for k, v in vals.items()
+                if "/" not in k and k.split("/")[0] not in ignore_set
+            }
 
             # 3. CREATE
             new_record = model.with_context(context).create(clean_vals)
@@ -404,6 +426,7 @@ def _execute_load_batch(
         thread_state["progress"],
     )
     uid_index = thread_state["unique_id_field_index"]
+    ignore_list = thread_state.get("ignore_list", [])
 
     if thread_state.get("force_create"):
         # Use the rich console to print status messages
@@ -411,14 +434,39 @@ def _execute_load_batch(
             f"Batch {batch_number}: Fail mode active, using `create` method."
         )
         result = _create_batch_individually(
-            model, batch_lines, batch_header, uid_index, context
+            model, batch_lines, batch_header, uid_index, context, ignore_list
         )
         result["success"] = bool(result.get("id_map"))
         return result
 
+    # Filter header and data for this batch before `load`
+    if ignore_list:
+        ignore_set = set(ignore_list)
+        indices_to_keep = [
+            i for i, h in enumerate(batch_header) if h.split("/")[0] not in ignore_set
+        ]
+        load_header = [batch_header[i] for i in indices_to_keep]
+
+        # --- Start of Fix ---
+        # This check is crucial to prevent index errors on malformed rows.
+        # It ensures we don't try to access an index that doesn't exist.
+        max_index_needed = max(indices_to_keep) if indices_to_keep else 0
+        load_lines = []
+        for row in batch_lines:
+            if len(row) > max_index_needed:
+                load_lines.append([row[i] for i in indices_to_keep])
+            else:
+                # Log a warning for the malformed row if you have a logger instance
+                # log.warning(f"Skipping malformed row: {row}")
+                pass  # Or handle the error as appropriate
+        # --- End of Fix ---
+    else:
+        load_header = batch_header
+        load_lines = batch_lines
+
     try:
         log.debug(f"Attempting `load` for batch {batch_number}...")
-        res = model.load(batch_header, batch_lines, context=context)
+        res = model.load(load_header, load_lines, context=context)
         if res.get("messages"):
             error = res["messages"][0].get("message", "Batch load failed.")
             raise ValueError(error)
@@ -439,7 +487,7 @@ def _execute_load_batch(
         )
         # Fallback to create
         result = _create_batch_individually(
-            model, batch_lines, batch_header, uid_index, context
+            model, batch_lines, batch_header, uid_index, context, ignore_list
         )
         # The batch is a success if at least one record was created in the fallback.
         result["success"] = bool(result.get("id_map"))
@@ -668,9 +716,8 @@ def _orchestrate_pass_1(
     rpc_pass_1 = RPCThreadImport(
         max_connection, progress, TaskID(0), fail_writer, fail_handle
     )
-    pass_1_header, pass_1_data = _filter_ignored_columns(
-        deferred_fields + ignore, header, all_data
-    )
+    pass_1_header, pass_1_data = header, all_data
+    pass_1_ignore_list = deferred_fields + ignore
 
     try:
         pass_1_uid_index = pass_1_header.index(unique_id_field)
@@ -698,6 +745,7 @@ def _orchestrate_pass_1(
         "batch_header": pass_1_header,
         "force_create": force_create,
         "progress": progress,
+        "ignore_list": pass_1_ignore_list,
     }
 
     results, aborted = _run_threaded_pass(

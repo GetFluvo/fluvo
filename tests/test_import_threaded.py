@@ -320,7 +320,7 @@ class TestImportThreadedEdgeCases:
         batch_lines = [["record1"]]
 
         result = _create_batch_individually(
-            mock_model, batch_lines, batch_header, 0, {}
+            mock_model, batch_lines, batch_header, 0, {}, []
         )
 
         assert len(result["failed_lines"]) == 1
