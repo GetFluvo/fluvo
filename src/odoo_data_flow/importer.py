@@ -20,7 +20,7 @@ from rich.panel import Panel
 
 from . import import_threaded
 from .enums import PreflightMode
-from .lib import preflight
+from .lib import preflight, sort
 from .lib.internal.ui import _show_error_panel
 from .logging_config import log
 
@@ -174,8 +174,24 @@ def run_import(  # noqa: C901
             separator=separator,
             unique_id_field=unique_id_field,
             ignore=ignore or [],
+            o2m=o2m,
         ):
             return
+
+    # --- Strategy Execution ---
+    sorted_temp_file = None
+    if import_plan.get("strategy") == "sort_and_one_pass_load":
+        log.info("Executing 'Sort & One-Pass Load' strategy.")
+        sorted_temp_file = sort.sort_for_self_referencing(
+            file_to_process,
+            id_column=import_plan["id_column"],
+            parent_column=import_plan["parent_column"],
+            encoding=encoding,
+        )
+        if sorted_temp_file:
+            file_to_process = sorted_temp_file
+            # Disable deferred fields for this strategy
+            deferred_fields = []
 
     final_deferred = deferred_fields or import_plan.get("deferred_fields", [])
     final_uid_field = unique_id_field or import_plan.get("unique_id_field") or "id"
@@ -192,24 +208,29 @@ def run_import(  # noqa: C901
         force_create = False
 
     start_time = time.time()
-    success, stats = import_threaded.import_data(
-        config_file=config,
-        model=model,
-        unique_id_field=final_uid_field,
-        file_csv=file_to_process,
-        deferred_fields=final_deferred,
-        context=parsed_context,
-        fail_file=fail_output_file,
-        encoding=encoding,
-        separator=separator,
-        ignore=ignore or [],
-        max_connection=max_conn,
-        batch_size=batch_size_run,
-        skip=skip,
-        force_create=force_create,
-        o2m=o2m,
-        split_by_cols=groupby,
-    )
+    try:
+        success, stats = import_threaded.import_data(
+            config_file=config,
+            model=model,
+            unique_id_field=final_uid_field,
+            file_csv=file_to_process,
+            deferred_fields=final_deferred,
+            context=parsed_context,
+            fail_file=fail_output_file,
+            encoding=encoding,
+            separator=separator,
+            ignore=ignore or [],
+            max_connection=max_conn,
+            batch_size=batch_size_run,
+            skip=skip,
+            force_create=force_create,
+            o2m=o2m,
+            split_by_cols=groupby,
+        )
+    finally:
+        if sorted_temp_file and os.path.exists(sorted_temp_file):
+            os.remove(sorted_temp_file)
+
     elapsed = time.time() - start_time
 
     fail_file_was_created = _count_lines(fail_output_file) > 1

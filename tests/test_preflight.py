@@ -1,6 +1,7 @@
 """Test the pre-flight checker functions."""
 
 from collections.abc import Generator
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -31,6 +32,58 @@ def mock_show_error_panel() -> Generator[MagicMock, None, None]:
     """Fixture to mock _show_error_panel."""
     with patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_panel:
         yield mock_panel
+
+
+class TestSelfReferencingCheck:
+    """Tests for the self_referencing_check."""
+
+    @patch("odoo_data_flow.lib.preflight.sort.sort_for_self_referencing")
+    def test_check_plans_strategy_when_hierarchy_detected(
+        self, mock_sort: MagicMock, tmp_path: "Path"
+    ) -> None:
+        """Verify the import plan is updated when a hierarchy is found."""
+        sorted_file = tmp_path / "sorted.csv"
+        mock_sort.return_value = str(sorted_file)
+        import_plan: dict[str, str] = {}
+        result = preflight.self_referencing_check(
+            preflight_mode=PreflightMode.NORMAL,
+            filename="file.csv",
+            import_plan=import_plan,
+        )
+        assert result is True
+        assert import_plan["strategy"] == "sort_and_one_pass_load"
+        assert import_plan["id_column"] == "id"
+        assert import_plan["parent_column"] == "parent_id"
+        mock_sort.assert_called_once_with(
+            "file.csv", id_column="id", parent_column="parent_id"
+        )
+
+    @patch("odoo_data_flow.lib.preflight.sort.sort_for_self_referencing")
+    def test_check_does_nothing_when_no_hierarchy(self, mock_sort: MagicMock) -> None:
+        """Verify the import plan is unchanged when no hierarchy is found."""
+        mock_sort.return_value = None
+        import_plan: dict[str, str] = {}
+        result = preflight.self_referencing_check(
+            preflight_mode=PreflightMode.NORMAL,
+            filename="file.csv",
+            import_plan=import_plan,
+        )
+        assert result is True
+        assert "strategy" not in import_plan
+
+    @patch("odoo_data_flow.lib.preflight.sort.sort_for_self_referencing")
+    def test_check_is_skipped_for_o2m(self, mock_sort: MagicMock) -> None:
+        """Verify the check is skipped when o2m flag is True."""
+        import_plan: dict[str, str] = {}
+        result = preflight.self_referencing_check(
+            preflight_mode=PreflightMode.NORMAL,
+            filename="file.csv",
+            import_plan=import_plan,
+            o2m=True,
+        )
+        assert result is True
+        assert "strategy" not in import_plan
+        mock_sort.assert_not_called()
 
 
 class TestInternalHelpers:

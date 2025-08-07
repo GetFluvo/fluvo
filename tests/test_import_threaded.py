@@ -115,46 +115,6 @@ class TestImportDataRefactored:
 
     @patch("odoo_data_flow.import_threaded._create_batches")
     @patch("odoo_data_flow.import_threaded._run_threaded_pass")
-    def test_orchestrate_pass_1_sorts_hierarchical_data(
-        self, mock_run_pass: MagicMock, mock_create_batches: MagicMock
-    ) -> None:
-        """Verify Pass 1 sorts data by parent_id if present and not o2m."""
-        mock_run_pass.return_value = ({}, False)
-        header = ["id", "name", "parent_id"]
-        data = [
-            ["child1", "C1", "parent1"],
-            ["parent1", "P1", ""],
-            ["child2", "C2", "parent1"],
-        ]
-
-        with Progress() as progress:
-            _orchestrate_pass_1(
-                progress,
-                MagicMock(),
-                "res.partner",
-                header,
-                data,
-                "id",
-                [],
-                [],
-                {},
-                None,
-                None,
-                1,
-                10,
-                o2m=False,
-                split_by_cols=None,
-            )
-
-        # Check that the data passed to _create_batches was sorted
-        call_args = mock_create_batches.call_args[0]
-        sorted_data = call_args[0]
-        assert sorted_data[0][0] == "parent1"
-        assert sorted_data[1][0] == "child1"
-        assert sorted_data[2][0] == "child2"
-
-    @patch("odoo_data_flow.import_threaded._create_batches")
-    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
     def test_orchestrate_pass_1_does_not_sort_for_o2m(
         self, mock_run_pass: MagicMock, mock_create_batches: MagicMock
     ) -> None:

@@ -15,7 +15,7 @@ from rich.prompt import Confirm
 from odoo_data_flow.enums import PreflightMode
 
 from ..logging_config import log
-from . import conf_lib
+from . import conf_lib, sort
 from .actions import language_installer
 from .internal.ui import _show_error_panel
 
@@ -49,10 +49,39 @@ def connection_check(
         return False
 
 
+@register_check
+def self_referencing_check(
+    preflight_mode: "PreflightMode",
+    filename: str,
+    import_plan: dict[str, Any],
+    **kwargs: Any,
+) -> bool:
+    """Detects self-referencing hierarchies and plans the sorting strategy."""
+    if kwargs.get("o2m"):
+        return True  # Skip this check if o2m is enabled
+
+    log.info("Running pre-flight check: Detecting self-referencing hierarchy...")
+    # We assume 'id' and 'parent_id' as conventional names.
+    # This could be made configurable later if needed.
+    if sort.sort_for_self_referencing(
+        filename, id_column="id", parent_column="parent_id"
+    ):
+        log.info(
+            "Detected self-referencing hierarchy. Planning one-pass sort strategy."
+        )
+        import_plan["strategy"] = "sort_and_one_pass_load"
+        import_plan["id_column"] = "id"
+        import_plan["parent_column"] = "parent_id"
+    else:
+        log.info("No self-referencing hierarchy detected.")
+    return True
+
+
 def _get_installed_languages(config_file: str) -> Optional[set[str]]:
     """Connects to Odoo and returns the set of installed language codes."""
     try:
         connection = conf_lib.get_connection_from_config(config_file)
+
         lang_obj = connection.get_model("res.lang")
         installed_langs_data = lang_obj.search_read([("active", "=", True)], ["code"])
         return {lang["code"] for lang in installed_langs_data}

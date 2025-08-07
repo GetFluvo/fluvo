@@ -752,15 +752,6 @@ def _orchestrate_pass_1(
     pass_1_header, pass_1_data = header, all_data
     pass_1_ignore_list = deferred_fields + ignore
 
-    # Conditionally sort data for hierarchical imports, but NOT for o2m.
-    if not o2m and "parent_id" in pass_1_header:
-        log.info("Parent ID found, sorting data for hierarchical import.")
-        parent_id_index = pass_1_header.index("parent_id")
-        # Sort by parent_id presence (empty ones first), then by parent_id value.
-        pass_1_data.sort(
-            key=lambda row: (row[parent_id_index] != "", row[parent_id_index])
-        )
-
     try:
         pass_1_uid_index = pass_1_header.index(unique_id_field)
     except ValueError:
