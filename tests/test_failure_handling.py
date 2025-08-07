@@ -42,13 +42,13 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
     mock_model.load.side_effect = Exception("Generic batch error")
     mock_model.browse.return_value.env.ref.return_value = None
 
-    def create_side_effect(vals: dict[str, Any]) -> Any:
-        if vals["id"] == "rec_02":
-            raise Exception("Validation Error")
-        else:
-            mock_record = MagicMock()
-            mock_record.id = 101
-            return mock_record
+    def create_side_effect(vals: dict[str, Any], context: dict[str, Any]) -> Any:
+            if vals["id"] == "rec_02":
+                raise Exception("Validation Error")
+            else:
+                mock_record = MagicMock()
+                mock_record.id = 101
+                return mock_record
 
     mock_model.create.side_effect = create_side_effect
     mock_get_conn.return_value.get_model.return_value = mock_model
