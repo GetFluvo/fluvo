@@ -310,8 +310,6 @@ class TestRunImportEdgeCases:
         # Check that a timestamp like _20230401_123055_ is present
         assert any(char.isdigit() for char in filename)
 
-    
-
     @patch("odoo_data_flow.importer.import_threaded.import_data")
     def test_run_import_fail_mode_ignore_is_none(
         self, mock_import_data: MagicMock, tmp_path: Path

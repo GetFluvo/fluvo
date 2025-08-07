@@ -182,6 +182,7 @@ def run_import(  # noqa: C901
             headless=headless,
             separator=separator,
             unique_id_field=unique_id_field,
+            ignore=ignore or [],
         ):
             return
 
