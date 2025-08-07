@@ -372,7 +372,7 @@ def _create_batch_individually(
             }
 
             # 3. CREATE
-            new_record = model.create(clean_vals, context=context)
+            new_record = model.with_context(context).create(clean_vals)
             id_map[source_id] = new_record.id
         except IndexError as e:
             error_message = (
@@ -550,7 +550,7 @@ def _execute_write_batch(
     ids, vals = batch_writes
     try:
         # The core of the fix: use model.write(ids, vals) for batch updates.
-        model.write(ids, vals, context=context)
+        model.with_context(context).write(ids, vals)
         return {"failed_writes": [], "successful_writes": len(ids), "success": True}
     except Exception as e:
         error_message = str(e).replace("\n", " | ")

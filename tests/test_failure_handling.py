@@ -42,7 +42,7 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
     mock_model.load.side_effect = Exception("Generic batch error")
     mock_model.browse.return_value.env.ref.return_value = None
 
-    def create_side_effect(vals: dict[str, Any], context: dict[str, Any]) -> Any:
+    def create_side_effect(vals: dict[str, Any]) -> Any:
             if vals["id"] == "rec_02":
                 raise Exception("Validation Error")
             else:
@@ -50,7 +50,7 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
                 mock_record.id = 101
                 return mock_record
 
-    mock_model.create.side_effect = create_side_effect
+    mock_model.with_context.return_value.create.side_effect = create_side_effect
     mock_get_conn.return_value.get_model.return_value = mock_model
 
     # --- Act ---
@@ -176,7 +176,7 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
 
     # 3. ASSERT
     assert result is True  # Process should succeed as good records exist
-    assert mock_model.create.call_count == 2  # Called for ok_1 and ok_2
+    assert mock_model.with_context.return_value.create.call_count == 2  # Called for ok_1 and ok_2
 
     # Verify the content of the fail file
     assert fail_file.exists()

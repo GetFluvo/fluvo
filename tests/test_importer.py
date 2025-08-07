@@ -299,8 +299,8 @@ class TestRunImport:
         # 3. ASSERT
         assert success is True
         # Assert Pass 2 called `write` with the child ID and resolved parent ID
-        mock_model.write.assert_called_once_with(
-            [20], {"parent_id": 10}, context={"tracking_disable": True}
+        mock_model.with_context.return_value.write.assert_called_once_with(
+            [20], {"parent_id": 10}
         )
 
 
