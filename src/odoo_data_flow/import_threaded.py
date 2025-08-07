@@ -487,11 +487,15 @@ def _execute_load_batch(
         if "Expecting value" in str(e):
             error_msg = (
                 "Received a non-JSON response from the server. This often means a proxy "
-                "server timed out or blocked the request due to its size. Check the "
-                "server/proxy logs and configuration (e.g., timeout, client_max_body_size)."
+                "server timed out or blocked the request due to its size or content. Check the "
+                "server/proxy logs and configuration (e.g., timeout, client_max_body_size, WAF rules)."
             )
-            progress.console.print(f"[bold red]Network/Proxy Error:[/] {error_msg}")
-            # Fall through to the `create` fallback, but the root cause is likely the server environment.
+            # Try to get the raw response text from the exception if it's available
+            raw_response = getattr(e, "body", "Not available")
+            progress.console.print(
+                f"[bold red]Network/Proxy Error:[/] {error_msg}\n"
+                f"[bold]Server Response:[/bold]\n{raw_response[:500]}..."
+            )
 
         clean_error = str(e).strip().replace("\n", " ")
         progress.console.print(
