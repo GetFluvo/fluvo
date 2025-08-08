@@ -29,7 +29,7 @@ from .logging_config import log
 # --- Fix for csv.field_size_limit OverflowError ---
 max_int = sys.maxsize
 decrement = True
-while decrement:
+while decrement:  # pragma: no cover
     decrement = False
     try:
         csv.field_size_limit(max_int)
