@@ -54,6 +54,7 @@ def test_run_direct_relational_import(
         10,
         progress,
         task_id,
+        "source.csv",
     )
 
     # Assert

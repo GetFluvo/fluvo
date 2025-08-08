@@ -52,7 +52,6 @@ class TestRunImport:
         self, mock_import_data: MagicMock
     ) -> None:
         """Tests that a non-deferred call routes to import_data."""
-        # --- Provide a valid return value for the mock ---
         mock_import_data.return_value = (True, {"total_records": 123})
         test_args = self.DEFAULT_ARGS.copy()
         test_args["context"] = "{}"
@@ -91,7 +90,6 @@ class TestRunImport:
         fail_file.write_text("id,name\n1,a\n2,b\n3,c\n4,d\n5,e\n")
         record_count = 5
 
-        # --- FIX: Add this line to set the mock's return value ---
         mock_import_data.return_value = (True, {"total_records": record_count})
 
         test_args = self.DEFAULT_ARGS.copy()
@@ -112,10 +110,9 @@ class TestRunImport:
         mock_import_data.return_value = (True, {"total_records": 123})
         test_args = self.DEFAULT_ARGS.copy()
         test_args["context"] = "{}"
-        test_args["deferred_fields"] = ["parent_id"]  # Test with deferred fields
+        test_args["deferred_fields"] = ["parent_id"]
         run_import(**test_args)
         mock_import_data.assert_called_once()
-        # Assert that the PARSED list is passed
         assert mock_import_data.call_args.kwargs["deferred_fields"] == ["parent_id"]
 
     @patch(
@@ -134,7 +131,6 @@ class TestRunImport:
         source_file = tmp_path / "res.partner.csv"
         fail_file = tmp_path / "res_partner_fail.csv"
         header = ["id", "name"]
-        # Only one record needed to test this logic
         source_data = [["new_partner", "Partner Name"]]
         with open(source_file, "w", newline="") as f:
             writer = csv.writer(f)
@@ -143,17 +139,11 @@ class TestRunImport:
 
         mock_model = MagicMock()
         mock_model.with_context.return_value = mock_model
-        # 1. Simulate the initial batch `load` failing
         mock_model.load.return_value = {
             "ids": [],
             "messages": [{"type": "error", "message": "Batch load failed"}],
         }
-
-        # 2.
-        #    Simulate the "search" step finding nothing, to force a `create` attempt.
         mock_model.browse.return_value.env.ref.return_value = None
-
-        # 3. Simulate the fallback `create` method also failing
         mock_model.create.side_effect = Exception("Validation Error on Create")
         mock_get_conn.return_value.get_model.return_value = mock_model
 
@@ -161,24 +151,16 @@ class TestRunImport:
         test_args.update(
             {
                 "filename": str(source_file),
-                "deferred_fields": [],  # No deferred fields for this test
+                "deferred_fields": [],
                 "no_preflight_checks": False,
             }
         )
-
-        # With the logic from the previous answer, this will run with a large batch size
         run_import(**test_args)
-
-        # The import should be marked as failed overall
         mock_show_error.assert_called_once()
-        # The critical assertion: the fail file must exist
         assert fail_file.exists()
-
-        # Optional but good: check the content of the fail file
         with open(fail_file) as f:
             reader = csv.reader(f)
             content = list(reader)
-            # Should contain header, the failed row, and the error reason
             assert len(content) == 2
             assert content[0] == [*header, "_ERROR_REASON"]
             assert content[1] == source_data[0] + ["Validation Error on Create"]
@@ -191,15 +173,11 @@ class TestRunImport:
         mock_import_data: MagicMock,
         tmp_path: Path,
     ) -> None:
-        """Test fail mode aborts if fail file is empty.
-
-        Tests that running in --fail mode exits gracefully if the fail file
-        has no records to process.
-        """
+        """Test fail mode aborts if fail file is empty."""
         source_file = tmp_path / "res.partner.csv"
         source_file.touch()
         fail_file = tmp_path / "res.partner_fail.csv"
-        fail_file.write_text("id,name,_ERROR_REASON\n")  # File with only a header
+        fail_file.write_text("id,name,_ERROR_REASON\n")
 
         test_args = self.DEFAULT_ARGS.copy()
         test_args.update(
@@ -208,15 +186,9 @@ class TestRunImport:
                 "fail": True,
             }
         )
-
         run_import(**test_args)
-
-        # The core import engine should NOT have been called
         mock_import_data.assert_not_called()
-        # A message should have been printed to the console
         mock_console.return_value.print.assert_called_once()
-
-    # In a test file (e.g., tests/test_importer.py)
 
     @patch(
         "odoo_data_flow.importer.import_threaded.conf_lib.get_connection_from_config"
@@ -225,7 +197,6 @@ class TestRunImport:
         self, mock_get_conn: MagicMock, tmp_path: Path
     ) -> None:
         """Tests a simple, successful import with no failures."""
-        # 1. ARRANGE
         source_file = tmp_path / "source.csv"
         fail_file = tmp_path / "source_fail.csv"
         header = ["id", "name"]
@@ -239,7 +210,6 @@ class TestRunImport:
         mock_model.load.return_value = {"ids": [101, 102], "messages": []}
         mock_get_conn.return_value.get_model.return_value = mock_model
 
-        # 2. ACT
         success, stats = import_threaded.import_data(
             config_file="dummy.conf",
             model="res.partner",
@@ -247,12 +217,8 @@ class TestRunImport:
             file_csv=str(source_file),
             fail_file=str(fail_file),
         )
-
-        # 3. ASSERT
         assert success is True
         assert stats["total_records"] == 2
-        # The file is created proactively, so we check that it exists
-        # but only contains the header.
         assert fail_file.exists()
         with open(fail_file, encoding="utf-8") as f:
             lines = f.readlines()
@@ -265,7 +231,6 @@ class TestRunImport:
         self, mock_get_conn: MagicMock, tmp_path: Path
     ) -> None:
         """Tests a successful two-pass import with deferred fields."""
-        # 1. ARRANGE
         source_file = tmp_path / "source.csv"
         header = ["id", "name", "parent_id/id"]
         source_data = [
@@ -279,14 +244,9 @@ class TestRunImport:
 
         mock_model = MagicMock()
         mock_model.with_context.return_value = mock_model
-        # Pass 1: `load` is called on data without the parent_id column
         mock_model.load.return_value = {"ids": [10, 20], "messages": []}
-
-        # Pass 2: The `write` method should be called directly on the model
-        # with the appropriate IDs and values.
         mock_get_conn.return_value.get_model.return_value = mock_model
 
-        # 2. ACT
         success, _ = import_threaded.import_data(
             config_file="dummy.conf",
             model="res.partner",
@@ -295,10 +255,7 @@ class TestRunImport:
             deferred_fields=["parent_id"],
             separator=";",
         )
-
-        # 3. ASSERT
         assert success is True
-        # Assert Pass 2 called `write` with the child ID and resolved parent ID
         mock_model.write.assert_called_once_with(
             [20], {"parent_id": 10}, context={"tracking_disable": True}
         )
@@ -312,7 +269,6 @@ class TestRunImportEdgeCases:
         filename = _get_fail_filename("res.partner", is_fail_run=True)
         assert "res_partner" in filename
         assert "failed" in filename
-        # Check that a timestamp like _20230401_123055_ is present
         assert any(char.isdigit() for char in filename)
 
     @patch("odoo_data_flow.importer.import_threaded.import_data")
@@ -328,14 +284,12 @@ class TestRunImportEdgeCases:
             {
                 "filename": str(tmp_path / "res.partner.csv"),
                 "fail": True,
-                "ignore": None,  # Explicitly set to None
+                "ignore": None,
             }
         )
 
         mock_import_data.return_value = (True, {"total_records": 1})
         run_import(**args)
-
-        # Assert that the core import function was called with the error column ignored
         called_kwargs = mock_import_data.call_args.kwargs
         assert "_ERROR_REASON" in called_kwargs["ignore"]
 
@@ -358,7 +312,7 @@ class TestRunImportEdgeCases:
         kwargs = mock_import_data.call_args.kwargs
         assert kwargs["model"] == "res.partner"
         assert kwargs["unique_id_field"] == "id"
-        assert "tmp" in kwargs["file_csv"]  # Check that a temp file is used
+        assert "tmp" in kwargs["file_csv"]
         assert kwargs["context"] == {"tracking_disable": True}
 
     @patch("odoo_data_flow.importer._show_error_panel")
@@ -435,7 +389,6 @@ def test_run_import_orchestrates_direct_relational_strategy(
     tmp_path: Path,
 ) -> None:
     """Verify the importer correctly orchestrates the direct relational strategy."""
-    # Arrange
     source_file = tmp_path / "source.csv"
     source_file.write_text("id,name,category_id\n1,test,cat1")
 
@@ -458,12 +411,9 @@ def test_run_import_orchestrates_direct_relational_strategy(
     test_args["filename"] = str(source_file)
     test_args["no_preflight_checks"] = False
 
-    # Act
     run_import(**test_args)
-
-    # Assert
-    mock_import_data.assert_called_once()  # Main import
-    mock_relational_import.assert_called_once()  # Relational import
+    mock_import_data.assert_called_once()
+    mock_relational_import.assert_called_once()
     call_args = mock_relational_import.call_args[0]
     assert call_args[1] == "res.partner"
     assert call_args[2] == "category_id"
@@ -479,7 +429,6 @@ def test_run_import_orchestrates_write_tuple_strategy(
     tmp_path: Path,
 ) -> None:
     """Verify the importer correctly orchestrates the write tuple strategy."""
-    # Arrange
     source_file = tmp_path / "source.csv"
     source_file.write_text("id,name,category_id\n1,test,cat1")
 
@@ -502,12 +451,55 @@ def test_run_import_orchestrates_write_tuple_strategy(
     test_args["filename"] = str(source_file)
     test_args["no_preflight_checks"] = False
 
-    # Act
     run_import(**test_args)
-
-    # Assert
-    mock_import_data.assert_called_once()  # Main import
-    mock_write_tuple_import.assert_called_once()  # Relational import
+    mock_import_data.assert_called_once()
+    mock_write_tuple_import.assert_called_once()
     call_args = mock_write_tuple_import.call_args[0]
     assert call_args[1] == "res.partner"
     assert call_args[2] == "category_id"
+
+
+@patch("odoo_data_flow.importer.relational_import.run_write_o2m_tuple_import")
+@patch("odoo_data_flow.importer.relational_import.run_write_tuple_import")
+@patch("odoo_data_flow.importer.import_threaded.import_data")
+@patch("odoo_data_flow.importer._run_preflight_checks")
+def test_run_import_orchestrates_combined_strategies(
+    mock_preflight: MagicMock,
+    mock_import_data: MagicMock,
+    mock_write_tuple: MagicMock,
+    mock_write_o2m: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Verify the importer correctly orchestrates multiple strategies in one run."""
+    source_file = tmp_path / "source.csv"
+    source_file.write_text(
+        "id,name,parent_id,category_id,line_ids\n"
+        'p1,Parent,,cat1,"[{"product": "prodA"}]"\n'
+        "c1,Child,p1,cat2,\n"
+    )
+
+    def preflight_side_effect(*args: Any, **kwargs: Any) -> bool:
+        import_plan = kwargs["import_plan"]
+        import_plan["deferred_fields"] = ["parent_id", "category_id", "line_ids"]
+        import_plan["strategies"] = {
+            "category_id": {
+                "strategy": "write_tuple",
+                "relation": "res.partner.category",
+            },
+            "line_ids": {"strategy": "write_o2m_tuple"},
+        }
+        return True
+
+    mock_preflight.side_effect = preflight_side_effect
+    mock_import_data.return_value = (True, {"id_map": {"p1": 1, "c1": 2}})
+
+    test_args = TestRunImport.DEFAULT_ARGS.copy()
+    test_args["filename"] = str(source_file)
+    test_args["no_preflight_checks"] = False
+
+    run_import(**test_args)
+    mock_import_data.assert_called_once()
+    mock_write_tuple.assert_called_once()
+    mock_write_o2m.assert_called_once()
+    assert mock_write_tuple.call_args[0][2] == "category_id"
+    assert mock_write_o2m.call_args[0][2] == "line_ids"

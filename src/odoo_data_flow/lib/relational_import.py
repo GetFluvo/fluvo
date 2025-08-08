@@ -1,5 +1,6 @@
-"""Handles the 'Direct Relational Table Import' strategy."""
+"""Handles relational import strategies like m2m and o2m."""
 
+import json
 import tempfile
 from pathlib import Path
 from typing import Any, Optional
@@ -9,7 +10,7 @@ from rich.progress import Progress, TaskID
 
 from .. import import_threaded
 from ..logging_config import log
-from . import cache, conf_lib
+from . import cache, conf_lib, writer
 
 
 def _resolve_related_ids(
@@ -18,7 +19,7 @@ def _resolve_related_ids(
     """Resolve related ids.
 
     Resolves external IDs for a related model, trying cache first,
-    then falling back to XML-ID resolution.
+    then falling back to a bulk XML-ID resolution.
     """
     # 1. Try to load from cache
     related_model_cache = cache.load_id_map(config, related_model)
@@ -26,7 +27,7 @@ def _resolve_related_ids(
         log.info(f"Cache hit for related model '{related_model}'.")
         return related_model_cache
 
-    # 2. Fallback to XML-ID resolution
+    # 2. Fallback to bulk XML-ID resolution
     log.warning(
         f"Cache miss for related model '{related_model}'. "
         f"Falling back to slow XML-ID resolution."
@@ -36,46 +37,52 @@ def _resolve_related_ids(
         log.error("Cannot perform XML-ID lookup: Odoo connection failed.")
         return None
 
-    resolved_ids = {}
     id_list = external_ids.drop_nulls().unique().to_list()
-    total_ids = len(id_list)
-    log.info(f"Resolving {total_ids} unique external IDs for '{related_model}'...")
+    log.info(f"Resolving {len(id_list)} unique external IDs for '{related_model}'...")
 
-    # Odoo's `execute` for `ir.model.data` `xmlid_to_res_id` is not bulk
-    # We can loop, but it will be slow. A better way might be to search `ir.model.data`
-    # but let's stick to the public API for now.
-    for external_id in id_list:
-        try:
-            # The `.` in external_id is the separator for module and identifier
-            if "." not in external_id:
-                log.warning(
-                    f"Skipping invalid external_id '{external_id}' for "
-                    f"model '{related_model}'. It must be in the format "
-                    "'module.identifier'."
-                )
-                continue
-            res_id = connection.execute(
-                "ir.model.data", "xmlid_to_res_id", external_id, True
-            )
-            if res_id:
-                resolved_ids[external_id] = res_id
-        except Exception as e:
+    # Split full XML-ID 'module.identifier' into components
+    split_ids = [(i.split(".", 1)[0], i.split(".", 1)[1]) for i in id_list if "." in i]
+    invalid_ids = [i for i in id_list if "." not in i]
+    if invalid_ids:
+        log.warning(
+            f"Skipping {len(invalid_ids)} invalid external_ids for model "
+            f"'{related_model}' (must be in 'module.identifier' format)."
+        )
+
+    domain = [
+        "&",
+        ("module", "=", split_ids[0][0]),
+        ("name", "=", split_ids[0][1]),
+    ]
+    for module, name in split_ids[1:]:
+        domain.insert(0, "|")
+        domain.append("&")
+        domain.append(("module", "=", module))
+        domain.append(("name", "=", name))
+
+    try:
+        data_model = connection.get_model("ir.model.data")
+        resolved_data = data_model.search_read(domain, ["module", "name", "res_id"])
+        if not resolved_data:
             log.error(
-                f"Error resolving external_id '{external_id}' for model "
-                f"'{related_model}': {e}"
+                f"XML-ID resolution failed for all IDs in model '{related_model}'."
             )
+            return None
 
-    if not resolved_ids:
-        log.error(f"XML-ID resolution failed for all IDs in model '{related_model}'.")
+        resolved_map = {
+            f"{rec['module']}.{rec['name']}": rec["res_id"] for rec in resolved_data
+        }
+
+        log.info(
+            f"Successfully resolved {len(resolved_map)} out of {len(id_list)} "
+            f"external IDs for model '{related_model}'."
+        )
+        return pl.DataFrame(
+            {"external_id": resolved_map.keys(), "db_id": resolved_map.values()}
+        )
+    except Exception as e:
+        log.error(f"An error occurred during bulk XML-ID resolution: {e}")
         return None
-
-    log.info(
-        f"Successfully resolved {len(resolved_ids)} out of {total_ids} "
-        f"external IDs for model '{related_model}'."
-    )
-    return pl.DataFrame(
-        {"external_id": resolved_ids.keys(), "db_id": resolved_ids.values()}
-    )
 
 
 def run_direct_relational_import(
@@ -89,6 +96,7 @@ def run_direct_relational_import(
     batch_size: int,
     progress: Progress,
     task_id: TaskID,
+    original_filename: str,
 ) -> bool:
     """Orchestrates the high-speed direct relational import."""
     progress.update(
@@ -126,13 +134,11 @@ def run_direct_relational_import(
         related_model_df.rename({"external_id": field}), on=field, how="inner"
     ).rename({"db_id": f"{related_model_fk}/id"})
 
-    final_df = link_df.select([owning_model_fk, f"{related_model_fk}/id"])
-
     # 4. Write to a temporary file and import
     with tempfile.NamedTemporaryFile(
         mode="w+", delete=False, suffix=".csv", newline=""
     ) as tmp:
-        final_df.write_csv(tmp.name)
+        link_df.select([owning_model_fk, f"{related_model_fk}/id"]).write_csv(tmp.name)
         tmp_path = tmp.name
 
     success, _ = import_threaded.import_data(
@@ -159,6 +165,7 @@ def run_write_tuple_import(
     batch_size: int,
     progress: Progress,
     task_id: TaskID,
+    original_filename: str,
 ) -> bool:
     """Orchestrates the 'write_tuple' import for relational fields."""
     progress.update(
@@ -196,30 +203,159 @@ def run_write_tuple_import(
         related_model_df.rename({"external_id": field}), on=field, how="inner"
     ).rename({"db_id": f"{related_model_fk}/id"})
 
-    final_df = link_df.select([owning_model_fk, f"{related_model_fk}/id"])
-
     # 4. Create records in the relational table
     connection = conf_lib.get_connection_from_config(config_file=config)
     rel_model = connection.get_model(relational_table)
 
-    vals_list = final_df.to_dicts()
-    successful_creates = 0
-    failed_creates = 0
+    # We need to map back to the original external IDs for failure reporting
+    # This is a bit heavy, but necessary for accurate error logs.
+    original_links_df = source_df.select(["id", field]).rename(
+        {"id": "parent_external_id"}
+    )
+    original_links_df = original_links_df.with_columns(
+        pl.col(field).str.split(",")
+    ).explode(field)
+    original_links_df = original_links_df.rename({field: "related_external_id"})
 
-    for vals in vals_list:
+    # Join with resolved IDs to get the data for `create`
+    create_df = original_links_df.join(
+        owning_df.rename({"external_id": "parent_external_id"}),
+        on="parent_external_id",
+        how="inner",
+    ).rename({"db_id": owning_model_fk})
+    create_df = create_df.join(
+        related_model_df.rename({"external_id": "related_external_id"}),
+        on="related_external_id",
+        how="inner",
+    ).rename({"db_id": f"{related_model_fk}/id"})
+
+    vals_list = create_df.select([owning_model_fk, f"{related_model_fk}/id"]).to_dicts()
+    # Keep original IDs for error reporting
+    report_list = create_df.select(
+        ["parent_external_id", "related_external_id"]
+    ).to_dicts()
+
+    successful_creates = 0
+    failed_records_to_report = []
+    batch_size = 50
+
+    for i in range(0, len(vals_list), batch_size):
+        vals_batch = vals_list[i : i + batch_size]
+        report_batch = report_list[i : i + batch_size]
         try:
-            rel_model.create(vals)
-            successful_creates += 1
+            rel_model.create(vals_batch)
+            successful_creates += len(vals_batch)
         except Exception as e:
             log.error(
-                f"Failed to create record for '{relational_table}' with values {vals}. "
-                f"Reason: {e}"
+                f"Failed to create a batch of {len(vals_batch)} records for "
+                f"'{relational_table}'. Reason: {e}"
             )
-            failed_creates += 1
+            # Fallback to one-by-one to salvage what we can and log failures
+            for j, vals in enumerate(vals_batch):
+                try:
+                    rel_model.create(vals)
+                    successful_creates += 1
+                except Exception as inner_e:
+                    report_item = report_batch[j]
+                    report_item["model"] = model
+                    report_item["field"] = field
+                    report_item["error_reason"] = str(inner_e)
+                    failed_records_to_report.append(report_item)
 
+    if failed_records_to_report:
+        writer.write_relational_failures_to_csv(
+            model, field, original_filename, failed_records_to_report
+        )
+
+    failed_creates = len(failed_records_to_report)
     log.info(
         f"Finished 'Write Tuple' for '{field}': "
         f"{successful_creates} successful, {failed_creates} failed."
     )
 
     return successful_creates > 0
+
+
+def run_write_o2m_tuple_import(
+    config: str,
+    model: str,
+    field: str,
+    strategy_details: dict[str, Any],
+    source_df: pl.DataFrame,
+    id_map: dict[str, int],
+    worker: int,
+    batch_size: int,
+    progress: Progress,
+    task_id: TaskID,
+    original_filename: str,
+) -> bool:
+    """Orchestrates the 'write_o2m_tuple' import for one2many fields."""
+    progress.update(
+        task_id,
+        description=f"Pass 2/2: Updating relations for [bold]{field}[/bold]",
+    )
+    log.info(f"Running 'Write O2M Tuple' for field '{field}'...")
+
+    connection = conf_lib.get_connection_from_config(config_file=config)
+    parent_model = connection.get_model(model)
+    successful_updates = 0
+    failed_records_to_report = []
+
+    # Filter for rows that actually have data in the o2m field
+    o2m_df = source_df.filter(pl.col(field).is_not_null())
+
+    for record in o2m_df.iter_rows(named=True):
+        parent_external_id = record["id"]
+        parent_db_id = id_map.get(parent_external_id)
+        if not parent_db_id:
+            continue
+
+        o2m_json_data = record[field]
+        try:
+            child_records = json.loads(o2m_json_data)
+            if not isinstance(child_records, list):
+                raise ValueError("JSON data is not a list")
+
+            # Odoo command: (0, 0, {values}) for creating new records
+            o2m_commands = [(0, 0, vals) for vals in child_records]
+            parent_model.write([parent_db_id], {field: o2m_commands})
+            successful_updates += 1
+
+        except json.JSONDecodeError:
+            log.error(
+                f"Failed to decode JSON for parent '{parent_external_id}' "
+                f"in field '{field}'. Value: {o2m_json_data}"
+            )
+            failed_records_to_report.append(
+                {
+                    "model": model,
+                    "field": field,
+                    "parent_external_id": parent_external_id,
+                    "related_external_id": "N/A (JSON Data)",
+                    "error_reason": "Invalid JSON format",
+                }
+            )
+        except Exception as e:
+            log.error(
+                f"Failed to write o2m commands for parent '{parent_external_id}': {e}"
+            )
+            failed_records_to_report.append(
+                {
+                    "model": model,
+                    "field": field,
+                    "parent_external_id": parent_external_id,
+                    "related_external_id": "N/A (JSON Data)",
+                    "error_reason": str(e),
+                }
+            )
+
+    if failed_records_to_report:
+        writer.write_relational_failures_to_csv(
+            model, field, original_filename, failed_records_to_report
+        )
+
+    log.info(
+        f"Finished 'Write O2M Tuple' for '{field}': "
+        f"{successful_updates} successful, {len(failed_records_to_report)} failed."
+    )
+    return successful_updates > 0

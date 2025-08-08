@@ -366,9 +366,11 @@ class TestDeferralAndStrategyCheck:
         """Verify 'direct_relational_import' is chosen for many m2m links."""
         mock_df_header = MagicMock()
         mock_df_header.columns = ["id", "name", "category_id"]
+
+        # Setup a more robust mock for the chained Polars calls
         mock_df_data = MagicMock()
         (
-            mock_df_data.__getitem__.return_value.str.split.return_value.list.len.return_value.sum.return_value
+            mock_df_data.lazy.return_value.select.return_value.select.return_value.sum.return_value.collect.return_value.item.return_value
         ) = 500
         mock_polars_read_csv.side_effect = [mock_df_header, mock_df_data]
 
@@ -404,9 +406,11 @@ class TestDeferralAndStrategyCheck:
         """Verify 'write_tuple' is chosen for fewer m2m links."""
         mock_df_header = MagicMock()
         mock_df_header.columns = ["id", "name", "category_id"]
+
+        # Setup a more robust mock for the chained Polars calls
         mock_df_data = MagicMock()
         (
-            mock_df_data.__getitem__.return_value.str.split.return_value.list.len.return_value.sum.return_value
+            mock_df_data.lazy.return_value.select.return_value.select.return_value.sum.return_value.collect.return_value.item.return_value
         ) = 499
         mock_polars_read_csv.side_effect = [mock_df_header, mock_df_data]
 

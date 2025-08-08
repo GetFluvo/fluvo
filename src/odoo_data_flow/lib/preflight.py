@@ -276,17 +276,27 @@ def _plan_deferrals_and_strategies(
         clean_field_name = field_name.replace("/id", "")
         if clean_field_name in odoo_fields:
             field_info = odoo_fields[clean_field_name]
+            field_type = field_info.get("type")
+
             is_m2o_self = (
-                field_info.get("type") == "many2one"
-                and field_info.get("relation") == model
+                field_type == "many2one" and field_info.get("relation") == model
             )
-            is_m2m = field_info.get("type") == "many2many"
+            is_m2m = field_type == "many2many"
+            is_o2m = field_type == "one2many"
 
             if is_m2o_self:
                 deferrable_fields.append(clean_field_name)
             elif is_m2m:
                 deferrable_fields.append(clean_field_name)
-                relation_count = df[field_name].str.split(",").list.len().sum()
+                # Ensure the column is treated as string for splitting
+                relation_count = (
+                    df.lazy()
+                    .select(pl.col(field_name).cast(pl.Utf8).str.split(","))
+                    .select(pl.col(field_name).list.len())
+                    .sum()
+                    .collect()
+                    .item()
+                )
                 if relation_count >= 500:
                     strategies[clean_field_name] = {
                         "strategy": "direct_relational_import",
@@ -295,7 +305,15 @@ def _plan_deferrals_and_strategies(
                         "relation": field_info["relation"],
                     }
                 else:
-                    strategies[clean_field_name] = {"strategy": "write_tuple"}
+                    strategies[clean_field_name] = {
+                        "strategy": "write_tuple",
+                        "relation_table": field_info["relation_table"],
+                        "relation_field": field_info["relation_field"],
+                        "relation": field_info["relation"],
+                    }
+            elif is_o2m:
+                deferrable_fields.append(clean_field_name)
+                strategies[clean_field_name] = {"strategy": "write_o2m_tuple"}
 
     if deferrable_fields:
         log.info(f"Detected deferrable fields: {deferrable_fields}")

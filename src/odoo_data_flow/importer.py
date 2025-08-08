@@ -266,6 +266,7 @@ def run_import(  # noqa: C901
                             batch_size_run,
                             progress,
                             task_id,
+                            filename,
                         )
                     elif strategy_info["strategy"] == "write_tuple":
                         relational_import.run_write_tuple_import(
@@ -279,6 +280,21 @@ def run_import(  # noqa: C901
                             batch_size_run,
                             progress,
                             task_id,
+                            filename,
+                        )
+                    elif strategy_info["strategy"] == "write_o2m_tuple":
+                        relational_import.run_write_o2m_tuple_import(
+                            config,
+                            model,
+                            field,
+                            strategy_info,
+                            source_df,
+                            id_map,
+                            max_conn,
+                            batch_size_run,
+                            progress,
+                            task_id,
+                            filename,
                         )
                     progress.update(task_id, advance=1)
 
