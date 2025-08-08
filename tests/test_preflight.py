@@ -35,6 +35,13 @@ def mock_show_error_panel() -> Generator[MagicMock, None, None]:
         yield mock_panel
 
 
+@pytest.fixture
+def mock_cache() -> Generator[MagicMock, None, None]:
+    """Fixture to mock the cache module."""
+    with patch("odoo_data_flow.lib.preflight.cache") as mock_cache_module:
+        yield mock_cache_module
+
+
 class TestSelfReferencingCheck:
     """Tests for the self_referencing_check."""
 
@@ -506,3 +513,57 @@ class TestDeferralAndStrategyCheck:
         assert result is False
         mock_show_error_panel.assert_called_once()
         assert "Action Required" in mock_show_error_panel.call_args[0][0]
+
+
+class TestGetOdooFields:
+    """Tests for the _get_odoo_fields helper function."""
+
+    def test_get_odoo_fields_cache_hit(
+        self, mock_cache: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Verify fields are returned from cache and Odoo is not called."""
+        mock_cache.load_fields_get_cache.return_value = {"name": {"type": "char"}}
+        result = preflight._get_odoo_fields("dummy.conf", "res.partner")
+
+        assert result == {"name": {"type": "char"}}
+        mock_cache.load_fields_get_cache.assert_called_once_with(
+            "dummy.conf", "res.partner"
+        )
+        mock_conf_lib.assert_not_called()
+
+    def test_get_odoo_fields_cache_miss(
+        self, mock_cache: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Verify fields are fetched from Odoo and cached on a cache miss."""
+        mock_cache.load_fields_get_cache.return_value = None
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {"name": {"type": "char"}}
+
+        result = preflight._get_odoo_fields("dummy.conf", "res.partner")
+
+        assert result == {"name": {"type": "char"}}
+        mock_cache.load_fields_get_cache.assert_called_once_with(
+            "dummy.conf", "res.partner"
+        )
+        mock_conf_lib.return_value.get_model.assert_called_once_with("res.partner")
+        mock_model.fields_get.assert_called_once()
+        mock_cache.save_fields_get_cache.assert_called_once_with(
+            "dummy.conf", "res.partner", {"name": {"type": "char"}}
+        )
+
+    def test_get_odoo_fields_odoo_error(
+        self,
+        mock_cache: MagicMock,
+        mock_conf_lib: MagicMock,
+        mock_show_error_panel: MagicMock,
+    ) -> None:
+        """Verify None is returned and error is shown when Odoo call fails."""
+        mock_cache.load_fields_get_cache.return_value = None
+        mock_conf_lib.side_effect = Exception("Odoo Error")
+
+        result = preflight._get_odoo_fields("dummy.conf", "res.partner")
+
+        assert result is None
+        mock_show_error_panel.assert_called_once()
+        assert "Odoo Connection Error" in mock_show_error_panel.call_args[0][0]
+        mock_cache.save_fields_get_cache.assert_not_called()

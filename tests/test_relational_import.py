@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 from polars.testing import assert_frame_equal
+from rich.progress import Progress
 
 from odoo_data_flow.lib import relational_import
 
@@ -20,9 +21,12 @@ def test_run_direct_relational_import(
 ) -> None:
     """Verify the direct relational import workflow."""
     # Arrange
-    source_csv = tmp_path / "source.csv"
-    source_csv.write_text(
-        'id,name,category_id\np1,Partner 1,"cat1,cat2"\np2,Partner 2,"cat2,cat3"\n'
+    source_df = pl.DataFrame(
+        {
+            "id": ["p1", "p2"],
+            "name": ["Partner 1", "Partner 2"],
+            "category_id": ["cat1,cat2", "cat2,cat3"],
+        }
     )
     mock_load_id_map.return_value = pl.DataFrame(
         {"external_id": ["cat1", "cat2", "cat3"], "db_id": [11, 12, 13]}
@@ -35,6 +39,8 @@ def test_run_direct_relational_import(
         "relation": "category_id",
     }
     id_map = {"p1": 1, "p2": 2}
+    progress = Progress()
+    task_id = progress.add_task("test")
 
     # Act
     result = relational_import.run_direct_relational_import(
@@ -42,10 +48,12 @@ def test_run_direct_relational_import(
         "res.partner",
         "category_id",
         strategy_details,
-        str(source_csv),
+        source_df,
         id_map,
         1,
         10,
+        progress,
+        task_id,
     )
 
     # Assert

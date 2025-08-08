@@ -15,7 +15,7 @@ from rich.prompt import Confirm
 from odoo_data_flow.enums import PreflightMode
 
 from ..logging_config import log
-from . import conf_lib, sort
+from . import cache, conf_lib, sort
 from .actions import language_installer
 from .internal.ui import _show_error_panel
 
@@ -198,11 +198,21 @@ def _get_odoo_fields(config: str, model: str) -> Optional[dict[str, Any]]:
     Returns:
         A dictionary of the model's fields, or None on failure.
     """
+    # 1. Try to load from cache first
+    cached_fields = cache.load_fields_get_cache(config, model)
+    if cached_fields:
+        return cached_fields
+
+    # 2. If cache miss, fetch from Odoo
+    log.info(f"Cache miss for '{model}' fields, fetching from Odoo...")
     try:
         connection: Any = conf_lib.get_connection_from_config(config_file=config)
         model_obj = connection.get_model(model)
-        # FIX: Use `cast` to inform mypy of the expected return type.
-        return cast(dict[str, Any], model_obj.fields_get())
+        odoo_fields = cast(dict[str, Any], model_obj.fields_get())
+
+        # 3. Save the result to the cache for next time
+        cache.save_fields_get_cache(config, model, odoo_fields)
+        return odoo_fields
     except Exception as e:
         _show_error_panel(
             "Odoo Connection Error",

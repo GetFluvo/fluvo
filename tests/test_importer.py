@@ -437,7 +437,7 @@ def test_run_import_orchestrates_direct_relational_strategy(
     """Verify the importer correctly orchestrates the direct relational strategy."""
     # Arrange
     source_file = tmp_path / "source.csv"
-    source_file.touch()
+    source_file.write_text("id,name,category_id\n1,test,cat1")
 
     def preflight_side_effect(*args: Any, **kwargs: Any) -> bool:
         kwargs["import_plan"]["strategies"] = {
@@ -481,7 +481,7 @@ def test_run_import_orchestrates_write_tuple_strategy(
     """Verify the importer correctly orchestrates the write tuple strategy."""
     # Arrange
     source_file = tmp_path / "source.csv"
-    source_file.touch()
+    source_file.write_text("id,name,category_id\n1,test,cat1")
 
     def preflight_side_effect(*args: Any, **kwargs: Any) -> bool:
         kwargs["import_plan"]["strategies"] = {

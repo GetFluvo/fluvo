@@ -15,8 +15,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, cast
 
+import polars as pl
 from rich.console import Console
 from rich.panel import Panel
+from rich.progress import Progress
 
 from . import import_threaded
 from .enums import PreflightMode
@@ -243,29 +245,42 @@ def run_import(  # noqa: C901
 
         # --- Pass 2: Relational Strategies ---
         if import_plan.get("strategies"):
-            for field, strategy_info in import_plan["strategies"].items():
-                if strategy_info["strategy"] == "direct_relational_import":
-                    relational_import.run_direct_relational_import(
-                        config,
-                        model,
-                        field,
-                        strategy_info,
-                        filename,  # Use original file for relational data
-                        id_map,
-                        max_conn,
-                        batch_size_run,
-                    )
-                elif strategy_info["strategy"] == "write_tuple":
-                    relational_import.run_write_tuple_import(
-                        config,
-                        model,
-                        field,
-                        strategy_info,
-                        filename,  # Use original file for relational data
-                        id_map,
-                        max_conn,
-                        batch_size_run,
-                    )
+            source_df = pl.read_csv(
+                filename, separator=separator, truncate_ragged_lines=True
+            )
+            with Progress() as progress:
+                task_id = progress.add_task(
+                    "Pass 2/2: Relational fields",
+                    total=len(import_plan["strategies"]),
+                )
+                for field, strategy_info in import_plan["strategies"].items():
+                    if strategy_info["strategy"] == "direct_relational_import":
+                        relational_import.run_direct_relational_import(
+                            config,
+                            model,
+                            field,
+                            strategy_info,
+                            source_df,
+                            id_map,
+                            max_conn,
+                            batch_size_run,
+                            progress,
+                            task_id,
+                        )
+                    elif strategy_info["strategy"] == "write_tuple":
+                        relational_import.run_write_tuple_import(
+                            config,
+                            model,
+                            field,
+                            strategy_info,
+                            source_df,
+                            id_map,
+                            max_conn,
+                            batch_size_run,
+                            progress,
+                            task_id,
+                        )
+                    progress.update(task_id, advance=1)
 
         log.info(
             f"{stats.get('total_records', 0)} records processed. "
