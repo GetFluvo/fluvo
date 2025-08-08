@@ -168,7 +168,7 @@ class TestRPCThreadExport:
             assert result == []  # Should return an empty list on failure
             mock_log_error.assert_called_once()
             assert (
-                "The server returned an invalid (non-JSON) response"
+                "failed permanently after a network error"
                 in mock_log_error.call_args[0][0]
             )
 
@@ -907,6 +907,7 @@ class TestExportData:
         """
         # --- Arrange ---
         mock_rpc_thread = MagicMock(spec=RPCThreadExport)
+        mock_rpc_thread.has_failures = False
         future1, future2 = MagicMock(), MagicMock()
         future1.result.return_value = [{"id": 1, "is_special": True}]
         future2.result.return_value = [{"id": 2, "is_special": "False"}]

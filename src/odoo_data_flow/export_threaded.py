@@ -78,6 +78,7 @@ class RPCThreadExport(RpcThread):
         self.context = context or {}
         self.technical_names = technical_names
         self.is_hybrid = is_hybrid
+        self.has_failures = False
 
     def _enrich_with_xml_ids(
         self,
@@ -155,8 +156,8 @@ class RPCThreadExport(RpcThread):
         """Executes the export for a single batch of IDs.
 
         This method attempts to fetch data for the given IDs. If it detects a
-        MemoryError from the Odoo server, it splits the batch in half and
-        calls itself recursively on the smaller sub-batches.
+        network or memory error from the Odoo server, it splits the batch in
+        half and calls itself recursively on the smaller sub-batches.
 
         Args:
             ids_to_export: A list of Odoo record IDs to export.
@@ -169,13 +170,15 @@ class RPCThreadExport(RpcThread):
         start_time = time()
         log.debug(f"Exporting batch {num} with {len(ids_to_export)} records...")
         try:
+            # Determine the fields to read and if enrichment is needed
+            read_fields, enrichment_tasks = set(), []
             if not self.technical_names and not self.is_hybrid:
+                # Use export_data for simple cases
                 exported_data = self.model.export_data(
                     ids_to_export, self.header, context=self.context
                 ).get("datas", [])
                 return [dict(zip(self.header, row)) for row in exported_data]
 
-            read_fields, enrichment_tasks = set(), []
             for field in self.header:
                 base_field = field.split("/")[0].replace(".id", "id")
                 read_fields.add(base_field)
@@ -188,6 +191,7 @@ class RPCThreadExport(RpcThread):
                         }
                     )
 
+            # Fetch the raw data using the read method
             raw_data = cast(
                 list[dict[str, Any]],
                 self.model.read(ids_to_export, list(read_fields)),
@@ -195,24 +199,34 @@ class RPCThreadExport(RpcThread):
             if not raw_data:
                 return []
 
+            # Enrich with XML IDs if in hybrid mode
             if enrichment_tasks:
                 self._enrich_with_xml_ids(raw_data, enrichment_tasks)
 
             return self._format_batch_results(raw_data)
 
-        # --- FIX START: Add specific handling for JSONDecodeError ---
-        except requests.exceptions.JSONDecodeError:
-            error_msg = (
-                "The server returned an invalid (non-JSON) response. "
-                "This is often caused by a web server (e.g., Nginx) timeout "
-                "or a critical Odoo error. Check your server logs for details "
-                "like a '504 Gateway Timeout' and consider reducing the batch size."
-            )
-            log.error(f"Failed to process batch {num}. {error_msg}")
-            return []  # Return empty list to signal batch failure
-        # --- FIX END ---
+        except requests.exceptions.RequestException as e:
+            # --- Resilient network error handling ---
+            if len(ids_to_export) > 1:
+                log.warning(
+                    f"Batch {num} failed with a network error ({e}). This is "
+                    "often a server timeout on large batches. Automatically "
+                    "splitting the batch and retrying."
+                )
+                mid_point = len(ids_to_export) // 2
+                results_a = self._execute_batch(ids_to_export[:mid_point], f"{num}-a")
+                results_b = self._execute_batch(ids_to_export[mid_point:], f"{num}-b")
+                return results_a + results_b
+            else:
+                log.error(
+                    f"Export for record ID {ids_to_export[0]} in batch {num} "
+                    f"failed permanently after a network error: {e}"
+                )
+                self.has_failures = True
+                return []
 
         except Exception as e:
+            # --- MemoryError handling ---
             error_data = (
                 e.args[0].get("data", {})
                 if e.args and isinstance(e.args[0], dict)
@@ -233,6 +247,7 @@ class RPCThreadExport(RpcThread):
                     f"Export for batch {num} failed permanently: {e}",
                     exc_info=True,
                 )
+                self.has_failures = True
                 return []
         finally:
             log.debug(f"Batch {num} finished in {time() - start_time:.2f}s.")
@@ -385,7 +400,6 @@ def _process_export_batches(  # noqa: C901
 
     all_cleaned_dfs: list[pl.DataFrame] = []
     header_written = False
-    has_errors = False
     progress = Progress(
         SpinnerColumn(),
         TextColumn("[bold blue]{task.description}", justify="right"),
@@ -431,7 +445,7 @@ def _process_export_batches(  # noqa: C901
                     progress.update(task, advance=len(batch_result))
                 except Exception as e:
                     log.error(f"A task in a worker thread failed: {e}", exc_info=True)
-                    has_errors = True
+                    rpc_thread.has_failures = True
     except KeyboardInterrupt:  # pragma: no cover
         log.warning("\nExport process interrupted by user. Shutting down workers...")
         rpc_thread.executor.shutdown(wait=True, cancel_futures=True)
@@ -440,13 +454,11 @@ def _process_export_batches(  # noqa: C901
 
     rpc_thread.executor.shutdown(wait=True)
 
-    if has_errors:
+    if rpc_thread.has_failures:
         log.error(
-            "Export failed due to one or more errors in the worker threads. "
-            "The output file may be incomplete or empty."
+            "Export finished with errors. Some records could not be exported. "
+            "Please check the logs above for details on failed records."
         )
-        return None
-
     if output and streaming:
         log.info(f"Streaming export complete. Data written to {output}")
         return None
@@ -461,7 +473,8 @@ def _process_export_batches(  # noqa: C901
     if output:
         log.info(f"Writing {len(final_df)} records to {output}...")
         final_df.write_csv(output, separator=separator)
-        log.info("Export complete.")
+        if not rpc_thread.has_failures:
+            log.info("Export complete.")
     else:
         log.info("In-memory export complete.")
     return final_df
