@@ -13,14 +13,14 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from rich.console import Console
 from rich.panel import Panel
 
 from . import import_threaded
 from .enums import PreflightMode
-from .lib import preflight, sort
+from .lib import cache, preflight, relational_import, sort
 from .lib.internal.ui import _show_error_panel
 from .logging_config import log
 
@@ -237,6 +237,36 @@ def run_import(  # noqa: C901
     is_truly_successful = success and not fail_file_was_created
 
     if is_truly_successful:
+        id_map = cast(dict[str, int], stats.get("id_map", {}))
+        if id_map:
+            cache.save_id_map(config, model, id_map)
+
+        # --- Pass 2: Relational Strategies ---
+        if import_plan.get("strategies"):
+            for field, strategy_info in import_plan["strategies"].items():
+                if strategy_info["strategy"] == "direct_relational_import":
+                    relational_import.run_direct_relational_import(
+                        config,
+                        model,
+                        field,
+                        strategy_info,
+                        filename,  # Use original file for relational data
+                        id_map,
+                        max_conn,
+                        batch_size_run,
+                    )
+                elif strategy_info["strategy"] == "write_tuple":
+                    relational_import.run_write_tuple_import(
+                        config,
+                        model,
+                        field,
+                        strategy_info,
+                        filename,  # Use original file for relational data
+                        id_map,
+                        max_conn,
+                        batch_size_run,
+                    )
+
         log.info(
             f"{stats.get('total_records', 0)} records processed. "
             f"Total time: {elapsed:.2f}s."

@@ -423,3 +423,91 @@ def test_run_import_with_vies_disabled(
     run_import(**test_args)
     mock_import_data.assert_called_once()
     assert mock_import_data.call_args.kwargs["context"] == {"vat_check_vies": False}
+
+
+@patch("odoo_data_flow.importer.relational_import.run_direct_relational_import")
+@patch("odoo_data_flow.importer.import_threaded.import_data")
+@patch("odoo_data_flow.importer._run_preflight_checks")
+def test_run_import_orchestrates_direct_relational_strategy(
+    mock_preflight: MagicMock,
+    mock_import_data: MagicMock,
+    mock_relational_import: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Verify the importer correctly orchestrates the direct relational strategy."""
+    # Arrange
+    source_file = tmp_path / "source.csv"
+    source_file.touch()
+
+    def preflight_side_effect(*args: Any, **kwargs: Any) -> bool:
+        kwargs["import_plan"]["strategies"] = {
+            "category_id": {
+                "strategy": "direct_relational_import",
+                "type": "many2many",
+                "relation_table": "res.partner.category.rel",
+                "relation_field": "partner_id",
+                "relation": "category_id",
+            }
+        }
+        return True
+
+    mock_preflight.side_effect = preflight_side_effect
+    mock_import_data.return_value = (True, {"id_map": {"p1": 1}})
+
+    test_args = TestRunImport.DEFAULT_ARGS.copy()
+    test_args["filename"] = str(source_file)
+    test_args["no_preflight_checks"] = False
+
+    # Act
+    run_import(**test_args)
+
+    # Assert
+    mock_import_data.assert_called_once()  # Main import
+    mock_relational_import.assert_called_once()  # Relational import
+    call_args = mock_relational_import.call_args[0]
+    assert call_args[1] == "res.partner"
+    assert call_args[2] == "category_id"
+
+
+@patch("odoo_data_flow.importer.relational_import.run_write_tuple_import")
+@patch("odoo_data_flow.importer.import_threaded.import_data")
+@patch("odoo_data_flow.importer._run_preflight_checks")
+def test_run_import_orchestrates_write_tuple_strategy(
+    mock_preflight: MagicMock,
+    mock_import_data: MagicMock,
+    mock_write_tuple_import: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Verify the importer correctly orchestrates the write tuple strategy."""
+    # Arrange
+    source_file = tmp_path / "source.csv"
+    source_file.touch()
+
+    def preflight_side_effect(*args: Any, **kwargs: Any) -> bool:
+        kwargs["import_plan"]["strategies"] = {
+            "category_id": {
+                "strategy": "write_tuple",
+                "type": "many2many",
+                "relation_table": "res.partner.category.rel",
+                "relation_field": "partner_id",
+                "relation": "category_id",
+            }
+        }
+        return True
+
+    mock_preflight.side_effect = preflight_side_effect
+    mock_import_data.return_value = (True, {"id_map": {"p1": 1}})
+
+    test_args = TestRunImport.DEFAULT_ARGS.copy()
+    test_args["filename"] = str(source_file)
+    test_args["no_preflight_checks"] = False
+
+    # Act
+    run_import(**test_args)
+
+    # Assert
+    mock_import_data.assert_called_once()  # Main import
+    mock_write_tuple_import.assert_called_once()  # Relational import
+    call_args = mock_write_tuple_import.call_args[0]
+    assert call_args[1] == "res.partner"
+    assert call_args[2] == "category_id"

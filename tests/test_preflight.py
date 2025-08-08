@@ -2,6 +2,7 @@
 
 from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -44,7 +45,7 @@ class TestSelfReferencingCheck:
         """Verify the import plan is updated when a hierarchy is found."""
         sorted_file = tmp_path / "sorted.csv"
         mock_sort.return_value = str(sorted_file)
-        import_plan: dict[str, str] = {}
+        import_plan: dict[str, Any] = {}
         result = preflight.self_referencing_check(
             preflight_mode=PreflightMode.NORMAL,
             filename="file.csv",
@@ -62,7 +63,7 @@ class TestSelfReferencingCheck:
     def test_check_does_nothing_when_no_hierarchy(self, mock_sort: MagicMock) -> None:
         """Verify the import plan is unchanged when no hierarchy is found."""
         mock_sort.return_value = None
-        import_plan: dict[str, str] = {}
+        import_plan: dict[str, Any] = {}
         result = preflight.self_referencing_check(
             preflight_mode=PreflightMode.NORMAL,
             filename="file.csv",
@@ -74,7 +75,7 @@ class TestSelfReferencingCheck:
     @patch("odoo_data_flow.lib.preflight.sort.sort_for_self_referencing")
     def test_check_is_skipped_for_o2m(self, mock_sort: MagicMock) -> None:
         """Verify the check is skipped when o2m flag is True."""
-        import_plan: dict[str, str] = {}
+        import_plan: dict[str, Any] = {}
         result = preflight.self_referencing_check(
             preflight_mode=PreflightMode.NORMAL,
             filename="file.csv",
@@ -148,7 +149,9 @@ class TestLanguageCheck:
     ) -> None:
         """Tests the case where the source file contains no languages."""
         mock_df = MagicMock()
-        mock_df.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value = []  # noqa: E501
+        (
+            mock_df.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+        ) = []
         mock_polars_read_csv.return_value = mock_df
         result = preflight.language_check(
             preflight_mode=PreflightMode.NORMAL,
@@ -164,7 +167,9 @@ class TestLanguageCheck:
     ) -> None:
         """Tests the success case where all required languages are installed."""
         mock_df = MagicMock()
-        mock_df.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value = [  # noqa: E501
+        (
+            mock_df.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+        ) = [
             "en_US",
             "fr_FR",
         ]
@@ -198,9 +203,9 @@ class TestLanguageCheck:
         mock_polars_read_csv: MagicMock,
     ) -> None:
         """Tests missing languages where user confirms and install succeeds."""
-        mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value = [  # noqa: E501
-            "fr_FR"
-        ]
+        (
+            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+        ) = ["fr_FR"]
         mock_installer.return_value = True
 
         result = preflight.language_check(
@@ -227,9 +232,9 @@ class TestLanguageCheck:
         mock_conf_lib: MagicMock,
     ) -> None:
         """Tests missing languages where user confirms but install fails."""
-        mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value = [  # noqa
-            "fr_FR"
-        ]
+        (
+            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+        ) = ["fr_FR"]
         mock_conf_lib.return_value.get_model.return_value.search_read.return_value = [
             {"code": "en_US"}
         ]
@@ -258,9 +263,9 @@ class TestLanguageCheck:
         mock_polars_read_csv: MagicMock,
     ) -> None:
         """Tests that the check fails if the user cancels the installation."""
-        mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value = [  # noqa: E501
-            "fr_FR"
-        ]
+        (
+            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+        ) = ["fr_FR"]
 
         result = preflight.language_check(
             preflight_mode=PreflightMode.NORMAL,
@@ -287,9 +292,9 @@ class TestLanguageCheck:
         mock_polars_read_csv: MagicMock,
     ) -> None:
         """Tests that languages are auto-installed in headless mode."""
-        mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value = [  # noqa: E501
-            "fr_FR"
-        ]
+        (
+            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+        ) = ["fr_FR"]
         mock_installer.return_value = True
 
         result = preflight.language_check(
@@ -345,225 +350,147 @@ class TestLanguageCheck:
         mock_confirm.assert_not_called()
 
 
-class TestFieldExistenceCheck:
-    """Tests for the field_existence_check pre-flight checker."""
+class TestDeferralAndStrategyCheck:
+    """Tests for the deferral_and_strategy_check pre-flight checker."""
 
-    def test_field_check_success(
+    def test_direct_relational_import_strategy_for_large_volumes(
         self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
     ) -> None:
-        """Tests the success case where all CSV columns exist on the model."""
-        mock_polars_read_csv.return_value.columns = ["id", "name", "email"]
+        """Verify 'direct_relational_import' is chosen for many m2m links."""
+        mock_df_header = MagicMock()
+        mock_df_header.columns = ["id", "name", "category_id"]
+        mock_df_data = MagicMock()
+        (
+            mock_df_data.__getitem__.return_value.str.split.return_value.list.len.return_value.sum.return_value
+        ) = 500
+        mock_polars_read_csv.side_effect = [mock_df_header, mock_df_data]
 
-        # Mock model.fields_get() which is now used instead of search_read()
-        # It returns a dictionary where keys are the field names.
         mock_model = mock_conf_lib.return_value.get_model.return_value
         mock_model.fields_get.return_value = {
             "id": {"type": "integer"},
             "name": {"type": "char"},
-            "email": {"type": "char"},
-            "phone": {"type": "char"},
-        }
-
-        result = preflight.field_existence_check(
-            preflight_mode=PreflightMode.NORMAL,
-            model="res.partner",
-            filename="file.csv",
-            config="",
-        )
-        assert result is True
-
-    def test_field_check_success_with_relational_id(
-        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
-    ) -> None:
-        """Test Relational Id's passes tests.
-
-        Tests that the check PASSES when using Odoo's standard relational
-        field syntax (field/id).
-        """
-        # Arrange
-        mock_polars_read_csv.return_value.columns = ["name", "parent_id/id"]
-        mock_model = mock_conf_lib.return_value.get_model.return_value
-        mock_model.fields_get.return_value = {
-            "name": {"type": "char"},
-            "parent_id": {"type": "many2one"},
-        }
-
-        # Act
-        result = preflight.field_existence_check(
-            preflight_mode=PreflightMode.NORMAL,
-            model="res.partner.category",
-            filename="file.csv",
-            config="",
-        )
-
-        # Assert
-        assert result is True
-
-    def test_field_check_failure_with_invalid_base_field(
-        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
-    ) -> None:
-        """Test invalid base field.
-
-        Tests that the check FAILS if the base field name is invalid,
-        even when using relational syntax.
-        """
-        # Arrange
-        mock_polars_read_csv.return_value.columns = [
-            "name",
-            "invalid_parent/id",
-        ]
-        mock_model = mock_conf_lib.return_value.get_model.return_value
-        mock_model.fields_get.return_value = {
-            "name": {"type": "char"},
-            "parent_id": {"type": "many2one"},
-        }
-
-        # Act
-        result = preflight.field_existence_check(
-            preflight_mode=PreflightMode.NORMAL,
-            model="res.partner.category",
-            filename="file.csv",
-            config="",
-        )
-
-        # Assert
-        assert result is False
-
-    def test_field_check_rejects_export_only_syntax(
-        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
-    ) -> None:
-        """Test Reject export only syntax.
-
-        Tests that the check FAILS when using the export-only '/.id' syntax,
-        as this is not valid for importing.
-        """
-        # Arrange
-        mock_polars_read_csv.return_value.columns = ["name", "parent_id/.id"]
-        mock_model = mock_conf_lib.return_value.get_model.return_value
-        mock_model.fields_get.return_value = {
-            "name": {"type": "char"},
-            "parent_id": {"type": "many2one"},
-        }
-
-        # Act
-        result = preflight.field_existence_check(
-            preflight_mode=PreflightMode.NORMAL,
-            model="res.partner.category",
-            filename="file.csv",
-            config="",
-        )
-
-        # Assert
-        assert result is False
-
-    def test_field_check_failure(
-        self,
-        mock_polars_read_csv: MagicMock,
-        mock_conf_lib: MagicMock,
-        mock_show_error_panel: MagicMock,
-    ) -> None:
-        """Tests the failure case where a CSV column is missing from the model."""
-        mock_polars_read_csv.return_value.columns = [
-            "id",
-            "name",
-            "x_legacy_field",
-        ]
-        mock_model = mock_conf_lib.return_value.get_model.return_value
-        mock_model.fields_get.return_value = {"id": {}, "name": {}}
-
-        result = preflight.field_existence_check(
-            preflight_mode=PreflightMode.NORMAL,
-            model="res.partner",
-            filename="file.csv",
-            config="",
-        )
-        assert result is False
-        mock_show_error_panel.assert_called_once()
-        assert "Invalid Fields Found" in mock_show_error_panel.call_args[0][0]
-        assert "x_legacy_field" in mock_show_error_panel.call_args[0][1]
-
-    def test_field_check_read_csv_fails(
-        self, mock_polars_read_csv: MagicMock, mock_show_error_panel: MagicMock
-    ) -> None:
-        """Tests that the check handles an error when reading the CSV header."""
-        mock_polars_read_csv.side_effect = Exception("Cannot read file")
-        result = preflight.field_existence_check(
-            preflight_mode=PreflightMode.NORMAL,
-            model="res.partner",
-            filename="file.csv",
-            config="",
-        )
-        assert result is False
-        mock_show_error_panel.assert_called_once()
-        assert "File Read Error" in mock_show_error_panel.call_args[0][0]
-
-    def test_field_check_odoo_connection_fails(
-        self,
-        mock_polars_read_csv: MagicMock,
-        mock_conf_lib: MagicMock,
-        mock_show_error_panel: MagicMock,
-    ) -> None:
-        """Tests that the check handles an Odoo connection failure."""
-        mock_polars_read_csv.return_value.columns = ["id", "name"]
-        mock_conf_lib.side_effect = Exception("Connection Refused")
-        result = preflight.field_existence_check(
-            preflight_mode=PreflightMode.NORMAL,
-            model="res.partner",
-            filename="file.csv",
-            config="",
-        )
-        assert result is False
-        mock_show_error_panel.assert_called_once()
-        assert "Odoo Connection Error" in mock_show_error_panel.call_args[0][0]
-
-    def test_field_check_success_with_slash_notation_for_display_name(
-        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
-    ) -> None:
-        """Test the slash notation.
-
-        Tests that the pre-flight check PASSES when using Odoo's standard
-        slash notation to get a display name from a related field
-        (e.g., 'field/name').
-        """
-        # --- Arrange ---
-        # Simulate a CSV header requesting a related field's name
-        mock_polars_read_csv.return_value.columns = ["name", "parent_id/name"]
-
-        # Mock the Odoo model to confirm that the base field 'parent_id' exists
-        mock_model = mock_conf_lib.return_value.get_model.return_value
-        mock_model.fields_get.return_value = {
-            "name": {"type": "char"},
-            "parent_id": {
-                "type": "many2one",
+            "category_id": {
+                "type": "many2many",
                 "relation": "res.partner.category",
+                "relation_table": "res_partner_res_partner_category_rel",
+                "relation_field": "partner_id",
             },
         }
-
-        # --- Act ---
-        result = preflight.field_existence_check(
+        import_plan: dict[str, Any] = {}
+        result = preflight.deferral_and_strategy_check(
             preflight_mode=PreflightMode.NORMAL,
-            model="res.partner.category",
-            filename="file.csv",
-            config="",
-        )
-
-        # --- Assert ---
-        # The check should pass because 'parent_id' is a valid field
-        assert result is True
-
-    def test_field_check_respects_ignore_list(
-        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
-    ) -> None:
-        """Tests that the check ignores columns in the ignore list."""
-        mock_polars_read_csv.return_value.columns = ["id", "name", "_ERROR_REASON"]
-        mock_model = mock_conf_lib.return_value.get_model.return_value
-        mock_model.fields_get.return_value = {"id": {}, "name": {}}
-
-        result = preflight.field_existence_check(
-            preflight_mode=PreflightMode.FAIL_MODE,
             model="res.partner",
             filename="file.csv",
             config="",
-            ignore=["_ERROR_REASON"],
+            import_plan=import_plan,
         )
         assert result is True
+        assert "category_id" in import_plan["deferred_fields"]
+        assert (
+            import_plan["strategies"]["category_id"]["strategy"]
+            == "direct_relational_import"
+        )
+
+    def test_write_tuple_strategy_for_small_volumes(
+        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Verify 'write_tuple' is chosen for fewer m2m links."""
+        mock_df_header = MagicMock()
+        mock_df_header.columns = ["id", "name", "category_id"]
+        mock_df_data = MagicMock()
+        (
+            mock_df_data.__getitem__.return_value.str.split.return_value.list.len.return_value.sum.return_value
+        ) = 499
+        mock_polars_read_csv.side_effect = [mock_df_header, mock_df_data]
+
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+            "category_id": {
+                "type": "many2many",
+                "relation": "res.partner.category",
+                "relation_table": "res_partner_res_partner_category_rel",
+                "relation_field": "partner_id",
+            },
+        }
+        import_plan: dict[str, Any] = {}
+        result = preflight.deferral_and_strategy_check(
+            preflight_mode=PreflightMode.NORMAL,
+            model="res.partner",
+            filename="file.csv",
+            config="",
+            import_plan=import_plan,
+        )
+        assert result is True
+        assert "category_id" in import_plan["deferred_fields"]
+        assert import_plan["strategies"]["category_id"]["strategy"] == "write_tuple"
+
+    def test_self_referencing_m2o_is_deferred(
+        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Verify self-referencing many2one fields are deferred."""
+        mock_polars_read_csv.return_value.columns = ["id", "name", "parent_id"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+            "parent_id": {"type": "many2one", "relation": "res.partner"},
+        }
+        import_plan: dict[str, Any] = {}
+        result = preflight.deferral_and_strategy_check(
+            preflight_mode=PreflightMode.NORMAL,
+            model="res.partner",
+            filename="file.csv",
+            config="",
+            import_plan=import_plan,
+        )
+        assert result is True
+        assert "parent_id" in import_plan["deferred_fields"]
+
+    def test_auto_detects_unique_id_field(
+        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Verify 'id' is automatically chosen as the unique id field."""
+        mock_polars_read_csv.return_value.columns = ["id", "name", "parent_id"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+            "parent_id": {"type": "many2one", "relation": "res.partner"},
+        }
+        import_plan: dict[str, Any] = {}
+        result = preflight.deferral_and_strategy_check(
+            preflight_mode=PreflightMode.NORMAL,
+            model="res.partner",
+            filename="file.csv",
+            config="",
+            import_plan=import_plan,
+        )
+        assert result is True
+        assert import_plan["unique_id_field"] == "id"
+
+    def test_error_if_no_unique_id_field_for_deferrals(
+        self,
+        mock_polars_read_csv: MagicMock,
+        mock_conf_lib: MagicMock,
+        mock_show_error_panel: MagicMock,
+    ) -> None:
+        """Verify an error is shown if deferrals exist but no 'id' column."""
+        mock_polars_read_csv.return_value.columns = ["name", "parent_id"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {
+            "name": {"type": "char"},
+            "parent_id": {"type": "many2one", "relation": "res.partner"},
+        }
+        import_plan: dict[str, Any] = {}
+        result = preflight.deferral_and_strategy_check(
+            preflight_mode=PreflightMode.NORMAL,
+            model="res.partner",
+            filename="file.csv",
+            config="",
+            import_plan=import_plan,
+        )
+        assert result is False
+        mock_show_error_panel.assert_called_once()
+        assert "Action Required" in mock_show_error_panel.call_args[0][0]

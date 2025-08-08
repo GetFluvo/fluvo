@@ -1062,5 +1062,6 @@ def import_data(
         "total_records": record_count,
         "created_records": len(id_map),
         "updated_relations": updates_made,
+        "id_map": id_map,
     }
     return overall_success, stats

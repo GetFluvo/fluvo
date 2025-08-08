@@ -248,16 +248,21 @@ def _validate_header(
     return True
 
 
-def _detect_and_plan_deferrals(
-    csv_header: list[str],
+def _plan_deferrals_and_strategies(
+    header: list[str],
     odoo_fields: dict[str, Any],
     model: str,
-    import_plan: Optional[dict[str, Any]],
-    kwargs: dict[str, Any],
+    filename: str,
+    separator: str,
+    import_plan: dict[str, Any],
+    **kwargs: Any,
 ) -> bool:
-    """Detects deferrable fields and updates the import plan."""
+    """Analyzes fields to plan deferrals and select import strategies."""
     deferrable_fields = []
-    for field_name in csv_header:
+    strategies = {}
+    df = pl.read_csv(filename, separator=separator, truncate_ragged_lines=True)
+
+    for field_name in header:
         clean_field_name = field_name.replace("/id", "")
         if clean_field_name in odoo_fields:
             field_info = odoo_fields[clean_field_name]
@@ -266,62 +271,58 @@ def _detect_and_plan_deferrals(
                 and field_info.get("relation") == model
             )
             is_m2m = field_info.get("type") == "many2many"
-            if is_m2o_self or is_m2m:
+
+            if is_m2o_self:
                 deferrable_fields.append(clean_field_name)
+            elif is_m2m:
+                deferrable_fields.append(clean_field_name)
+                relation_count = df[field_name].str.split(",").list.len().sum()
+                if relation_count >= 500:
+                    strategies[clean_field_name] = {
+                        "strategy": "direct_relational_import",
+                        "relation_table": field_info["relation_table"],
+                        "relation_field": field_info["relation_field"],
+                        "relation": field_info["relation"],
+                    }
+                else:
+                    strategies[clean_field_name] = {"strategy": "write_tuple"}
 
     if deferrable_fields:
         log.info(f"Detected deferrable fields: {deferrable_fields}")
         unique_id_field = kwargs.get("unique_id_field")
+        if not unique_id_field and "id" in header:
+            log.info("Automatically using 'id' column as the unique identifier.")
+            import_plan["unique_id_field"] = "id"
+        elif not unique_id_field:
+            _show_error_panel(
+                "Action Required for Two-Pass Import",
+                "Deferrable fields were detected, but no 'id' column was found.\n"
+                "Please specify the unique ID column using the "
+                "[bold cyan]--unique-id-field[/bold cyan] option.",
+            )
+            return False
 
-        # --- NEW: Automatic 'id' column detection ---
-        if not unique_id_field:
-            if "id" in csv_header:
-                log.info("Automatically using 'id' column as the unique identifier.")
-                unique_id_field = "id"
-                if import_plan is not None:
-                    import_plan["unique_id_field"] = "id"  # Store the inferred field
-            else:
-                _show_error_panel(
-                    "Action Required for Two-Pass Import",
-                    "Deferrable fields were detected, but no 'id' column was found.\n"
-                    "Please specify the unique ID column using the "
-                    "[bold cyan]--unique-id-field[/bold cyan] option.",
-                )
-                return False
-
-        if import_plan is not None:
-            import_plan["deferred_fields"] = deferrable_fields
+        import_plan["deferred_fields"] = deferrable_fields
+        import_plan["strategies"] = strategies
     return True
 
 
 @register_check
-def field_existence_check(
+def deferral_and_strategy_check(
     preflight_mode: "PreflightMode",
     model: str,
     filename: str,
     config: str,
-    import_plan: Optional[dict[str, Any]] = None,
+    import_plan: dict[str, Any],
     **kwargs: Any,
 ) -> bool:
-    """Verifies fields exist and detects which fields require deferred import.
-
-    Args:
-        preflight_mode: The current pre-flight mode.
-        model: The target Odoo model name.
-        filename: The path to the source CSV file.
-        config: The path to the connection configuration file.
-        import_plan: A dictionary to be populated with import strategy details.
-        **kwargs: Additional arguments passed from the importer.
-
-    Returns:
-        True if all checks pass, False otherwise.
-    """
+    """Verifies fields, detects deferrals, and plans import strategies."""
     log.info(f"Running pre-flight check: Verifying fields for model '{model}'...")
-    csv_header = _get_csv_header(filename, kwargs.get("separator", ";"))
+    separator = kwargs.get("separator", ";")
+    csv_header = _get_csv_header(filename, separator)
     if not csv_header:
         return False
 
-    # FIX: Filter the header based on the ignore list BEFORE validation.
     ignore_list = kwargs.get("ignore", [])
     header_to_validate = [h for h in csv_header if h not in ignore_list]
 
@@ -329,18 +330,23 @@ def field_existence_check(
     if not odoo_fields:
         return False
 
-    # Step 1: Validate that all columns in the CSV exist on the Odoo model.
-    # This check is crucial and should run in both NORMAL and FAIL modes.
     if not _validate_header(header_to_validate, odoo_fields, model):
         return False
 
-    # Step 2: Detect deferrable fields and plan a two-pass strategy.
-    # This should ONLY run in NORMAL mode, as fail runs are always single-pass.
-    if preflight_mode == PreflightMode.NORMAL:
-        if not _detect_and_plan_deferrals(
-            header_to_validate, odoo_fields, model, import_plan, kwargs
-        ):
-            return False
+    if preflight_mode == PreflightMode.FAIL_MODE:
+        log.info("Pre-flight Check Successful in Fail-Mode.")
+        return True
+
+    if not _plan_deferrals_and_strategies(
+        header_to_validate,
+        odoo_fields,
+        model,
+        filename,
+        separator,
+        import_plan,
+        **kwargs,
+    ):
+        return False
 
     log.info("Pre-flight Check Successful: All columns are valid fields on the model.")
     return True
