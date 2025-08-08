@@ -1,3 +1,6 @@
+# odoo-data-flow
+.odf_cache/
+
 # virtualenv
 .venv/
 
