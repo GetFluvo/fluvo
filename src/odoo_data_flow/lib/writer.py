@@ -42,7 +42,7 @@ def write_relational_failures_to_csv(
                 writer.writeheader()
             writer.writerows(failed_records)
 
-    except IOError as e:
+    except OSError as e:
         _show_error_panel(
             "File Write Error", f"Could not write to fail file {fail_filepath}: {e}"
         )
