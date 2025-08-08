@@ -147,11 +147,11 @@ This standard Python `dict` ties everything together. The keys are the column na
 
 A key strength of this library is its robust error handling, which ensures that a few bad records won't cause an entire import to fail. This is managed through a clever two-pass system.
 
-## The Smart Import Engine: Performance and Robustness
+## The Smart Import Engine: Performance, Robustness, and Caching
 
-A key strength of this library is its "smart" import engine, which is designed to maximize both speed and success rates. It automatically handles common issues like individual bad records in large batches and complex data relationships without requiring manual intervention.
+A key strength of this library is its "smart" import engine, which is designed to maximize both speed and success rates. It automatically handles common issues like individual bad records, complex data relationships, and redundant data lookups without requiring manual intervention.
 
-This is managed through two core automatic strategies: the `load` -> `create` fallback and the two-pass strategy for relations.
+This is managed through several core automatic strategies:
 
 ### Tier 1: The `load` -> `create` Fallback for Robustness
 
@@ -194,16 +194,27 @@ flowchart TD
 
 ```
 
-Tier 2: Automatic Two-Pass for Relational Data
+### Tier 2: Automatic Strategy Selection for Relational Fields
 
-The smart importer also automatically handles the performance and logic challenges of importing data with interdependent relationships (like a `parent_id` on a partner that refers to another partner in the same file).
+Importing data with interdependent relationships (like a `parent_id` on a partner that refers to another partner in the same file) is a complex challenge. The smart importer tackles this by automatically detecting relational fields and choosing the most performant import strategy.
 
-When the pre-flight check detects these fields, it automatically enables a two-pass strategy:
-1. Pass 1 (Create): The importer automatically excludes the relational fields and runs the robust load -> create process described above. This creates all the base records quickly and efficiently.
+During the **pre-flight check**, the importer inspects the header of your CSV file and queries Odoo for the type of each field. Based on the field types it discovers, it automatically selects one of the following strategies:
 
-2. Pass 2 (Write): After Pass 1 is complete, the importer performs a second, multi-threaded write pass to set the relationships on the newly created records.
+- **Standard Load**: For files with no relational fields, it uses the robust `load` -> `create` fallback method for maximum speed.
+- **Two-Pass Strategy (for `Many2one`)**: When it detects `Many2one` fields that create dependencies within the same file (e.g., `parent_id`), it automatically deactivates those columns for the first pass. It creates all the base records and then, in a second, multi-threaded pass, it efficiently `write`s the relational values.
+- **Three-Pass Strategy (for `Many2many` and `One2many`)**: For the most complex cases involving `Many2many` or `One2many` fields, it performs a three-pass import. This ensures that all records exist before attempting to create the complex relationships, maximizing the success rate.
 
-This automatic behavior means you no longer need to manually use --ignore or split your files to handle these common scenarios.
+This automatic behavior means you no longer need to manually use `--ignore` or split your files to handle these common scenarios. The tool selects the best strategy for you.
+
+### Tier 3: Internal Caching for Speed
+
+To further accelerate the import process, `odoo-data-flow` implements an internal caching mechanism. It automatically caches metadata fetched from Odoo, such as:
+
+- Field definitions for models
+- `ir.model.data` records (external IDs)
+
+This cache is stored in the `.odf_cache` directory in your project root. On subsequent runs, the importer uses the cached data instead of repeatedly querying the Odoo server, leading to a significant speed-up, especially in large projects with many files or complex models. The cache is intelligently invalidated when the corresponding model in Odoo changes.
+
 
 ## The Export Concept
 

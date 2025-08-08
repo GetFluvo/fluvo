@@ -144,9 +144,9 @@ Finally, execute the generated shell script to upload the data.
 bash load.sh
 ```
 
-The `odoo-data-flow` tool will connect to your database  and execute the first command.
+The `odoo-data-flow` tool will connect to your database and execute the first command.
 
-Because the import engine is "smart," it will automatically use its `load` -> `create` fallback to rescue good records if any batch fails, ensuring the highest possible success rate.
+Because the import engine is "smart," it automatically detects relational fields to select the most performant import strategy and uses its `load` -> `create` fallback to rescue good records if any batch fails, ensuring the highest possible success rate.
 
 The second command with the `--fail` flag will then automatically process any records that were truly invalid and written to the res_partner_fail.csv file.
 
