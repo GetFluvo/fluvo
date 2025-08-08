@@ -430,7 +430,11 @@ class TestDeferralAndStrategyCheck:
         self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
     ) -> None:
         """Verify self-referencing many2one fields are deferred."""
-        mock_polars_read_csv.return_value.columns = ["id", "name", "parent_id"]
+        mock_df_header = MagicMock()
+        mock_df_header.columns = ["id", "name", "parent_id"]
+        mock_df_data = MagicMock()
+        mock_polars_read_csv.side_effect = [mock_df_header, mock_df_data]
+
         mock_model = mock_conf_lib.return_value.get_model.return_value
         mock_model.fields_get.return_value = {
             "id": {"type": "integer"},
@@ -452,7 +456,11 @@ class TestDeferralAndStrategyCheck:
         self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
     ) -> None:
         """Verify 'id' is automatically chosen as the unique id field."""
-        mock_polars_read_csv.return_value.columns = ["id", "name", "parent_id"]
+        mock_df_header = MagicMock()
+        mock_df_header.columns = ["id", "name", "parent_id"]
+        mock_df_data = MagicMock()
+        mock_polars_read_csv.side_effect = [mock_df_header, mock_df_data]
+
         mock_model = mock_conf_lib.return_value.get_model.return_value
         mock_model.fields_get.return_value = {
             "id": {"type": "integer"},
@@ -477,7 +485,11 @@ class TestDeferralAndStrategyCheck:
         mock_show_error_panel: MagicMock,
     ) -> None:
         """Verify an error is shown if deferrals exist but no 'id' column."""
-        mock_polars_read_csv.return_value.columns = ["name", "parent_id"]
+        mock_df_header = MagicMock()
+        mock_df_header.columns = ["name", "parent_id"]
+        mock_df_data = MagicMock()
+        mock_polars_read_csv.side_effect = [mock_df_header, mock_df_data]
+
         mock_model = mock_conf_lib.return_value.get_model.return_value
         mock_model.fields_get.return_value = {
             "name": {"type": "char"},

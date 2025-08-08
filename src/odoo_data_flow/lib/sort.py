@@ -47,7 +47,7 @@ def sort_for_self_referencing(
     parent_ids = df.get_column(parent_column).drop_nulls().unique().cast(pl.Utf8)
     all_ids = df.get_column(id_column).unique().cast(pl.Utf8)
 
-    if not parent_ids.is_in(all_ids).all():
+    if not parent_ids.is_in(all_ids.to_list()).all():
         # Not a self-referencing hierarchy within this file
         return None
 
