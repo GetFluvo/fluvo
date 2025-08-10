@@ -365,6 +365,7 @@ def deferral_and_strategy_check(
         log.info("Pre-flight Check Successful in Fail-Mode.")
         return True
 
+    kwargs.pop("separator", None)
     if not _plan_deferrals_and_strategies(
         header_to_validate,
         odoo_fields,

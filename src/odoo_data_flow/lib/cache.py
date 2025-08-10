@@ -1,5 +1,6 @@
 """Handles caching of import metadata, such as id_maps."""
 
+import configparser
 import hashlib
 import json
 from pathlib import Path
@@ -8,7 +9,6 @@ from typing import Any, Optional, cast
 import polars as pl
 
 from ..logging_config import log
-from . import conf_lib
 
 
 def get_cache_dir(config_file: str) -> Optional[Path]:
@@ -21,8 +21,13 @@ def get_cache_dir(config_file: str) -> Optional[Path]:
         A Path object to the unique cache directory, or None on failure.
     """
     try:
-        config = conf_lib.get_connection_from_config(config_file)
-        connection_str = f"{config.hostname}{config.port}{config.database}"
+        config = configparser.ConfigParser()
+        config.read(config_file)
+        connection_str = (
+            f"{config.get('Connection', 'hostname')}"
+            f"{config.get('Connection', 'port')}"
+            f"{config.get('Connection', 'database')}"
+        )
         hash_id = hashlib.sha256(connection_str.encode()).hexdigest()
         cache_dir = Path(".odf_cache") / hash_id
         cache_dir.mkdir(parents=True, exist_ok=True)
