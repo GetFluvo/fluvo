@@ -71,7 +71,7 @@ def _str_to_mapper(field: Any) -> MapperFunc:
     If the input is not a string, it is assumed to be a valid mapper function.
     """
     if isinstance(field, str):
-        return val(field)
+        return val(field, default="")
     return cast(MapperFunc, field)
 
 
@@ -151,7 +151,6 @@ def concat_mapper_all(separator: str, *fields: Any) -> MapperFunc:
         *fields: A variable number of source column names or static strings.
 
     Returns:
-        Returns:
         A mapper function that returns the concatenated string or an empty string.
     """
     mappers = _list_to_mappers(fields)
@@ -197,6 +196,7 @@ def bool_val(
     """Returns a mapper that converts a field value to a boolean '1' or '0'.
 
     The logic is as follows:
+
     1. If `true_values` is provided, any value in that list is considered True.
     2. If `false_values` is provided, any value in that list is considered False.
     3. If the value is not in either list, the truthiness of the value itself
