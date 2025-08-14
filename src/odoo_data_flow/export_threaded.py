@@ -6,12 +6,15 @@ data from an Odoo instance.
 
 import concurrent.futures
 import csv
+import json
+import shutil
 import sys
+from pathlib import Path
 from time import time
 from typing import Any, Optional, Union, cast
 
-import polars as pl
 import httpx
+import polars as pl
 from rich.progress import (
     BarColumn,
     Progress,
@@ -20,7 +23,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from .lib import conf_lib
+from .lib import cache, conf_lib
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch
 from .lib.odoo_lib import ODOO_TO_POLARS_MAP
@@ -152,7 +155,7 @@ class RPCThreadExport(RpcThread):
 
     def _execute_batch_with_retry(
         self, ids_to_export: list[int], num: Union[int, str], e: Exception
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], list[int]]:
         """Splits the batch and recursively retries on network errors."""
         if len(ids_to_export) > 1:
             log.warning(
@@ -161,20 +164,24 @@ class RPCThreadExport(RpcThread):
                 "splitting the batch and retrying."
             )
             mid_point = len(ids_to_export) // 2
-            results_a = self._execute_batch(ids_to_export[:mid_point], f"{num}-a")
-            results_b = self._execute_batch(ids_to_export[mid_point:], f"{num}-b")
-            return results_a + results_b
+            results_a, ids_a = self._execute_batch(
+                ids_to_export[:mid_point], f"{num}-a"
+            )
+            results_b, ids_b = self._execute_batch(
+                ids_to_export[mid_point:], f"{num}-b"
+            )
+            return results_a + results_b, ids_a + ids_b
         else:
             log.error(
                 f"Export for record ID {ids_to_export[0]} in batch {num} "
                 f"failed permanently after a network error: {e}"
             )
             self.has_failures = True
-            return []
+            return [], []
 
     def _execute_batch(
         self, ids_to_export: list[int], num: Union[int, str]
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], list[int]]:
         """Executes the export for a single batch of IDs.
 
         This method attempts to fetch data for the given IDs. If it detects a
@@ -186,8 +193,10 @@ class RPCThreadExport(RpcThread):
             num: The batch number, used for logging.
 
         Returns:
-            A list of dictionaries representing the exported records. Returns an
-            empty list if the batch fails permanently.
+            A tuple containing:
+            - A list of dictionaries representing the exported records.
+            - A list of the database IDs that were successfully processed.
+            Returns an empty list if the batch fails permanently.
         """
         start_time = time()
         log.debug(f"Exporting batch {num} with {len(ids_to_export)} records...")
@@ -199,7 +208,9 @@ class RPCThreadExport(RpcThread):
                 exported_data = self.model.export_data(
                     ids_to_export, self.header, context=self.context
                 ).get("datas", [])
-                return [dict(zip(self.header, row)) for row in exported_data]
+                return [
+                    dict(zip(self.header, row)) for row in exported_data
+                ], ids_to_export
 
             for field in self.header:
                 base_field = field.split("/")[0].replace(".id", "id")
@@ -212,6 +223,8 @@ class RPCThreadExport(RpcThread):
                             "relation": self.fields_info[field].get("relation"),
                         }
                     )
+            # Ensure 'id' is always present for session tracking
+            read_fields.add("id")
 
             # Fetch the raw data using the read method
             raw_data = cast(
@@ -219,13 +232,16 @@ class RPCThreadExport(RpcThread):
                 self.model.read(ids_to_export, list(read_fields)),
             )
             if not raw_data:
-                return []
+                return [], []
 
             # Enrich with XML IDs if in hybrid mode
             if enrichment_tasks:
                 self._enrich_with_xml_ids(raw_data, enrichment_tasks)
 
-            return self._format_batch_results(raw_data)
+            processed_ids = [
+                rec["id"] for rec in raw_data if isinstance(rec.get("id"), int)
+            ]
+            return self._format_batch_results(raw_data), processed_ids
 
         except (
             httpx.ReadError,
@@ -248,16 +264,20 @@ class RPCThreadExport(RpcThread):
                     f"MemoryError. Splitting and retrying..."
                 )
                 mid_point = len(ids_to_export) // 2
-                results_a = self._execute_batch(ids_to_export[:mid_point], f"{num}-a")
-                results_b = self._execute_batch(ids_to_export[mid_point:], f"{num}-b")
-                return results_a + results_b
+                results_a, ids_a = self._execute_batch(
+                    ids_to_export[:mid_point], f"{num}-a"
+                )
+                results_b, ids_b = self._execute_batch(
+                    ids_to_export[mid_point:], f"{num}-b"
+                )
+                return results_a + results_b, ids_a + ids_b
             else:
                 log.error(
                     f"Export for batch {num} failed permanently: {e}",
                     exc_info=True,
                 )
                 self.has_failures = True
-                return []
+                return [], []
         finally:
             log.debug(f"Batch {num} finished in {time() - start_time:.2f}s.")
 
@@ -390,6 +410,9 @@ def _process_export_batches(  # noqa: C901
     fields_info: dict[str, dict[str, Any]],
     separator: str,
     streaming: bool,
+    session_dir: Optional[Path],
+    is_resuming: bool,
+    encoding: str,
 ) -> Optional[pl.DataFrame]:
     """Processes exported batches.
 
@@ -426,9 +449,16 @@ def _process_export_batches(  # noqa: C901
             )
             for future in concurrent.futures.as_completed(rpc_thread.futures):
                 try:
-                    batch_result = future.result()
+                    batch_result, completed_ids = future.result()
                     if not batch_result:
                         continue
+
+                    # --- Session State Update ---
+                    if session_dir and completed_ids:
+                        with (session_dir / "completed_ids.txt").open("a") as f:
+                            for record_id in completed_ids:
+                                f.write(f"{record_id}\n")
+                    # --- End Session State Update ---
 
                     df = _clean_batch(batch_result)
                     if df.is_empty():
@@ -440,12 +470,24 @@ def _process_export_batches(  # noqa: C901
 
                     if output and streaming:
                         if not header_written:
-                            final_batch_df.write_csv(
-                                output, separator=separator, include_header=True
-                            )
+                            if is_resuming:
+                                with open(
+                                    output, "a", newline="", encoding=encoding
+                                ) as f:
+                                    final_batch_df.write_csv(
+                                        f,
+                                        separator=separator,
+                                        include_header=False,
+                                    )
+                            else:
+                                final_batch_df.write_csv(
+                                    output,
+                                    separator=separator,
+                                    include_header=True,
+                                )
                             header_written = True
                         else:
-                            with open(output, "ab") as f:
+                            with open(output, "a", newline="", encoding=encoding) as f:
                                 final_batch_df.write_csv(
                                     f, separator=separator, include_header=False
                                 )
@@ -475,13 +517,22 @@ def _process_export_batches(  # noqa: C901
         log.warning("No data was returned from the export.")
         empty_df = pl.DataFrame(schema=polars_schema)
         if output:
-            empty_df.write_csv(output, separator=separator)
+            if is_resuming:
+                with open(output, "a", newline="", encoding=encoding) as f:
+                    empty_df.write_csv(f, separator=separator, include_header=False)
+            else:
+                empty_df.write_csv(output, separator=separator)
         return empty_df
 
     final_df = pl.concat(all_cleaned_dfs)
     if output:
         log.info(f"Writing {len(final_df)} records to {output}...")
-        final_df.write_csv(output, separator=separator)
+        if is_resuming:
+            with open(output, "a", newline="", encoding=encoding) as f:
+                final_df.write_csv(f, separator=separator, include_header=False)
+        else:
+            final_df.write_csv(output, separator=separator)
+
         if not rpc_thread.has_failures:
             log.info("Export complete.")
     else:
@@ -558,6 +609,59 @@ def _determine_export_strategy(
     return connection, model_obj, fields_info, force_read_method, is_hybrid
 
 
+def _resume_existing_session(
+    session_dir: Path, session_id: str
+) -> tuple[list[int], int]:
+    """Resumes an existing export session by loading completed IDs."""
+    log.info(f"Resuming export session: {session_id}")
+    all_ids_file = session_dir / "all_ids.json"
+    if not all_ids_file.exists():
+        log.error(
+            f"Session file 'all_ids.json' not found in {session_dir}. "
+            "Cannot resume. Please start a new export."
+        )
+        return [], 0
+
+    with all_ids_file.open("r") as f:
+        all_ids = set(json.load(f))
+
+    completed_ids_file = session_dir / "completed_ids.txt"
+    completed_ids: set[int] = set()
+    if completed_ids_file.exists():
+        with completed_ids_file.open("r") as f:
+            completed_ids = {int(line.strip()) for line in f if line.strip()}
+
+    ids_to_export = list(all_ids - completed_ids)
+    total_record_count = len(all_ids)
+
+    log.info(
+        f"{len(completed_ids)} of {total_record_count} records already "
+        f"exported. Fetching remaining {len(ids_to_export)} records."
+    )
+    return ids_to_export, total_record_count
+
+
+def _create_new_session(
+    model_obj: Any,
+    domain: list[Any],
+    context: Optional[dict[str, Any]],
+    session_id: str,
+    session_dir: Path,
+) -> tuple[list[int], int]:
+    """Creates a new export session and fetches initial record IDs."""
+    log.info(f"Starting new export session: {session_id}")
+    log.info(f"Searching for records to export in model '{model_obj.model_name}'...")
+    ids = model_obj.search(domain, context=context)
+    total_record_count = len(ids)
+
+    all_ids_file = session_dir / "all_ids.json"
+    with all_ids_file.open("w") as f:
+        json.dump(ids, f)
+    (session_dir / "completed_ids.txt").touch()
+
+    return ids, total_record_count
+
+
 def export_data(
     config_file: str,
     model: str,
@@ -571,33 +675,44 @@ def export_data(
     encoding: str = "utf-8",
     technical_names: bool = False,
     streaming: bool = False,
-) -> Optional[pl.DataFrame]:
-    """Exports data from an Odoo model."""
+    resume_session: Optional[str] = None,
+) -> tuple[bool, Optional[str], int, Optional[pl.DataFrame]]:
+    """Exports data from an Odoo model, with support for resumable sessions."""
+    session_id = resume_session or cache.generate_session_id(model, domain, header)
+    session_dir = cache.get_session_dir(session_id)
+    if not session_dir:
+        return False, session_id, 0, None
+
     connection, model_obj, fields_info, force_read_method, is_hybrid = (
         _determine_export_strategy(config_file, model, header, technical_names)
     )
-
     if not connection or not model_obj or not fields_info:
-        return None
+        return False, session_id, 0, None
 
     if streaming and not output:
         log.error("Streaming mode requires an output file path. Aborting.")
-        return None
+        return False, session_id, 0, None
 
-    log.info(
-        f"Searching for records to export in model '{model}' with domain: \n{domain}"
-    )
-    ids = model_obj.search(domain, context=context)
-    if not ids:
-        log.warning("No records found for the given domain.")
-        if output:
+    is_resuming = bool(resume_session)
+    if is_resuming:
+        ids_to_export, total_record_count = _resume_existing_session(
+            session_dir, session_id
+        )
+    else:
+        ids_to_export, total_record_count = _create_new_session(
+            model_obj, domain, context, session_id, session_dir
+        )
+
+    if not ids_to_export:
+        log.info("All records have already been exported. Nothing to do.")
+        if output and not Path(output).exists():
             pl.DataFrame(schema=header).write_csv(output, separator=separator)
-        return None
+        if not is_resuming:
+            shutil.rmtree(session_dir)
+        return True, session_id, total_record_count, pl.DataFrame(schema=header)
 
-    log.info(
-        f"Found {len(ids)} records to export. Splitting into batches of {batch_size}."
-    )
-    id_batches = list(batch(ids, batch_size))
+    log.info(f"Processing {len(ids_to_export)} records in batches of {batch_size}.")
+    id_batches = list(batch(ids_to_export, batch_size))
 
     rpc_thread = RPCThreadExport(
         max_connection=max_connection,
@@ -612,6 +727,25 @@ def export_data(
     for i, id_batch in enumerate(id_batches):
         rpc_thread.launch_batch(list(id_batch), i)
 
-    return _process_export_batches(
-        rpc_thread, len(ids), model, output, fields_info, separator, streaming
+    final_df = _process_export_batches(
+        rpc_thread,
+        total_ids=total_record_count,
+        model_name=model,
+        output=output,
+        fields_info=fields_info,
+        separator=separator,
+        streaming=streaming,
+        session_dir=session_dir,
+        is_resuming=is_resuming,
+        encoding=encoding,
     )
+
+    # --- Finalization and Cleanup ---
+    success = not rpc_thread.has_failures
+    if success:
+        log.info("Export complete, cleaning up session directory.")
+        shutil.rmtree(session_dir)
+    else:
+        log.error(f"Export failed. Session data retained in: {session_dir}")
+
+    return success, session_id, total_record_count, final_df
