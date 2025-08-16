@@ -13,7 +13,7 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional, Union, cast
 
 import polars as pl
 from rich.console import Console
@@ -40,7 +40,7 @@ def _infer_model_from_filename(filename: str) -> Optional[str]:
     """Tries to guess the Odoo model from a CSV filename."""
     basename = Path(filename).stem
     # Remove common suffixes like _fail, _transformed, etc.
-    clean_name = re.sub(r"(_fail|_transformed|\d+)$", "", basename)
+    clean_name = re.sub(r"(_fail|_transformed|_\d+)$", "", basename)
     # Convert underscores to dots
     model_name = clean_name.replace("_", ".")
     if "." in model_name:
@@ -89,7 +89,7 @@ def _run_preflight_checks(
 
 
 def run_import(  # noqa: C901
-    config: str,
+    config: Union[str, dict[str, Any]],
     filename: str,
     model: Optional[str],
     deferred_fields: Optional[list[str]],
@@ -212,7 +212,7 @@ def run_import(  # noqa: C901
     start_time = time.time()
     try:
         success, stats = import_threaded.import_data(
-            config_file=config,
+            config=config,
             model=model,
             unique_id_field=final_uid_field,
             file_csv=file_to_process,
@@ -241,7 +241,8 @@ def run_import(  # noqa: C901
     if is_truly_successful:
         id_map = cast(dict[str, int], stats.get("id_map", {}))
         if id_map:
-            cache.save_id_map(config, model, id_map)
+            if isinstance(config, str):
+                cache.save_id_map(config, model, id_map)
 
         # --- Pass 2: Relational Strategies ---
         if import_plan.get("strategies"):
@@ -270,7 +271,7 @@ def run_import(  # noqa: C901
                         )
                         if import_details:
                             import_threaded.import_data(
-                                config_file=config,
+                                config=config,
                                 model=import_details["model"],
                                 unique_id_field=import_details["unique_id_field"],
                                 file_csv=import_details["file_csv"],
@@ -341,7 +342,7 @@ def run_import(  # noqa: C901
 
 
 def run_import_for_migration(
-    config: str,
+    config: Union[str, dict[str, Any]],
     model: str,
     header: list[str],
     data: list[list[Any]],
@@ -374,7 +375,7 @@ def run_import_for_migration(
             tmp_path = tmp.name
         log.info(f"In-memory data written to temporary file: {tmp_path}")
         import_threaded.import_data(
-            config_file=config,
+            config=config,
             model=model,
             unique_id_field="id",  # Migration import assumes 'id'
             file_csv=tmp_path,

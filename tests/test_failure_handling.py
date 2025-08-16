@@ -56,7 +56,7 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
     # --- Act ---
     # Capture the return value of the import process
     result, _ = import_threaded.import_data(
-        config_file="dummy.conf",
+        config="dummy.conf",
         model=model_name,
         unique_id_field="id",
         file_csv=str(source_file),
@@ -112,7 +112,7 @@ def test_create_fallback_handles_malformed_rows(tmp_path: Path) -> None:
     ) as mock_get_conn:
         mock_get_conn.return_value.get_model.return_value = mock_model
         result, _ = import_threaded.import_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model=model_name,
             unique_id_field="id",
             file_csv=str(source_file),
@@ -166,7 +166,7 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
 
     # 2. ACT
     result, _ = import_threaded.import_data(
-        config_file="dummy.conf",
+        config="dummy.conf",
         model=model_name,
         unique_id_field="id",
         file_csv=str(source_file),
@@ -210,7 +210,7 @@ def test_load_with_ignored_columns(mock_get_conn: MagicMock, tmp_path: Path) -> 
 
     # 2. ACT
     import_threaded.import_data(
-        config_file="dummy.conf",
+        config="dummy.conf",
         model="res.partner",
         unique_id_field="id",
         file_csv=str(source_file),

@@ -11,7 +11,7 @@ import sys
 import time  # noqa
 from collections.abc import Generator, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed  # noqa
-from typing import Any, Optional, TextIO
+from typing import Any, Optional, TextIO, Union
 
 from rich.console import Console
 from rich.progress import (
@@ -900,7 +900,7 @@ def _orchestrate_pass_2(
 
 
 def import_data(
-    config_file: str,
+    config: Union[str, dict[str, Any]],
     model: str,
     unique_id_field: str,
     file_csv: str,
@@ -931,7 +931,7 @@ def import_data(
       multi-threaded pass to `write` the relational data.
 
     Args:
-        config_file (str): Path to the Odoo connection configuration file.
+        config (Union[str, dict]): Path to the Odoo connection file or a dict.
         model (str): The technical name of the target Odoo model.
         unique_id_field (str): The column name in the source file that
             uniquely identifies each record.
@@ -971,7 +971,10 @@ def import_data(
         return False, {}
 
     try:
-        connection = conf_lib.get_connection_from_config(config_file)
+        if isinstance(config, dict):
+            connection = conf_lib.get_connection_from_dict(config)
+        else:
+            connection = conf_lib.get_connection_from_config(config)
         model_obj = connection.get_model(model)
     except Exception as e:
         from .lib.internal.ui import _show_error_panel

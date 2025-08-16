@@ -59,7 +59,7 @@ class TestInitializeExport:
 
         # --- Act ---
         _initialize_export(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model_name="res.partner",
             header=header,
             technical_names=False,
@@ -93,7 +93,7 @@ class TestInitializeExport:
 
         # --- Act ---
         _initialize_export(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model_name="res.partner",
             header=header,
             technical_names=False,
@@ -256,7 +256,7 @@ class TestExportData:
 
         # --- Act ---
         _, _, _, result_df = export_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="res.partner",
             domain=[],
             header=header,
@@ -295,7 +295,7 @@ class TestExportData:
 
         # --- Act ---
         _, _, _, result_df = export_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="res.partner",
             domain=[],
             header=header,
@@ -340,7 +340,7 @@ class TestExportData:
 
         # --- Act ---
         success, _, _, result_df = export_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="res.partner",
             domain=[],
             header=header,
@@ -367,7 +367,7 @@ class TestExportData:
             side_effect=Exception("Connection Error"),
         ):
             success, _, _, result = export_data(
-                config_file="bad.conf",
+                config="bad.conf",
                 model="res.partner",
                 domain=[],
                 header=["id"],
@@ -389,7 +389,7 @@ class TestExportData:
         }
 
         success, _, _, result_df = export_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="res.partner",
             domain=[],
             header=["id", "name"],
@@ -436,7 +436,7 @@ class TestExportData:
 
         # --- Act ---
         success, _, _, result_df = export_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="res.partner",
             domain=[],
             header=["id", "name"],
@@ -474,7 +474,7 @@ class TestExportData:
 
         # --- Act ---
         export_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="res.partner",
             domain=[],
             header=["id", "name"],
@@ -509,7 +509,7 @@ class TestExportData:
 
         # --- Act ---
         export_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="res.partner",
             domain=[],
             header=["id", "name"],
@@ -551,7 +551,7 @@ class TestExportData:
         )
 
         success, _, _, result_df = export_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="res.partner",
             domain=[],
             header=["name"],
@@ -668,7 +668,7 @@ class TestExportData:
 
         # --- Act ---
         _, _, _, result_df = export_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="res.partner.category",
             domain=[],
             header=header,
@@ -721,7 +721,7 @@ class TestExportData:
 
         # --- Act ---
         _, _, _, result_df = export_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="res.partner.category",
             domain=[],
             header=header,
@@ -757,7 +757,7 @@ class TestExportData:
 
         # --- Act ---
         _, _, _, result_df = export_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="res.partner",
             domain=[],
             header=header,
@@ -803,7 +803,7 @@ class TestExportData:
 
         # --- Act ---
         _, _, _, result_df = export_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="res.partner",
             domain=[],
             header=header,
@@ -858,7 +858,7 @@ class TestExportData:
 
         # --- Act ---
         _, _, _, result_df = export_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="sale.order",
             domain=[],
             header=header,
@@ -908,7 +908,7 @@ class TestExportData:
 
         # --- Act ---
         _, _, _, result_df = export_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="ir.attachment",
             domain=[],
             header=header,

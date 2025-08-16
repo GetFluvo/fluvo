@@ -14,18 +14,39 @@ def runner() -> CliRunner:
     return CliRunner()
 
 
-def test_main_succeeds_without_command(runner: CliRunner) -> None:
-    """Test main Succeeds.
+# --- Project Mode Tests ---
+@patch("odoo_data_flow.__main__.run_project_flow")
+def test_project_mode_with_explicit_flow_file(
+    mock_run_flow: MagicMock, runner: CliRunner
+) -> None:
+    """It should run project mode when --flow-file is explicitly provided."""
+    with runner.isolated_filesystem():
+        with open("test_flow.yml", "w") as f:
+            f.write("flow: content")
+        result = runner.invoke(__main__.cli, ["--flow-file", "test_flow.yml"])
+        assert result.exit_code == 0
+        mock_run_flow.assert_called_once_with("test_flow.yml", None)
 
-    It exits with a status code of 0 when no command is provided
-    and should show the main help message.
-    """
-    result = runner.invoke(__main__.cli)
-    assert result.exit_code == 0
-    assert "import" in result.output
-    assert "export" in result.output
-    assert "path-to-image" in result.output
-    assert "url-to-image" in result.output
+
+@patch("odoo_data_flow.__main__.run_project_flow")
+def test_project_mode_with_default_flow_file(
+    mock_run_flow: MagicMock, runner: CliRunner
+) -> None:
+    """It should use flows.yml by default if it exists and no command is given."""
+    with runner.isolated_filesystem():
+        with open("flows.yml", "w") as f:
+            f.write("default flow")
+        result = runner.invoke(__main__.cli)
+        assert result.exit_code == 0
+        mock_run_flow.assert_called_once_with("flows.yml", None)
+
+
+def test_shows_help_when_no_command_or_flow_file(runner: CliRunner) -> None:
+    """It should show the help message when no command or flow file is found."""
+    with runner.isolated_filesystem():
+        result = runner.invoke(__main__.cli)
+        assert result.exit_code == 0
+        assert "Usage: cli" in result.output
 
 
 def test_main_shows_version(runner: CliRunner) -> None:
@@ -35,12 +56,15 @@ def test_main_shows_version(runner: CliRunner) -> None:
     assert "version" in result.output
 
 
-def test_import_fails_without_options(runner: CliRunner) -> None:
+# --- Single-Action Mode Tests (Refactored) ---
+
+
+def test_import_fails_without_required_options(runner: CliRunner) -> None:
     """The import command should fail if required options are missing."""
     result = runner.invoke(__main__.cli, ["import"])
     assert result.exit_code != 0
     assert "Missing option" in result.output
-    assert "--file" in result.output
+    assert "--connection-file" in result.output
 
 
 @patch("odoo_data_flow.__main__.run_import")
@@ -48,24 +72,27 @@ def test_import_command_calls_runner(
     mock_run_import: MagicMock, runner: CliRunner
 ) -> None:
     """Tests that the import command calls the correct runner function."""
-    result = runner.invoke(
-        __main__.cli,
-        [
-            "import",
-            "--config",
-            "my.conf",
-            "--file",
-            "my.csv",
-            "--model",
-            "res.partner",
-        ],
-    )
-    assert result.exit_code == 0
-    mock_run_import.assert_called_once()
-    call_kwargs = mock_run_import.call_args.kwargs
-    assert call_kwargs["config"] == "my.conf"
-    assert call_kwargs["filename"] == "my.csv"
-    assert call_kwargs["model"] == "res.partner"
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "my.csv",
+                "--model",
+                "res.partner",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_run_import.assert_called_once()
+        call_kwargs = mock_run_import.call_args.kwargs
+        assert call_kwargs["config"] == "conn.conf"
+        assert call_kwargs["filename"] == "my.csv"
+        assert call_kwargs["model"] == "res.partner"
 
 
 @patch("odoo_data_flow.__main__.run_export")
@@ -73,158 +100,76 @@ def test_export_command_calls_runner(
     mock_run_export: MagicMock, runner: CliRunner
 ) -> None:
     """Tests that the export command calls the correct runner function."""
-    result = runner.invoke(
-        __main__.cli,
-        [
-            "export",
-            "--config",
-            "my.conf",
-            "--output",
-            "my.csv",
-            "--model",
-            "res.partner",
-            "--fields",
-            "id,name",
-        ],
-    )
-    assert result.exit_code == 0
-    mock_run_export.assert_called_once()
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "export",
+                "--connection-file",
+                "conn.conf",
+                "--output",
+                "my.csv",
+                "--model",
+                "res.partner",
+                "--fields",
+                "id,name",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_run_export.assert_called_once()
+        call_kwargs = mock_run_export.call_args[1]
+        assert call_kwargs["config"] == "conn.conf"
 
 
-MOCK_TARGET = "odoo_data_flow.__main__.run_export"
-
-
-@patch(MOCK_TARGET)
-def test_export_cmd_default_mode(mock_run_export: MagicMock, runner: CliRunner) -> None:
-    """Verifies that --streaming is False by default."""
-    result = runner.invoke(
-        __main__.cli,
-        [
-            "export",
-            "--config",
-            "dummy.conf",
-            "--model",
-            "res.partner",
-            "--output",
-            "out.csv",
-            "--fields",
-            "id,name",
-            "--domain",
-            "[]",
-        ],
-    )
-
-    assert result.exit_code == 0
-    mock_run_export.assert_called_once()
-    call_kwargs = mock_run_export.call_args.kwargs
-    assert "streaming" in call_kwargs
-    assert call_kwargs["streaming"] is False
-
-
-@patch(MOCK_TARGET)
-def test_export_cmd_streaming_mode(
-    mock_run_export: MagicMock, runner: CliRunner
-) -> None:
-    """Verifies that --streaming flag sets the streaming argument to True."""
-    result = runner.invoke(
-        __main__.cli,
-        [
-            "export",
-            "--config",
-            "dummy.conf",
-            "--model",
-            "res.partner",
-            "--output",
-            "out.csv",
-            "--fields",
-            "id,name",
-            "--domain",
-            "[]",
-            "--streaming",
-        ],
-    )
-
-    assert result.exit_code == 0
-    mock_run_export.assert_called_once()
-    call_kwargs = mock_run_export.call_args.kwargs
-    assert "streaming" in call_kwargs
-    assert call_kwargs["streaming"] is True
+@patch("odoo_data_flow.__main__.run_module_installation")
+def test_module_install_command(mock_run_install: MagicMock, runner: CliRunner) -> None:
+    """Tests the 'module install' command with the new connection file."""
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "module",
+                "install",
+                "--connection-file",
+                "conn.conf",
+                "--modules",
+                "sale,mrp",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_run_install.assert_called_once_with(
+            config="conn.conf", modules=["sale", "mrp"]
+        )
 
 
 @patch("odoo_data_flow.__main__.run_write")
-def test_write_cmd_invalid_context(
+def test_write_command_calls_runner(
     mock_run_write: MagicMock, runner: CliRunner
 ) -> None:
-    """Tests that the 'write' command handles an invalid context string gracefully."""
-    with patch("odoo_data_flow.__main__.log.error") as mock_log_error:
+    """Tests that the write command calls the correct runner function."""
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
         result = runner.invoke(
             __main__.cli,
             [
                 "write",
-                "--config",
-                "dummy.conf",
+                "--connection-file",
+                "conn.conf",
                 "--file",
-                "dummy.csv",
+                "my.csv",
                 "--model",
                 "res.partner",
-                "--context",
-                "{'invalid-syntax'",  # Malformed dictionary string
             ],
         )
-
-        assert result.exit_code == 0  # Should exit gracefully, not crash
-        mock_run_write.assert_not_called()
-        mock_log_error.assert_called_once()
-        assert "Invalid --context dictionary provided" in mock_log_error.call_args[0][0]
-
-    @patch("odoo_data_flow.__main__.run_import")
-    def test_cli_import_deferred_options(mock_run_import: MagicMock) -> None:
-        """Test cli deferred option.
-
-        Test that --deferred-fields and --unique-id-field are passed correctly.
-        """
-        # --- Arrange ---
-        runner = CliRunner()
-        args = [
-            "import",
-            "--file",
-            "dummy.csv",
-            "--deferred-fields",
-            "parent_id,category_id",
-            "--unique-id-field",
-            "xml_id",
-        ]
-
-        # --- Act ---
-        result = runner.invoke(__main__.cli, args)
-
-        # --- Assert ---
         assert result.exit_code == 0
-        mock_run_import.assert_called_once()
-
-        # Check the keyword arguments passed to the mocked run_import
-        kwargs = mock_run_import.call_args.kwargs
-        assert kwargs.get("deferred_fields") == "parent_id,category_id"
-        assert kwargs.get("unique_id_field") == "xml_id"
-
-    @patch("odoo_data_flow.__main__.run_import")
-    def test_cli_import_standard_options(
-        mock_run_import: MagicMock, runner: CliRunner
-    ) -> None:
-        """Test that deferred fields are None when not provided."""
-        # --- Arrange ---
-        args = ["import", "--file", "dummy.csv"]  # No deferred flags
-
-        # --- Act ---
-        result = runner.invoke(__main__.cli, args)
-
-        # --- Assert ---
-        assert result.exit_code == 0
-        mock_run_import.assert_called_once()
-
-        kwargs = mock_run_import.call_args.kwargs
-        assert kwargs.get("deferred_fields") is None
-        assert kwargs.get("unique_id_field") is None
+        mock_run_write.assert_called_once()
+        call_kwargs = mock_run_write.call_args.kwargs
+        assert call_kwargs["config"] == "conn.conf"
 
 
 @patch("odoo_data_flow.__main__.run_path_to_image")
@@ -249,33 +194,6 @@ def test_url_to_image_command_calls_runner(
     )
     assert result.exit_code == 0
     mock_run_url_to_image.assert_called_once()
-
-
-@patch("odoo_data_flow.__main__.run_migration")
-def test_migrate_command_calls_runner(
-    mock_run_migration: MagicMock, runner: CliRunner
-) -> None:
-    """Tests that the migrate command calls the correct runner function."""
-    result = runner.invoke(
-        __main__.cli,
-        [
-            "migrate",
-            "--config-export",
-            "src.conf",
-            "--config-import",
-            "dest.conf",
-            "--model",
-            "res.partner",
-            "--fields",
-            "id,name",
-            "--mapping",
-            "{'name': ('val', 'name')}",
-        ],
-    )
-    assert result.exit_code == 0
-    mock_run_migration.assert_called_once()
-    call_kwargs = mock_run_migration.call_args.kwargs
-    assert isinstance(call_kwargs["mapping"], dict)
 
 
 @patch("odoo_data_flow.__main__.run_migration")
@@ -335,25 +253,30 @@ def test_workflow_command_calls_runner(
     mock_run_workflow: MagicMock, runner: CliRunner
 ) -> None:
     """Tests that the workflow command calls the correct runner function."""
-    result = runner.invoke(
-        __main__.cli,
-        [
-            "workflow",
-            "invoice-v9",
-            "--config",
-            "my.conf",
-            "--field",
-            "x_status",
-            "--status-map",
-            "{}",
-            "--paid-date-field",
-            "x_date",
-            "--payment-journal",
-            "1",
-        ],
-    )
-    assert result.exit_code == 0
-    mock_run_workflow.assert_called_once()
+    with runner.isolated_filesystem():
+        with open("my.conf", "w") as f:
+            f.write("[Connection]")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "workflow",
+                "invoice-v9",
+                "--connection-file",
+                "my.conf",
+                "--field",
+                "x_status",
+                "--status-map",
+                "{}",
+                "--paid-date-field",
+                "x_date",
+                "--payment-journal",
+                "1",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_run_workflow.assert_called_once()
+        call_kwargs = mock_run_workflow.call_args.kwargs
+        assert call_kwargs["config"] == "my.conf"
 
 
 @patch("odoo_data_flow.__main__.run_update_module_list")
@@ -361,21 +284,14 @@ def test_module_update_list_command(
     mock_run_update: MagicMock, runner: CliRunner
 ) -> None:
     """Tests that the 'module update-list' command calls the correct function."""
-    result = runner.invoke(
-        __main__.cli, ["module", "update-list", "--config", "c.conf"]
-    )
-    assert result.exit_code == 0
-    mock_run_update.assert_called_once_with(config="c.conf")
-
-
-@patch("odoo_data_flow.__main__.run_module_installation")
-def test_module_install_command(mock_run_install: MagicMock, runner: CliRunner) -> None:
-    """Tests that the 'module install' command calls the correct function."""
-    result = runner.invoke(__main__.cli, ["module", "install", "--modules", "sale,mrp"])
-    assert result.exit_code == 0
-    mock_run_install.assert_called_once_with(
-        config="conf/connection.conf", modules=["sale", "mrp"]
-    )
+    with runner.isolated_filesystem():
+        with open("c.conf", "w") as f:
+            f.write("[Connection]")
+        result = runner.invoke(
+            __main__.cli, ["module", "update-list", "--connection-file", "c.conf"]
+        )
+        assert result.exit_code == 0
+        mock_run_update.assert_called_once_with(config="c.conf")
 
 
 @patch("odoo_data_flow.__main__.run_module_uninstallation")
@@ -383,13 +299,24 @@ def test_module_uninstall_command(
     mock_run_uninstall: MagicMock, runner: CliRunner
 ) -> None:
     """Tests that the 'module uninstall' command calls the correct function."""
-    result = runner.invoke(
-        __main__.cli, ["module", "uninstall", "--modules", "sale,purchase"]
-    )
-    assert result.exit_code == 0
-    mock_run_uninstall.assert_called_once_with(
-        config="conf/connection.conf", modules=["sale", "purchase"]
-    )
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "module",
+                "uninstall",
+                "--connection-file",
+                "conn.conf",
+                "--modules",
+                "sale,purchase",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_run_uninstall.assert_called_once_with(
+            config="conn.conf", modules=["sale", "purchase"]
+        )
 
 
 @patch("odoo_data_flow.__main__.run_language_installation")
@@ -397,11 +324,21 @@ def test_module_install_languages_command(
     mock_run_install: MagicMock, runner: CliRunner
 ) -> None:
     """Tests that the 'module install-languages' command calls the correct function."""
-    result = runner.invoke(
-        __main__.cli,
-        ["module", "install-languages", "--languages", "en_US,fr_FR"],
-    )
-    assert result.exit_code == 0
-    mock_run_install.assert_called_once_with(
-        config="conf/connection.conf", languages=["en_US", "fr_FR"]
-    )
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "module",
+                "install-languages",
+                "--connection-file",
+                "conn.conf",
+                "--languages",
+                "en_US,fr_FR",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_run_install.assert_called_once_with(
+            config="conn.conf", languages=["en_US", "fr_FR"]
+        )

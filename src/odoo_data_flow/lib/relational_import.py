@@ -2,7 +2,7 @@
 
 import json
 import tempfile
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import polars as pl
 from rich.progress import Progress, TaskID
@@ -12,7 +12,7 @@ from . import cache, conf_lib, writer
 
 
 def _resolve_related_ids(
-    config: str, related_model: str, external_ids: pl.Series
+    config: Union[str, dict[str, Any]], related_model: str, external_ids: pl.Series
 ) -> Optional[pl.DataFrame]:
     """Resolve related ids.
 
@@ -20,17 +20,21 @@ def _resolve_related_ids(
     then falling back to a bulk XML-ID resolution.
     """
     # 1. Try to load from cache
-    related_model_cache = cache.load_id_map(config, related_model)
-    if related_model_cache is not None:
-        log.info(f"Cache hit for related model '{related_model}'.")
-        return related_model_cache
+    if isinstance(config, str):
+        related_model_cache = cache.load_id_map(config, related_model)
+        if related_model_cache is not None:
+            log.info(f"Cache hit for related model '{related_model}'.")
+            return related_model_cache
 
     # 2. Fallback to bulk XML-ID resolution
     log.warning(
         f"Cache miss for related model '{related_model}'. "
         f"Falling back to slow XML-ID resolution."
     )
-    connection = conf_lib.get_connection_from_config(config_file=config)
+    if isinstance(config, dict):
+        connection = conf_lib.get_connection_from_dict(config)
+    else:
+        connection = conf_lib.get_connection_from_config(config_file=config)
     if not connection.is_connected():
         log.error("Cannot perform XML-ID lookup: Odoo connection failed.")
         return None
@@ -46,7 +50,8 @@ def _resolve_related_ids(
             f"Skipping {len(invalid_ids)} invalid external_ids for model "
             f"'{related_model}' (must be in 'module.identifier' format)."
         )
-
+        if not split_ids:
+            return None
     domain = [
         "&",
         ("module", "=", split_ids[0][0]),
@@ -84,7 +89,7 @@ def _resolve_related_ids(
 
 
 def run_direct_relational_import(
-    config: str,
+    config: Union[str, dict[str, Any]],
     model: str,
     field: str,
     strategy_details: dict[str, Any],
@@ -147,7 +152,7 @@ def run_direct_relational_import(
 
 
 def run_write_tuple_import(
-    config: str,
+    config: Union[str, dict[str, Any]],
     model: str,
     field: str,
     strategy_details: dict[str, Any],
@@ -196,7 +201,10 @@ def run_write_tuple_import(
     ).rename({"db_id": f"{related_model_fk}/id"})
 
     # 4. Create records in the relational table
-    connection = conf_lib.get_connection_from_config(config_file=config)
+    if isinstance(config, dict):
+        connection = conf_lib.get_connection_from_dict(config)
+    else:
+        connection = conf_lib.get_connection_from_config(config_file=config)
     rel_model = connection.get_model(relational_table)
 
     # We need to map back to the original external IDs for failure reporting
@@ -269,7 +277,7 @@ def run_write_tuple_import(
 
 
 def run_write_o2m_tuple_import(
-    config: str,
+    config: Union[str, dict[str, Any]],
     model: str,
     field: str,
     strategy_details: dict[str, Any],
@@ -288,7 +296,10 @@ def run_write_o2m_tuple_import(
     )
     log.info(f"Running 'Write O2M Tuple' for field '{field}'...")
 
-    connection = conf_lib.get_connection_from_config(config_file=config)
+    if isinstance(config, dict):
+        connection = conf_lib.get_connection_from_dict(config)
+    else:
+        connection = conf_lib.get_connection_from_config(config_file=config)
     parent_model = connection.get_model(model)
     successful_updates = 0
     failed_records_to_report = []

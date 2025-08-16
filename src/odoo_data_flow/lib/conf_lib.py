@@ -1,7 +1,7 @@
 """Config File Handler.
 
-This module handles reading the connection configuration file and
-establishing a connection to the Odoo server using odoo-client-lib.
+This module handles creating Odoo connections from configuration,
+supporting both file-based and dictionary-based setups.
 """
 
 import configparser
@@ -14,19 +14,53 @@ from ..logging_config import log
 _connection_cache: dict[str, Any] = {}
 
 
-def get_connection_from_config(config_file: str) -> Any:
-    """Get connection from config.
+def get_connection_from_dict(config_dict: dict[str, Any]) -> Any:
+    """Establishes a connection to Odoo from a dictionary.
 
-    Reads an Odoo connection configuration file and returns an
-    initialized OdooClient object. It caches connections to reuse them.
+    Args:
+        config_dict: A dictionary with connection details.
+
+    Returns:
+        An initialized and connected Odoo client object.
+    """
+    try:
+        # Explicitly check for required keys before proceeding.
+        required_keys = ["hostname", "database", "login", "password"]
+        for key in required_keys:
+            if key not in config_dict:
+                raise KeyError(f"Required key '{key}' not found in config dict.")
+
+        # Ensure port and uid are integers if they exist
+        if "port" in config_dict:
+            config_dict["port"] = int(config_dict["port"])
+        if "uid" in config_dict:
+            # The OdooClient expects the user ID as 'user_id'
+            config_dict["user_id"] = int(config_dict.pop("uid"))
+
+        log.info(f"Connecting to Odoo server at {config_dict.get('hostname')}...")
+
+        # Use odoo-client-lib to establish the connection
+        connection = odoolib.get_connection(**config_dict)
+        return connection
+
+    except (KeyError, ValueError) as e:
+        log.error(f"Connection config dict is missing a key or has a bad value: {e}")
+        raise
+    except Exception as e:
+        log.error(f"An unexpected error occurred while connecting to Odoo: {e}")
+        raise
+
+
+def get_connection_from_config(config_file: str) -> Any:
+    """Reads a config file and returns an Odoo connection.
+
+    It caches connections based on the file path to reuse them.
 
     Args:
         config_file: The path to the connection.conf file.
 
     Returns:
-        An initialized and connected Odoo client object,
-        (returned by odoolib.get_connection)
-        or raises an exception on failure.
+        An initialized and connected Odoo client object.
     """
     if config_file in _connection_cache:
         log.debug(f"Reusing cached connection for {config_file}")
@@ -37,36 +71,10 @@ def get_connection_from_config(config_file: str) -> Any:
         log.error(f"Configuration file not found or is empty: {config_file}")
         raise FileNotFoundError(f"Configuration file not found: {config_file}")
 
-    try:
-        conn_details: dict[str, Any] = dict(config["Connection"])
+    conn_details: dict[str, Any] = dict(config["Connection"])
 
-        # Explicitly check for required keys before proceeding.
-        # This loop is the crucial fix.
-        required_keys = ["hostname", "database", "login", "password"]
-        for key in required_keys:
-            if key not in conn_details:
-                raise KeyError(f"Required key '{key}' not found in config file.")
+    # The core logic is now in get_connection_from_dict
+    connection = get_connection_from_dict(conn_details)
 
-        # Ensure port and uid are integers if they exist
-        if "port" in conn_details:
-            conn_details["port"] = int(conn_details["port"])
-        if "uid" in conn_details:
-            # The OdooClient expects the user ID as 'user_id'
-            conn_details["user_id"] = int(conn_details.pop("uid"))
-
-        log.info(f"Connecting to Odoo server at {conn_details.get('hostname')}...")
-
-        # Use odoo-client-lib to establish the connection
-        connection = odoolib.get_connection(**conn_details)
-        _connection_cache[config_file] = connection
-        return connection
-
-    except (KeyError, ValueError) as e:
-        log.error(
-            f"Configuration file '{config_file}' is missing a required key "
-            f"or has a malformed value: {e}"
-        )
-        raise
-    except Exception as e:
-        log.error(f"An unexpected error occurred while connecting to Odoo: {e}")
-        raise
+    _connection_cache[config_file] = connection
+    return connection

@@ -2,6 +2,7 @@
 
 import ast
 from importlib.metadata import version as get_version
+from pathlib import Path
 from typing import Any, Optional
 
 import click
@@ -21,6 +22,15 @@ from .workflow_runner import run_invoice_v9_workflow
 from .writer import run_write
 
 
+def run_project_flow(flow_file: str, flow_name: Optional[str]) -> None:
+    """Placeholder for running a project flow."""
+    log.info(f"Running project flow from '{flow_file}'")
+    if flow_name:
+        log.info(f"Executing specific flow: '{flow_name}'")
+    else:
+        log.info("Executing all flows defined in the file.")
+
+
 @click.group(
     context_settings=dict(help_option_names=["-h", "--help"]),
     invoke_without_command=True,
@@ -35,12 +45,44 @@ from .writer import run_write
     type=click.Path(),
     help="Path to a file to write logs to, in addition to the console.",
 )
+@click.option(
+    "--flow-file",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the YAML flow file. Defaults to 'flows.yml' in current directory.",
+)
+@click.option(
+    "--run",
+    "flow_name",
+    help="Name of a specific flow to run from the flow file.",
+)
 @click.pass_context
-def cli(ctx: click.Context, verbose: bool, log_file: Optional[str]) -> None:
+def cli(
+    ctx: click.Context,
+    verbose: bool,
+    log_file: Optional[str],
+    flow_file: Optional[str],
+    flow_name: Optional[str],
+) -> None:
     """Odoo Data Flow: A tool for importing, exporting, and processing data."""
     setup_logging(verbose, log_file)
-    if ctx.invoked_subcommand is None:
-        click.echo(ctx.get_help())
+
+    # If a subcommand is invoked, it's Single-Action mode. Let it proceed.
+    if ctx.invoked_subcommand is not None:
+        return
+
+    # --- Project Mode Logic ---
+    effective_flow_file = flow_file
+    if not effective_flow_file:
+        default_flow_file = Path("flows.yml")
+        if default_flow_file.exists():
+            log.info("No --flow-file specified, using default 'flows.yml'.")
+            effective_flow_file = str(default_flow_file)
+        else:
+            # No subcommand, no --flow-file, and no default flows.yml -> show help.
+            click.echo(ctx.get_help())
+            return
+
+    run_project_flow(effective_flow_file, flow_name)
 
 
 # --- Module Management Command Group ---
@@ -52,24 +94,22 @@ def module_group() -> None:
 
 @module_group.command(name="update-list")
 @click.option(
-    "-c",
-    "--config",
-    default="conf/connection.conf",
-    show_default=True,
-    help="Path to the connection configuration file.",
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
 )
-def update_module_list_cmd(config: str) -> None:
+def update_module_list_cmd(connection_file: str) -> None:
     """Scans the addons path and updates the list of available modules."""
-    run_update_module_list(config=config)
+    run_update_module_list(config=connection_file)
 
 
 @module_group.command(name="install")
 @click.option(
-    "-c",
-    "--config",
-    default="conf/connection.conf",
-    show_default=True,
-    help="Path to the connection configuration file.",
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
 )
 @click.option(
     "-m",
@@ -78,19 +118,18 @@ def update_module_list_cmd(config: str) -> None:
     required=True,
     help="A comma-separated list of module names to install or upgrade.",
 )
-def install_modules_cmd(config: str, modules_str: str) -> None:
+def install_modules_cmd(connection_file: str, modules_str: str) -> None:
     """Installs or upgrades a list of Odoo modules."""
-    modules_list = [mod.strip() for mod in modules_str.split(",")]
-    run_module_installation(config=config, modules=modules_list)
+    modules_list = [mod.strip() for mod in modules_str.split(",") if mod.strip()]
+    run_module_installation(config=connection_file, modules=modules_list)
 
 
 @module_group.command(name="uninstall")
 @click.option(
-    "-c",
-    "--config",
-    default="conf/connection.conf",
-    show_default=True,
-    help="Path to the connection configuration file.",
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
 )
 @click.option(
     "-m",
@@ -99,19 +138,18 @@ def install_modules_cmd(config: str, modules_str: str) -> None:
     required=True,
     help="A comma-separated list of module names to uninstall.",
 )
-def uninstall_modules_cmd(config: str, modules_str: str) -> None:
+def uninstall_modules_cmd(connection_file: str, modules_str: str) -> None:
     """Uninstalls a list of Odoo modules."""
     modules_list = [mod.strip() for mod in modules_str.split(",")]
-    run_module_uninstallation(config=config, modules=modules_list)
+    run_module_uninstallation(config=connection_file, modules=modules_list)
 
 
 @module_group.command(name="install-languages")
 @click.option(
-    "-c",
-    "--config",
-    default="conf/connection.conf",
-    show_default=True,
-    help="Path to the connection configuration file.",
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
 )
 @click.option(
     "-l",
@@ -120,10 +158,10 @@ def uninstall_modules_cmd(config: str, modules_str: str) -> None:
     required=True,
     help="A comma-separated list of language codes to install (e.g., 'nl_BE,fr_FR').",
 )
-def install_languages_cmd(config: str, languages_str: str) -> None:
+def install_languages_cmd(connection_file: str, languages_str: str) -> None:
     """Installs one or more languages in the Odoo database."""
     languages_list = [lang.strip() for lang in languages_str.split(",")]
-    run_language_installation(config=config, languages=languages_list)
+    run_language_installation(config=connection_file, languages=languages_list)
 
 
 # --- Workflow Command Group ---
@@ -136,11 +174,10 @@ def workflow_group() -> None:
 # --- Invoice v9 Workflow Sub-command ---
 @workflow_group.command(name="invoice-v9")
 @click.option(
-    "-c",
-    "--config",
-    default="conf/connection.conf",
-    show_default=True,
-    help="Path to the connection configuration file.",
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
 )
 @click.option(
     "--action",
@@ -179,19 +216,19 @@ def workflow_group() -> None:
 @click.option(
     "--max-connection", default=4, type=int, help="Number of parallel threads."
 )
-def invoice_v9_cmd(**kwargs: Any) -> None:
+def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
     """Runs the legacy Odoo v9 invoice processing workflow."""
+    kwargs["config"] = connection_file
     run_invoice_v9_workflow(**kwargs)
 
 
 # --- Import Command ---
 @cli.command(name="import")
 @click.option(
-    "-c",
-    "--config",
-    default="conf/connection.conf",
-    show_default=True,
-    help="Configuration file for connection parameters.",
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
 )
 @click.option("--file", "filename", required=True, help="File to import.")
 @click.option(
@@ -266,8 +303,9 @@ def invoice_v9_cmd(**kwargs: Any) -> None:
     help="Special handling for one-to-many imports.",
 )
 @click.option("--encoding", default="utf-8", help="Encoding of the data file.")
-def import_cmd(**kwargs: Any) -> None:
+def import_cmd(connection_file: str, **kwargs: Any) -> None:
     """Runs the data import process."""
+    kwargs["config"] = connection_file
     try:
         kwargs["context"] = ast.literal_eval(kwargs.get("context", "{}"))
     except (ValueError, SyntaxError) as e:
@@ -279,11 +317,10 @@ def import_cmd(**kwargs: Any) -> None:
 # --- Write Command (New) ---
 @cli.command(name="write")
 @click.option(
-    "-c",
-    "--config",
-    default="conf/connection.conf",
-    show_default=True,
-    help="Configuration file for connection parameters.",
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
 )
 @click.option("--file", "filename", required=True, help="File with records to update.")
 @click.option("--model", required=True, help="Odoo model to write to.")
@@ -310,8 +347,9 @@ def import_cmd(**kwargs: Any) -> None:
     help="Odoo context as a dictionary string.",
 )
 @click.option("--encoding", default="utf-8", help="Encoding of the data file.")
-def write_cmd(**kwargs: Any) -> None:
+def write_cmd(connection_file: str, **kwargs: Any) -> None:
     """Runs the batch update (write) process."""
+    kwargs["config"] = connection_file
     try:
         kwargs["context"] = ast.literal_eval(kwargs.get("context", "{}"))
     except (ValueError, SyntaxError) as e:
@@ -323,11 +361,10 @@ def write_cmd(**kwargs: Any) -> None:
 # --- Export Command ---
 @cli.command(name="export")
 @click.option(
-    "-c",
-    "--config",
-    default="conf/connection.conf",
-    show_default=True,
-    help="Configuration file for connection parameters.",
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
 )
 @click.option("--output", required=True, help="Output file path.")
 @click.option("--model", required=True, help="Odoo model to export from.")
@@ -379,8 +416,9 @@ def write_cmd(**kwargs: Any) -> None:
     like 'selection' or 'binary'.
     """,
 )
-def export_cmd(**kwargs: Any) -> None:
+def export_cmd(connection_file: str, **kwargs: Any) -> None:
     """Runs the data export process."""
+    kwargs["config"] = connection_file
     run_export(**kwargs)
 
 

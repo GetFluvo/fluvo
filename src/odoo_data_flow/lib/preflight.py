@@ -4,7 +4,7 @@ These checks are run before the main import process to catch common,
 systemic errors early (e.g., missing languages, incorrect configuration).
 """
 
-from typing import Any, Callable, Optional, cast
+from typing import Any, Callable, Optional, Union, cast
 
 import polars as pl
 from polars.exceptions import ColumnNotFoundError
@@ -31,13 +31,15 @@ def register_check(func: Callable[..., bool]) -> Callable[..., bool]:
 
 @register_check
 def connection_check(
-    preflight_mode: "PreflightMode", config: str, **kwargs: Any
+    preflight_mode: "PreflightMode", config: Union[str, dict[str, Any]], **kwargs: Any
 ) -> bool:
     """Pre-flight check to verify connection to Odoo."""
     log.info("Running pre-flight check: Verifying Odoo connection...")
     try:
-        # This line implicitly checks the connection
-        conf_lib.get_connection_from_config(config_file=config)
+        if isinstance(config, dict):
+            conf_lib.get_connection_from_dict(config)
+        else:
+            conf_lib.get_connection_from_config(config_file=config)
         log.info("Connection to Odoo successful.")
         return True
     except Exception as e:
@@ -77,10 +79,13 @@ def self_referencing_check(
     return True
 
 
-def _get_installed_languages(config_file: str) -> Optional[set[str]]:
+def _get_installed_languages(config: Union[str, dict[str, Any]]) -> Optional[set[str]]:
     """Connects to Odoo and returns the set of installed language codes."""
     try:
-        connection = conf_lib.get_connection_from_config(config_file)
+        if isinstance(config, dict):
+            connection = conf_lib.get_connection_from_dict(config)
+        else:
+            connection = conf_lib.get_connection_from_config(config)
 
         lang_obj = connection.get_model("res.lang")
         installed_langs_data = lang_obj.search_read([("active", "=", True)], ["code"])
@@ -102,33 +107,11 @@ def _get_installed_languages(config_file: str) -> Optional[set[str]]:
         return None
 
 
-@register_check
-def language_check(
-    preflight_mode: PreflightMode,
-    model: str,
-    filename: str,
-    config: str,
-    headless: bool,
-    **kwargs: Any,
-) -> bool:
-    """Pre-flight check to verify that all required languages are installed."""
-    if preflight_mode == PreflightMode.FAIL_MODE:
-        log.debug("Skipping language pre-flight check in --fail mode.")
-        return True
-
-    if model not in ("res.partner", "res.users"):
-        return True
-
-    log.info("Running pre-flight check: Verifying required languages...")
-
+def _get_required_languages(filename: str, separator: str) -> Optional[list[str]]:
+    """Extracts the list of required languages from the source file."""
     try:
-        # FIX 2: Add `truncate_ragged_lines` to handle malformed CSV files.
-        required_languages = (
-            pl.read_csv(
-                filename,
-                separator=kwargs.get("separator", ";"),
-                truncate_ragged_lines=True,
-            )
+        return (
+            pl.read_csv(filename, separator=separator, truncate_ragged_lines=True)
             .get_column("lang")
             .unique()
             .drop_nulls()
@@ -136,27 +119,20 @@ def language_check(
         )
     except ColumnNotFoundError:
         log.debug("No 'lang' column found in source file. Skipping language check.")
-        return True
+        return []
     except Exception as e:
         log.warning(
             f"Could not read languages from source file. Skipping check. Error: {e}"
         )
-        return True
+        return None
 
-    if not required_languages:
-        return True
 
-    installed_languages = _get_installed_languages(config)
-    if installed_languages is None:
-        return False  # Connection failed, error already shown.
-
-    missing_languages = set(required_languages) - installed_languages
-
-    if not missing_languages:
-        log.info("All required languages are installed.")
-        return True
-
-    # This part of the logic now only runs in NORMAL mode.
+def _handle_missing_languages(
+    config: Union[str, dict[str, Any]],
+    missing_languages: set[str],
+    headless: bool,
+) -> bool:
+    """Handles the process of installing missing languages."""
     console = Console(stderr=True, style="bold yellow")
     message = (
         "The following required languages are not installed in the target "
@@ -174,44 +150,90 @@ def language_check(
 
     if headless:
         log.info("--headless mode detected. Auto-confirming language installation.")
+        if isinstance(config, dict):
+            log.error("Language installation from a dict config is not supported.")
+            return False
         return language_installer.run_language_installation(
             config, list(missing_languages)
         )
 
-    proceed = Confirm.ask("Do you want to install them now?", default=True)
-    if proceed:
-        return language_installer.run_language_installation(
-            config, list(missing_languages)
-        )
-    else:
+    if not Confirm.ask("Do you want to install them now?", default=True):
         log.warning("Language installation cancelled by user. Aborting import.")
         return False
 
+    if isinstance(config, dict):
+        log.error("Language installation from a dict config is not supported.")
+        return False
+    return language_installer.run_language_installation(config, list(missing_languages))
 
-def _get_odoo_fields(config: str, model: str) -> Optional[dict[str, Any]]:
+
+@register_check
+def language_check(
+    preflight_mode: PreflightMode,
+    model: str,
+    filename: str,
+    config: Union[str, dict[str, Any]],
+    headless: bool,
+    **kwargs: Any,
+) -> bool:
+    """Pre-flight check to verify that all required languages are installed."""
+    if preflight_mode == PreflightMode.FAIL_MODE or model not in (
+        "res.partner",
+        "res.users",
+    ):
+        log.debug("Skipping language pre-flight check.")
+        return True
+
+    log.info("Running pre-flight check: Verifying required languages...")
+
+    required_languages = _get_required_languages(filename, kwargs.get("separator", ";"))
+    if required_languages is None or not required_languages:
+        return True
+
+    installed_languages = _get_installed_languages(config)
+    if installed_languages is None:
+        return False
+
+    missing_languages = set(required_languages) - installed_languages
+    if not missing_languages:
+        log.info("All required languages are installed.")
+        return True
+
+    return _handle_missing_languages(config, missing_languages, headless)
+
+
+def _get_odoo_fields(
+    config: Union[str, dict[str, Any]], model: str
+) -> Optional[dict[str, Any]]:
     """Fetches the field schema for a given model from Odoo.
 
     Args:
-        config: The path to the connection configuration file.
+        config: The path to the connection configuration file or a config dict.
         model: The target Odoo model name.
 
     Returns:
         A dictionary of the model's fields, or None on failure.
     """
     # 1. Try to load from cache first
-    cached_fields = cache.load_fields_get_cache(config, model)
-    if cached_fields:
-        return cached_fields
+    if isinstance(config, str):
+        cached_fields = cache.load_fields_get_cache(config, model)
+        if cached_fields:
+            return cached_fields
 
     # 2. If cache miss, fetch from Odoo
     log.info(f"Cache miss for '{model}' fields, fetching from Odoo...")
     try:
-        connection: Any = conf_lib.get_connection_from_config(config_file=config)
-        model_obj = connection.get_model(model)
+        connection_obj: Any
+        if isinstance(config, dict):
+            connection_obj = conf_lib.get_connection_from_dict(config)
+        else:
+            connection_obj = conf_lib.get_connection_from_config(config_file=config)
+        model_obj = connection_obj.get_model(model)
         odoo_fields = cast(dict[str, Any], model_obj.fields_get())
 
         # 3. Save the result to the cache for next time
-        cache.save_fields_get_cache(config, model, odoo_fields)
+        if isinstance(config, str):
+            cache.save_fields_get_cache(config, model, odoo_fields)
         return odoo_fields
     except Exception as e:
         _show_error_panel(
@@ -340,7 +362,7 @@ def deferral_and_strategy_check(
     preflight_mode: "PreflightMode",
     model: str,
     filename: str,
-    config: str,
+    config: Union[str, dict[str, Any]],
     import_plan: dict[str, Any],
     **kwargs: Any,
 ) -> bool:

@@ -19,7 +19,7 @@ from odoo_data_flow.import_threaded import (
 )
 
 
-class TestImportDataRefactored:
+class TestImportData:
     """Tests for the main `import_data` orchestrator."""
 
     @patch("odoo_data_flow.import_threaded._read_data_file")
@@ -43,7 +43,7 @@ class TestImportDataRefactored:
 
         # Act
         result, _ = import_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="res.partner",
             unique_id_field="id",
             file_csv="dummy.csv",
@@ -83,7 +83,7 @@ class TestImportDataRefactored:
 
         # Act
         result = import_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="res.partner",
             unique_id_field="id",
             file_csv="dummy.csv",
@@ -104,7 +104,7 @@ class TestImportDataRefactored:
 
         # Act
         result, _ = import_data(
-            config_file="dummy.conf",
+            config="dummy.conf",
             model="res.partner",
             unique_id_field="id",  # We expect 'id' but it's not there
             file_csv="dummy.csv",

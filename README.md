@@ -80,7 +80,7 @@ The `transform.py` script generates a `load.sh` file containing the correct CLI 
 
 ```bash
 # Contents of the generated load.sh
-odoo-data-flow import --config conf/connection.conf --file data/products_clean.csv --model product.product ...
+odoo-data-flow import --connection-file conf/connection.conf --file data/products_clean.csv --model product.product ...
 ```
 
 Then execute the script.

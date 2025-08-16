@@ -292,12 +292,18 @@ class RPCThreadExport(RpcThread):
 
 
 def _initialize_export(
-    config_file: str, model_name: str, header: list[str], technical_names: bool
+    config: Union[str, dict[str, Any]],
+    model_name: str,
+    header: list[str],
+    technical_names: bool,
 ) -> tuple[Optional[Any], Optional[Any], Optional[dict[str, dict[str, Any]]]]:
     """Connects to Odoo and fetches field metadata, including relations."""
     log.debug("Starting metadata initialization.")
     try:
-        connection = conf_lib.get_connection_from_config(config_file)
+        if isinstance(config, dict):
+            connection = conf_lib.get_connection_from_dict(config)
+        else:
+            connection = conf_lib.get_connection_from_config(config)
         model_obj = connection.get_model(model_name)
         fields_for_metadata = sorted(
             list(
@@ -541,7 +547,10 @@ def _process_export_batches(  # noqa: C901
 
 
 def _determine_export_strategy(
-    config_file: str, model: str, header: list[str], technical_names: bool
+    config: Union[str, dict[str, Any]],
+    model: str,
+    header: list[str],
+    technical_names: bool,
 ) -> tuple[
     Optional[Any],
     Optional[Any],
@@ -554,7 +563,7 @@ def _determine_export_strategy(
         f.endswith("/.id") or f == ".id" for f in header
     )
     connection, model_obj, fields_info = _initialize_export(
-        config_file, model, header, preliminary_read_mode
+        config, model, header, preliminary_read_mode
     )
 
     if not model_obj or not fields_info:
@@ -663,7 +672,7 @@ def _create_new_session(
 
 
 def export_data(
-    config_file: str,
+    config: Union[str, dict[str, Any]],
     model: str,
     domain: list[Any],
     header: list[str],
@@ -684,7 +693,7 @@ def export_data(
         return False, session_id, 0, None
 
     connection, model_obj, fields_info, force_read_method, is_hybrid = (
-        _determine_export_strategy(config_file, model, header, technical_names)
+        _determine_export_strategy(config, model, header, technical_names)
     )
     if not connection or not model_obj or not fields_info:
         return False, session_id, 0, None

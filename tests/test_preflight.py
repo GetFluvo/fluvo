@@ -346,9 +346,7 @@ class TestLanguageCheck:
         assert result is True, "The check should return True in fail mode"
 
         # 1. Assert that the correct debug message was logged.
-        mock_log_debug.assert_called_once_with(
-            "Skipping language pre-flight check in --fail mode."
-        )
+        mock_log_debug.assert_called_once_with("Skipping language pre-flight check.")
 
         # 2. Assert that the function exited before doing any real work.
         mock_polars_read_csv.assert_not_called()

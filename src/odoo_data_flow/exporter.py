@@ -1,7 +1,7 @@
 """This module contains the high-level logic for exporting data from Odoo."""
 
 import ast
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import polars as pl
 from rich.console import Console
@@ -30,7 +30,7 @@ def _show_success_panel(message: str) -> None:
 
 
 def run_export(
-    config: str,
+    config: Union[str, dict[str, Any]],
     model: str,
     fields: str,
     output: str,
@@ -71,7 +71,7 @@ def run_export(
     fields_list = fields.split(",")
 
     success, session_id, record_count, _ = export_threaded.export_data(
-        config_file=config,
+        config=config,
         model=model,
         domain=parsed_domain,
         header=fields_list,
@@ -136,7 +136,7 @@ def run_export(
 
 
 def run_export_for_migration(
-    config: str,
+    config: Union[str, dict[str, Any]],
     model: str,
     fields: list[str],
     domain: str = "[]",
@@ -168,7 +168,7 @@ def run_export_for_migration(
         parsed_context = {}
 
     success, _, _, result_df = export_threaded.export_data(
-        config_file=config,
+        config=config,
         model=model,
         domain=parsed_domain,
         header=fields,

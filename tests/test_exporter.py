@@ -40,7 +40,7 @@ def test_run_export_success(
     # 3. Assertions
     mock_export_data.assert_called_once()
     call_kwargs = mock_export_data.call_args.kwargs
-    assert call_kwargs["config_file"] == "dummy.conf"
+    assert call_kwargs["config"] == "dummy.conf"
     assert call_kwargs["model"] == "res.partner"
     assert call_kwargs["header"] == ["id", "name"]
     assert call_kwargs["domain"] == [("is_company", "=", True)]
@@ -107,7 +107,7 @@ def test_run_export_for_migration(mock_export_data: MagicMock) -> None:
     # 3. Assertions
     mock_export_data.assert_called_once()
     call_kwargs = mock_export_data.call_args.kwargs
-    assert call_kwargs["config_file"] == "conf/test.conf"
+    assert call_kwargs["config"] == "conf/test.conf"
     assert call_kwargs["model"] == "res.partner"
     assert call_kwargs["header"] == fields_list
     assert call_kwargs["output"] is None  # Ensures in-memory operation
