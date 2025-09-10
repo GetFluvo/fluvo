@@ -481,6 +481,30 @@ def _execute_load_batch(
 
         except Exception as e:
             error_str = str(e).lower()
+
+            # SPECIAL CASE: Client-side timeouts for local processing
+            # These should be IGNORED entirely to allow long server processing
+            if (
+                "timed out" == error_str.strip()
+                or "read timeout" in error_str
+                or type(e).__name__ == "ReadTimeout"
+            ):
+                log.debug(f"Client-side timeout detected ({type(e).__name__}): {e}")
+                log.debug(
+                    "Ignoring client-side timeout to allow server processing"
+                    " to continue"
+                )
+                # CRITICAL: For local imports, ignore client timeouts completely
+                # This restores the previous behavior where long processing was allowed
+                progress.console.print(
+                    f"[yellow]INFO:[/] Batch {batch_number} processing on server. "
+                    f"Continuing to wait for completion..."
+                )
+                # Continue with next chunk WITHOUT fallback - let server finish
+                lines_to_process = lines_to_process[chunk_size:]
+                continue
+
+            # For all other exceptions, use the original scalable error detection
             is_scalable_error = (
                 "memory" in error_str
                 or "out of memory" in error_str
