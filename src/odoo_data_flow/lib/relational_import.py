@@ -190,6 +190,15 @@ def run_direct_relational_import(
     # 1. Prepare the owning model's IDs
     owning_df = pl.DataFrame({"external_id": id_map.keys(), "db_id": id_map.values()})
 
+    # Debug: Print available columns and the field we're looking for
+    log.debug(f"Available columns in source_df: {source_df.columns}")
+    log.debug(f"Looking for field: {field}")
+
+    # Check if the field exists in the DataFrame
+    if field not in source_df.columns:
+        log.error(f"Field '{field}' not found in source DataFrame. Available columns: {source_df.columns}")
+        return None
+
     # 2. Prepare the related model's IDs using the resolver
     all_related_ext_ids = source_df.get_column(field).str.split(",").explode()
     if related_model_fk is None:
@@ -254,6 +263,21 @@ def _prepare_link_dataframe(
     Returns:
         The prepared link DataFrame
     """
+    # Debug: Print available columns and the field we're looking for
+    log.debug(f"Available columns in source_df: {source_df.columns}")
+    log.debug(f"Looking for field: {field}")
+
+    # Check if the field exists in the DataFrame
+    if field not in source_df.columns:
+        log.error(f"Field '{field}' not found in source DataFrame. Available columns: {source_df.columns}")
+        # Return an empty DataFrame with the expected schema
+        return pl.DataFrame(schema={
+            "external_id": pl.Utf8,
+            field: pl.Utf8,
+            owning_model_fk: pl.Int64,
+            f"{related_model_fk}/id": pl.Int64
+        })
+
     # Create the link table DataFrame
     link_df = source_df.select(["id", field]).rename({"id": "external_id"})
     link_df = link_df.with_columns(pl.col(field).str.split(",")).explode(field)
@@ -312,6 +336,15 @@ def run_write_tuple_import(
 
     # 1. Prepare the owning model's IDs
     owning_df = pl.DataFrame({"external_id": id_map.keys(), "db_id": id_map.values()})
+
+    # Debug: Print available columns and the field we're looking for
+    log.debug(f"Available columns in source_df: {source_df.columns}")
+    log.debug(f"Looking for field: {field}")
+
+    # Check if the field exists in the DataFrame
+    if field not in source_df.columns:
+        log.error(f"Field '{field}' not found in source DataFrame. Available columns: {source_df.columns}")
+        return False
 
     # 2. Prepare the related model's IDs using the resolver
     all_related_ext_ids = source_df.get_column(field).str.split(",").explode()
