@@ -149,6 +149,15 @@ def _query_relation_info_from_odoo(
     Returns:
         A tuple of (relation_table, relation_field) or None if not found
     """
+    # Early return for self-referencing fields to avoid constraint errors
+    # These should be handled by the hardcoded mappings in _derive_relation_info
+    if model == related_model_fk:
+        log.debug(
+            f"Skipping ir.model.relation query for self-referencing field "
+            f"between '{model}' and '{related_model_fk}'"
+        )
+        return None
+
     try:
         # Get connection to Odoo
         if isinstance(config, dict):
@@ -217,6 +226,17 @@ def _derive_relation_info(
     Returns:
         A tuple of (relation_table, relation_field)
     """
+    # Hardcoded mappings for known self-referencing fields
+    known_self_referencing_fields = {
+        ('product.template', 'optional_product_ids'): ('product_optional_rel', 'product_template_id'),
+        # Add more known self-referencing fields here as needed
+    }
+    
+    # Check if we have a known mapping for this field
+    key = (model, field)
+    if key in known_self_referencing_fields:
+        return known_self_referencing_fields[key]
+    
     # Derive relation table name (typically follows pattern: model1_model2_rel)
     # with models sorted alphabetically for canonical naming
     models = sorted([model.replace(".", "_"), related_model_fk.replace(".", "_")])

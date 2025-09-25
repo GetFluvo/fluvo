@@ -434,8 +434,19 @@ def _handle_create_error(
     error_str = str(create_error)
     error_str_lower = error_str.lower()
 
-    # Handle database connection pool exhaustion errors
+    # Handle constraint violation errors (e.g., XML ID space constraint)
     if (
+        "constraint" in error_str_lower
+        or "check constraint" in error_str_lower
+        or "nospaces" in error_str_lower
+        or "violation" in error_str_lower
+    ):
+        error_message = f"Constraint violation in row {i + 1}: {create_error}"
+        if "Fell back to create" in error_summary:
+            error_summary = "Database constraint violation detected"
+
+    # Handle database connection pool exhaustion errors
+    elif (
         "connection pool is full" in error_str_lower
         or "too many connections" in error_str_lower
         or "poolerror" in error_str_lower
@@ -496,13 +507,17 @@ def _create_batch_individually(
                 )
 
             source_id = line[uid_index]
+            # Sanitize source_id to ensure it's a valid XML ID
+            from .lib.internal.tools import to_xmlid
+            sanitized_source_id = to_xmlid(source_id)
+            
             # 1. SEARCH BEFORE CREATE
             existing_record = model.browse().env.ref(
-                f"__export__.{source_id}", raise_if_not_found=False
+                f"__export__.{sanitized_source_id}", raise_if_not_found=False
             )
 
             if existing_record:
-                id_map[source_id] = existing_record.id
+                id_map[sanitized_source_id] = existing_record.id
                 continue
 
             # 2. PREPARE FOR CREATE
@@ -524,7 +539,7 @@ def _create_batch_individually(
             log.debug(f"Converted vals keys: {list(converted_vals.keys())}")
 
             new_record = model.create(converted_vals, context=context)
-            id_map[source_id] = new_record.id
+            id_map[sanitized_source_id] = new_record.id
         except IndexError as e:
             error_message = f"Malformed row detected (row {i + 1} in batch): {e}"
             failed_lines.append([*line, error_message])
