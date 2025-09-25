@@ -696,7 +696,22 @@ def run_write_o2m_tuple_import(
     failed_records_to_report = []
 
     # Filter for rows that actually have data in the o2m field
-    o2m_df = source_df.filter(pl.col(field).is_not_null())
+    # Handle both direct field names and /id suffixed field names
+    actual_field = field
+    if field not in source_df.columns:
+        # Check if the field with /id suffix exists (common for relation fields)
+        field_with_id = f"{field}/id"
+        if field_with_id in source_df.columns:
+            log.debug(f"Using field '{field_with_id}' instead of '{field}' for O2M filtering")
+            actual_field = field_with_id
+        else:
+            log.error(
+                f"Field '{field}' not found in source DataFrame. "
+                f"Available columns: {list(source_df.columns)}"
+            )
+            return False
+    
+    o2m_df = source_df.filter(pl.col(actual_field).is_not_null())
 
     for record in o2m_df.iter_rows(named=True):
         parent_external_id = record["id"]
