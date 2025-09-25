@@ -701,6 +701,29 @@ def _execute_load_batch(  # noqa: C901
                 sanitized_load_lines.append(sanitized_line)
             
             res = model.load(load_header, sanitized_load_lines, context=context)
+            
+            # Check for any messages/warnings in the response that might indicate issues
+            if res.get("messages"):
+                for message in res["messages"]:
+                    msg_type = message.get("type", "unknown")
+                    msg_text = message.get("message", "")
+                    if msg_type in ["warning", "error"]:
+                        log.warning(f"Load operation returned {msg_type}: {msg_text}")
+                    else:
+                        log.info(f"Load operation returned {msg_type}: {msg_text}")
+            
+            # Verify that the load operation actually created records
+            created_ids = res.get("ids", [])
+            if len(created_ids) != len(sanitized_load_lines):
+                log.warning(
+                    f"Record creation mismatch: Expected {len(sanitized_load_lines)} records, "
+                    f"but only {len(created_ids)} were created"
+                )
+                if len(created_ids) == 0:
+                    log.error(
+                        "No records were created in this batch. This may indicate silent failures "
+                        "in the Odoo load operation. Check Odoo server logs for validation errors."
+                    )
             if res.get("messages"):
                 error = res["messages"][0].get("message", "Batch load failed.")
                 raise ValueError(error)
@@ -713,6 +736,13 @@ def _execute_load_batch(  # noqa: C901
             id_map = {
                 to_xmlid(line[uid_index]): created_ids[i] for i, line in enumerate(current_chunk)
             }
+            
+            # Log id_map information for debugging
+            log.debug(f"Created {len(id_map)} records in batch {batch_number}")
+            if id_map:
+                log.debug(f"Sample id_map entries: {dict(list(id_map.items())[:3])}")
+            else:
+                log.warning(f"No id_map entries created for batch {batch_number}")
             aggregated_id_map.update(id_map)
             lines_to_process = lines_to_process[chunk_size:]
 
