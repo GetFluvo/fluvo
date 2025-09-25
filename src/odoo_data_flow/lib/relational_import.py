@@ -171,6 +171,8 @@ def _query_relation_info_from_odoo(
 
         # Search for relations involving both models
         # We need to check both orders since the relation could be defined either way
+        # Note: The field names in ir.model.relation may vary by Odoo version
+        # Common field names are: model, comodel_id, or model_id for the related fields
         domain = [
             "|",
             "&",
@@ -205,6 +207,18 @@ def _query_relation_info_from_odoo(
             )
             return None
 
+    except ValueError as ve:
+        # Handle specific field validation errors in Odoo expressions
+        if "Invalid field" in str(ve) and "ir.model.relation" in str(ve):
+            log.warning(
+                f"Field validation error querying ir.model.relation: {ve}. "
+                f"This may be due to incorrect field names in the domain query."
+            )
+            # Fall back to derivation logic when we can't query the relation table
+            return None
+        else:
+            # Re-raise other ValueErrors
+            raise
     except Exception as e:
         log.warning(
             f"Failed to query ir.model.relation for models '{model}' and "
