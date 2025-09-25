@@ -690,17 +690,28 @@ def _execute_load_batch(  # noqa: C901
 
         try:
             log.debug(f"Attempting `load` for chunk of batch {batch_number}...")
-            res = model.load(load_header, load_lines, context=context)
+            # Sanitize the id column values to prevent XML ID constraint violations
+            from .lib.internal.tools import to_xmlid
+            sanitized_load_lines = []
+            for line in load_lines:
+                sanitized_line = list(line)
+                if uid_index < len(sanitized_line):
+                    # Sanitize the source_id (which is in the id column)
+                    sanitized_line[uid_index] = to_xmlid(sanitized_line[uid_index])
+                sanitized_load_lines.append(sanitized_line)
+            
+            res = model.load(load_header, sanitized_load_lines, context=context)
             if res.get("messages"):
                 error = res["messages"][0].get("message", "Batch load failed.")
                 raise ValueError(error)
 
             created_ids = res.get("ids", [])
-            if len(created_ids) != len(load_lines):
+            if len(created_ids) != len(sanitized_load_lines):
                 raise ValueError("Record count mismatch after load.")
 
+            # Use sanitized IDs for the id_map to match what was actually sent to Odoo
             id_map = {
-                line[uid_index]: created_ids[i] for i, line in enumerate(current_chunk)
+                to_xmlid(line[uid_index]): created_ids[i] for i, line in enumerate(current_chunk)
             }
             aggregated_id_map.update(id_map)
             lines_to_process = lines_to_process[chunk_size:]
