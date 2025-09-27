@@ -750,9 +750,19 @@ def _execute_load_batch(  # noqa: C901
                         f"Partial record creation: {len(created_ids)}/{len(sanitized_load_lines)} "
                         f"records were created. Some records may have failed validation."
                     )
+            # Check for any Odoo server errors in the response that should halt processing
             if res.get("messages"):
-                error = res["messages"][0].get("message", "Batch load failed.")
-                raise ValueError(error)
+                for message in res["messages"]:
+                    msg_type = message.get("type", "unknown")
+                    msg_text = message.get("message", "")
+                    if msg_type == "error":
+                        # Only raise for actual errors, not warnings
+                        log.error(f"Load operation returned fatal error: {msg_text}")
+                        raise ValueError(msg_text)
+                    elif msg_type in ["warning", "info"]:
+                        log.warning(f"Load operation returned {msg_type}: {msg_text}")
+                    else:
+                        log.info(f"Load operation returned {msg_type}: {msg_text}")
 
             created_ids = res.get("ids", [])
             log.debug(f"Expected records: {len(sanitized_load_lines)}, Created records: {len(created_ids)}")
