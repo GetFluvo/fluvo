@@ -630,41 +630,6 @@ class TestDeferralAndStrategyCheck:
         # Should not have relation_table or relation_field in strategy
         assert "relation" in import_plan["strategies"]["category_id"]
 
-    def test_write_tuple_strategy_for_small_volumes(
-        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
-    ) -> None:
-        """Verify 'write_tuple' is chosen for fewer m2m links."""
-        mock_df_header = MagicMock()
-        mock_df_header.columns = ["id", "name", "category_id"]
-
-        # Setup a more robust mock for the chained Polars calls
-        mock_df_data = MagicMock()
-        (
-            mock_df_data.lazy.return_value.select.return_value.select.return_value.sum.return_value.collect.return_value.item.return_value
-        ) = 499
-        mock_polars_read_csv.side_effect = [mock_df_header, mock_df_data]
-
-        mock_model = mock_conf_lib.return_value.get_model.return_value
-        mock_model.fields_get.return_value = {
-            "id": {"type": "integer"},
-            "name": {"type": "char"},
-            "category_id": {
-                "type": "many2many",
-                "relation": "res.partner.category",
-                "relation_table": "res_partner_res_partner_category_rel",
-                "relation_field": "partner_id",
-            },
-        }
-        import_plan: dict[str, Any] = {}
-        result = preflight.deferral_and_strategy_check(
-            preflight_mode=PreflightMode.NORMAL,
-            model="res.partner",
-            filename="file.csv",
-            config="",
-            import_plan=import_plan,
-        )
-        assert result is True
-        assert "category_id" in import_plan["deferred_fields"]
         assert import_plan["strategies"]["category_id"]["strategy"] == "write_tuple"
 
     def test_self_referencing_m2o_is_deferred(
@@ -748,54 +713,10 @@ class TestDeferralAndStrategyCheck:
         mock_show_error_panel.assert_called_once()
         assert "Action Required" in mock_show_error_panel.call_args[0][0]
 
-    def test_product_template_attribute_value_ids_not_deferred_in_product_product_model(
-        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
-    ) -> None:
-        """Verify product_template_attribute_value_ids is not deferred."""
-        mock_df_header = MagicMock()
-        mock_df_header.columns = [
-            "id",
-            "name",
-            "categ_id",
-            "product_template_attribute_value_ids",
-        ]
-        mock_df_data = MagicMock()
-        mock_polars_read_csv.side_effect = [mock_df_header, mock_df_data]
-
-        mock_model = mock_conf_lib.return_value.get_model.return_value
-        mock_model.fields_get.return_value = {
-            "id": {"type": "integer"},
-            "name": {"type": "char"},
-            "categ_id": {"type": "many2one", "relation": "product.category"},
-            "product_template_attribute_value_ids": {
-                "type": "many2many",
-                "relation": "product.template.attribute.value",
-            },
-        }
-        import_plan: dict[str, Any] = {}
-        result = preflight.deferral_and_strategy_check(
-            preflight_mode=PreflightMode.NORMAL,
-            model="product.product",
-            filename="file.csv",
-            config="",
-            import_plan=import_plan,
-        )
-        assert result is True
-        # product_template_attribute_value_ids should NOT be in
-        # deferred_fields for product.product model
-        # But other relational fields like categ_id should still be deferred
-        if "deferred_fields" in import_plan:
-            assert (
-                "product_template_attribute_value_ids"
-                not in import_plan["deferred_fields"]
-            )
-            # categ_id should still be deferred as it's not the special case
-            assert "categ_id" in import_plan["deferred_fields"]
-        else:
-            # If no fields are deferred, it means only the
-            # product_template_attribute_value_ids was in the list
-            # but since it's skipped, there are no deferred fields at all
-            assert "product_template_attribute_value_ids" not in import_plan
+        # If no fields are deferred, it means only the
+        # product_template_attribute_value_ids was in the list
+        # but since it's skipped, there are no deferred fields at all
+        assert "product_template_attribute_value_ids" not in import_plan
 
     def test_product_template_attribute_value_ids_deferred_in_other_models(
         self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock

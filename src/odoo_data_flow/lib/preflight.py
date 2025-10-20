@@ -689,14 +689,16 @@ def _handle_field_deferral(
         strategies: Dictionary to store import strategies
         df: Polars DataFrame containing the data
     """
-    # Handle deferral for all relational field types to prevent dependency issues during import
-    # Special cases and exceptions are handled by _should_skip_deferral and business logic
+    # Only defer fields that are self-referencing (relation matches the model)
+    # This prevents unnecessary deferrals of many2many fields that don't reference the same model
+    is_self_referencing = field_info.get("relation") == model
 
-    if field_type == "many2one":
+    if field_type == "many2one" and is_self_referencing:
         deferrable_fields.append(clean_field_name)
     elif field_type == "many2many":
         # For many2many fields, implement architectural improvements:
         # 1. Skip deferral for fields with XML ID patterns (module.name format) for direct resolution
+        # 2. By default, only defer self-referencing fields to reduce unnecessary deferrals
         has_xml_id_pattern = _has_xml_id_pattern(df, field_name)
 
         # Always analyze for strategies regardless of deferral decision
@@ -706,17 +708,13 @@ def _handle_field_deferral(
         if success:
             strategies[clean_field_name] = strategy_details
 
-        # Add many2many fields to deferrable_fields by default
-        # unless they have XML ID patterns that allow direct resolution
         if has_xml_id_pattern:
             # Skip deferral for fields with XML ID patterns - allow direct resolution
-            log.debug(
-                f"Skipping deferral for {clean_field_name} as it contains XML ID patterns "
-                f"that can be resolved directly"
-            )
-        else:
+            pass
+        elif is_self_referencing:
+            # Only defer non-XML ID fields if they are self-referencing (to avoid dependency cycles)
             deferrable_fields.append(clean_field_name)
-    elif field_type == "one2many":
+    elif field_type == "one2many" and is_self_referencing:
         deferrable_fields.append(clean_field_name)
         strategies[clean_field_name] = {"strategy": "write_o2m_tuple"}
 
