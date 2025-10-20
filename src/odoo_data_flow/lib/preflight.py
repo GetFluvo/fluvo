@@ -691,7 +691,7 @@ def _handle_field_deferral(
     """
     # Handle deferral for all relational field types to prevent dependency issues during import
     # Special cases and exceptions are handled by _should_skip_deferral and business logic
-    
+
     if field_type == "many2one":
         deferrable_fields.append(clean_field_name)
     elif field_type == "many2many":
@@ -706,11 +706,16 @@ def _handle_field_deferral(
         if success:
             strategies[clean_field_name] = strategy_details
 
+        # Add many2many fields to deferrable_fields by default
+        # unless they have XML ID patterns that allow direct resolution
         if has_xml_id_pattern:
             # Skip deferral for fields with XML ID patterns - allow direct resolution
-            # Remove from deferrable_fields if it was added
-            if clean_field_name in deferrable_fields:
-                deferrable_fields.remove(clean_field_name)
+            log.debug(
+                f"Skipping deferral for {clean_field_name} as it contains XML ID patterns "
+                f"that can be resolved directly"
+            )
+        else:
+            deferrable_fields.append(clean_field_name)
     elif field_type == "one2many":
         deferrable_fields.append(clean_field_name)
         strategies[clean_field_name] = {"strategy": "write_o2m_tuple"}
