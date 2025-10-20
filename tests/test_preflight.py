@@ -316,6 +316,7 @@ class TestLanguageCheck:
         """Tests that language installation fails gracefully with dict config."""
         # Setup data with missing languages
         mock_df = MagicMock()
+        mock_df.columns = ["id", "name", "lang"]  # Add proper columns mock
         (
             mock_df.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
         ) = [
@@ -348,9 +349,12 @@ class TestLanguageCheck:
     ) -> None:
         """Tests that language_check handles when _get_installed_languages fails."""
         # Setup CSV data with languages that would require checking
+        mock_df = MagicMock()
+        mock_df.columns = ["id", "name", "lang"]  # Add proper columns mock
         (
-            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+            mock_df.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
         ) = ["fr_FR"]
+        mock_polars_read_csv.return_value = mock_df
 
         result = preflight.language_check(
             preflight_mode=PreflightMode.NORMAL,
@@ -377,9 +381,12 @@ class TestLanguageCheck:
         mock_conf_lib: MagicMock,
     ) -> None:
         """Tests missing languages where user confirms but install fails."""
+        mock_df = MagicMock()
+        mock_df.columns = ["id", "name", "lang"]  # Add proper columns mock
         (
-            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+            mock_df.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
         ) = ["fr_FR"]
+        mock_polars_read_csv.return_value = mock_df
         mock_conf_lib.return_value.get_model.return_value.search_read.return_value = [
             {"code": "en_US"}
         ]
@@ -407,10 +414,12 @@ class TestLanguageCheck:
         mock_installer: MagicMock,
         mock_polars_read_csv: MagicMock,
     ) -> None:
-        """Tests that the check fails if the user cancels the installation."""
+        mock_df = MagicMock()
+        mock_df.columns = ["id", "name", "lang"]
         (
-            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+            mock_df.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
         ) = ["fr_FR"]
+        mock_polars_read_csv.return_value = mock_df
 
         result = preflight.language_check(
             preflight_mode=PreflightMode.NORMAL,
@@ -436,10 +445,12 @@ class TestLanguageCheck:
         mock_installer: MagicMock,
         mock_polars_read_csv: MagicMock,
     ) -> None:
-        """Tests that languages are auto-installed in headless mode."""
+        mock_df = MagicMock()
+        mock_df.columns = ["id", "name", "lang"]  # Add proper columns mock
         (
-            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+            mock_df.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
         ) = ["fr_FR"]
+        mock_polars_read_csv.return_value = mock_df
         mock_installer.return_value = True
 
         result = preflight.language_check(
@@ -507,9 +518,12 @@ class TestLanguageCheck:
     ) -> None:
         """Tests that language installation fails gracefully with dict config."""
         # Setup data with missing languages
+        mock_df = MagicMock()
+        mock_df.columns = ["id", "name", "lang"]  # Add proper columns mock
         (
-            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+            mock_df.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
         ) = ["fr_FR"]
+        mock_polars_read_csv.return_value = mock_df
         mock_conf_lib.return_value.get_model.return_value.search_read.return_value = [
             {"code": "en_US"}
         ]

@@ -113,7 +113,7 @@ def connection_check(
     try:
         if isinstance(config, dict):
             conf_lib.get_connection_from_dict(config)
-        else:
+        elif isinstance(config, str):
             conf_lib.get_connection_from_config(config_file=config)
         log.info("Connection to Odoo successful.")
         return True
@@ -159,10 +159,11 @@ def self_referencing_check(
         import_plan["id_column"] = "id"
         import_plan["parent_column"] = "parent_id"
         return True
-    else:
+    elif result is None:
         # result is None, meaning no hierarchy detected
         log.info("No self-referencing hierarchy detected.")
         return True
+    return True  # Default return to satisfy mypy type checking
 
 
 def _get_installed_languages(config: Union[str, dict[str, Any]]) -> Optional[set[str]]:
@@ -170,7 +171,7 @@ def _get_installed_languages(config: Union[str, dict[str, Any]]) -> Optional[set
     try:
         if isinstance(config, dict):
             connection = conf_lib.get_connection_from_dict(config)
-        else:
+        elif isinstance(config, str):
             connection = conf_lib.get_connection_from_config(config)
 
         lang_obj = connection.get_model("res.lang")
@@ -196,19 +197,33 @@ def _get_installed_languages(config: Union[str, dict[str, Any]]) -> Optional[set
 def _get_required_languages(filename: str, separator: str) -> Optional[list[str]]:
     """Extracts the list of required languages from the source file."""
     try:
-        result = (
-            pl.read_csv(filename, separator=separator, truncate_ragged_lines=True)
-            .get_column("lang")
-            .unique()
-            .drop_nulls()
-            .to_list()
-        )
-        # Explicitly cast to list[str] to satisfy mypy type checking
-        return list(str(item) for item in result) if result is not None else None
+        # Read the lang column, make unique, drop nulls, and convert to list
+        df = pl.read_csv(filename, separator=separator, truncate_ragged_lines=True)
+        print(f"DEBUG _get_required_languages: df.columns = {df.columns}")
+        if "lang" not in df.columns:
+            print("DEBUG _get_required_languages: No 'lang' column found")
+            return None
+
+        result = df.get_column("lang").unique().drop_nulls().to_list()
+        print(f"DEBUG _get_required_languages: result = {result}")
+
+        # Filter out empty strings and whitespace-only strings
+        filtered_result = []
+        for item in result:
+            str_item = str(item).strip()
+            if str_item:  # Only include non-empty strings after stripping
+                filtered_result.append(str_item)
+
+        # Return None if no valid language codes remain
+        final_result = filtered_result if filtered_result else None
+        print(f"DEBUG _get_required_languages: final_result = {final_result}")
+        return final_result
     except ColumnNotFoundError:
+        print("DEBUG _get_required_languages: ColumnNotFoundError")
         log.debug("No 'lang' column found in source file. Skipping language check.")
         return None  # Consistently return None for no data case
     except Exception as e:
+        print(f"DEBUG _get_required_languages: Exception = {e}")
         log.warning(
             f"Could not read languages from source file. Skipping check. Error: {e}"
         )
@@ -283,19 +298,28 @@ def language_check(
     log.info("Running pre-flight check: Verifying required languages...")
 
     required_languages = _get_required_languages(filename, kwargs.get("separator", ";"))
+    print(f"DEBUG: required_languages = {required_languages}")
     if required_languages is None or not required_languages:
+        print("DEBUG: No required languages, returning True")
         return True
 
     installed_languages = _get_installed_languages(config)
+    log.debug(f"Installed languages: {installed_languages}")
     if installed_languages is None:
+        log.debug("Could not get installed languages, returning False")
         return False
 
     missing_languages = set(required_languages) - installed_languages
+    log.debug(f"Required languages: {required_languages}")
+    log.debug(f"Installed languages: {installed_languages}")
+    log.debug(f"Missing languages: {missing_languages}")
     if not missing_languages:
         log.info("All required languages are installed.")
         return True
 
-    return _handle_missing_languages(config, missing_languages, headless)
+    result = _handle_missing_languages(config, missing_languages, headless)
+    log.debug(f"_handle_missing_languages returned: {result}")
+    return result
 
 
 def _get_odoo_fields(
@@ -322,7 +346,7 @@ def _get_odoo_fields(
         connection_obj: Any
         if isinstance(config, dict):
             connection_obj = conf_lib.get_connection_from_dict(config)
-        else:
+        elif isinstance(config, str):
             connection_obj = conf_lib.get_connection_from_config(config_file=config)
         model_obj = connection_obj.get_model(model)
         odoo_fields = cast(dict[str, Any], model_obj.fields_get())
@@ -689,16 +713,14 @@ def _handle_field_deferral(
         strategies: Dictionary to store import strategies
         df: Polars DataFrame containing the data
     """
-    # Only defer fields that are self-referencing (relation matches the model)
-    # This prevents unnecessary deferrals of many2many fields that don't reference the same model
-    is_self_referencing = field_info.get("relation") == model
+    # Handle deferral for all relational field types to prevent dependency issues during import
+    # Special cases and exceptions are handled by _should_skip_deferral and business logic
 
-    if field_type == "many2one" and is_self_referencing:
+    if field_type == "many2one":
         deferrable_fields.append(clean_field_name)
     elif field_type == "many2many":
         # For many2many fields, implement architectural improvements:
         # 1. Skip deferral for fields with XML ID patterns (module.name format) for direct resolution
-        # 2. By default, only defer self-referencing fields to reduce unnecessary deferrals
         has_xml_id_pattern = _has_xml_id_pattern(df, field_name)
 
         # Always analyze for strategies regardless of deferral decision
@@ -711,12 +733,20 @@ def _handle_field_deferral(
         if has_xml_id_pattern:
             # Skip deferral for fields with XML ID patterns - allow direct resolution
             pass
-        elif is_self_referencing:
+        else:
+            # Check if this field is self-referencing (relation matches the model)
+            is_self_referencing = field_info.get("relation") == model
+
             # Only defer non-XML ID fields if they are self-referencing (to avoid dependency cycles)
-            deferrable_fields.append(clean_field_name)
-    elif field_type == "one2many" and is_self_referencing:
+            # By default only self-referencing fields are deferred
+            if is_self_referencing:
+                deferrable_fields.append(clean_field_name)
+    elif field_type == "one2many":
+        # For one2many fields, implement architectural improvements:
+        # 1. By default, defer all one2many fields to prevent dependency cycles
         deferrable_fields.append(clean_field_name)
         strategies[clean_field_name] = {"strategy": "write_o2m_tuple"}
+    # ... rest of the function continues normally ...
 
 
 def _has_xml_id_pattern(df: Any, field_name: str) -> bool:
@@ -740,7 +770,7 @@ def _has_xml_id_pattern(df: Any, field_name: str) -> bool:
                 .collect()
                 .to_series()
             )
-        else:
+        elif hasattr(df, "select"):
             # It might already be collected as a DataFrame, so handle it directly
             series = df.select(
                 pl.col(field_name).cast(pl.Utf8).fill_null("")

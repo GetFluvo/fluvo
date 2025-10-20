@@ -35,7 +35,7 @@ except OverflowError:
 
 
 # --- Helper Functions ---
-def _sanitize_error_message(error_msg: str) -> str:
+def _sanitize_error_message(error_msg: Union[str, None]) -> str:
     """Sanitizes error messages to ensure they are safe for CSV output.
 
     Args:
@@ -606,7 +606,11 @@ def _safe_convert_field_value(  # noqa: C901
     """
     if field_value is None or field_value == "":
         # Handle empty values appropriately by field type
-        if field_type in ("integer", "float", "positive", "negative"):
+        # SPECIAL CASE: For external ID fields, return empty string instead of False
+        # to prevent tuple index errors when False is sent instead of ""
+        if field_name.endswith("/id"):
+            return ""  # Return empty string, not False
+        elif field_type in ("integer", "float", "positive", "negative"):
             return 0  # Use 0 for empty numeric fields
         elif field_type in ("many2one", "many2many", "one2many"):
             return (
@@ -1716,7 +1720,11 @@ def _execute_load_batch(  # noqa: C901
                                 str(field_value) if field_value is not None else ""
                             )
                         else:
-                            validated_value = field_value
+                            # Convert numeric types to strings to prevent tuple index errors during import
+                            # This specifically addresses the issue where numeric values are sent to string fields
+                            validated_value = (
+                                str(field_value) if field_value is not None else ""
+                            )
                         validated_line.append(validated_value)
                     validated_load_lines.append(validated_line)
                 load_lines = validated_load_lines  # Use validated data
@@ -2313,7 +2321,7 @@ def _orchestrate_pass_1(
     all_data: list[list[Any]],
     unique_id_field: str,
     deferred_fields: list[str],
-    ignore: list[str],
+    ignore: Union[str, list[str]],
     context: dict[str, Any],
     fail_writer: Optional[Any],
     fail_handle: Optional[TextIO],
@@ -2364,8 +2372,6 @@ def _orchestrate_pass_1(
     # Ensure ignore is a list before concatenation
     if isinstance(ignore, str):
         ignore_list = [ignore]
-    elif ignore is None:
-        ignore_list = []
     else:
         ignore_list = ignore
     pass_1_ignore_list = deferred_fields + ignore_list
