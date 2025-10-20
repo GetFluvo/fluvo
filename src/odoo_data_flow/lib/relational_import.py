@@ -112,7 +112,7 @@ def _resolve_related_ids(  # noqa: C901
             # Handle module.name pairs - map original search term to result
             resolved_data = []
             module_name_mappings = {}  # For module.name format: original -> db_id
-            name_only_mappings = {}   # For name-only format: maintain original behavior
+            name_only_mappings = {}  # For name-only format: maintain original behavior
 
             for module, name in parsed_xml_ids:
                 original_search_term = f"{module}.{name}"
@@ -799,8 +799,13 @@ def run_write_tuple_import(
 
     # 4. Execute the updates
     success = _execute_write_tuple_updates(
-        config, model, original_field, link_df, id_map,
-        related_model_fk, original_filename
+        config,
+        model,
+        original_field,
+        link_df,
+        id_map,
+        related_model_fk,
+        original_filename,
     )
 
     # Count successful updates - get from link_df

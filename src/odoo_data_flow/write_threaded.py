@@ -162,9 +162,9 @@ class RPCThreadWrite(RpcThread):
                     self.progress.update(
                         self.task_id,
                         advance=result.get("processed", 0),
-                        last_error=f"Last Error: {error_summary}"
-                        if error_summary
-                        else "",
+                        last_error=(
+                            f"Last Error: {error_summary}" if error_summary else ""
+                        ),
                     )
             except Exception as e:
                 log.error(f"A worker thread failed unexpectedly: {e}", exc_info=True)

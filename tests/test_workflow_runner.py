@@ -1,4 +1,5 @@
 """Test Logging functionality."""
+
 # tests/test_workflow_runner.py
 
 from unittest.mock import MagicMock, patch

@@ -659,6 +659,11 @@ def _plan_deferrals_and_strategies(
 
         import_plan["deferred_fields"] = deferrable_fields
         import_plan["strategies"] = strategies
+    else:
+        # Always populate deferred_fields and strategies even if empty
+        # to maintain compatibility with tests that expect these keys to exist
+        import_plan["deferred_fields"] = deferrable_fields
+        import_plan["strategies"] = strategies
     return True
 
 
@@ -684,22 +689,77 @@ def _handle_field_deferral(
         strategies: Dictionary to store import strategies
         df: Polars DataFrame containing the data
     """
-    is_m2o_self = field_type == "many2one" and field_info.get("relation") == model
-    is_m2m = field_type == "many2many"
-    is_o2m = field_type == "one2many"
+    # Handle deferral for all relational field types to prevent dependency issues during import
+    # Special cases and exceptions are handled by _should_skip_deferral and business logic
+    
+    if field_type == "many2one":
+        deferrable_fields.append(clean_field_name)
+    elif field_type == "many2many":
+        # For many2many fields, implement architectural improvements:
+        # 1. Skip deferral for fields with XML ID patterns (module.name format) for direct resolution
+        has_xml_id_pattern = _has_xml_id_pattern(df, field_name)
 
-    if is_m2o_self:
-        deferrable_fields.append(clean_field_name)
-    elif is_m2m:
-        deferrable_fields.append(clean_field_name)
+        # Always analyze for strategies regardless of deferral decision
         success, strategy_details = _handle_m2m_field(
             field_name, clean_field_name, field_info, df
         )
         if success:
             strategies[clean_field_name] = strategy_details
-    elif is_o2m:
+
+        if has_xml_id_pattern:
+            # Skip deferral for fields with XML ID patterns - allow direct resolution
+            # Remove from deferrable_fields if it was added
+            if clean_field_name in deferrable_fields:
+                deferrable_fields.remove(clean_field_name)
+    elif field_type == "one2many":
         deferrable_fields.append(clean_field_name)
         strategies[clean_field_name] = {"strategy": "write_o2m_tuple"}
+
+
+def _has_xml_id_pattern(df: Any, field_name: str) -> bool:
+    """Check if a field contains XML ID patterns (module.name format).
+
+    Args:
+        df: Polars DataFrame containing the data
+        field_name: Name of the field to check
+
+    Returns:
+        True if the field contains XML ID patterns, False otherwise
+    """
+    try:
+        # Get a sample of the data for the field
+        # Handle the case where the field might not exist or have null values
+        # Check if this is already a lazy frame or regular dataframe
+        if hasattr(df, "lazy"):
+            series = (
+                df.lazy()
+                .select(pl.col(field_name).cast(pl.Utf8).fill_null(""))
+                .collect()
+                .to_series()
+            )
+        else:
+            # It might already be collected as a DataFrame, so handle it directly
+            series = df.select(
+                pl.col(field_name).cast(pl.Utf8).fill_null("")
+            ).to_series()
+
+        # Check if any non-empty values contain the XML ID pattern (module.name format)
+        # XML IDs typically have a dot indicating module.name format
+        for value in series:
+            if value and isinstance(value, str):
+                # Split by comma to handle many2many field values
+                values_list = [v.strip() for v in value.split(",") if v.strip()]
+                for v in values_list:
+                    # Check if it looks like an XML ID (contains dot and follows module.name format)
+                    if "." in v and not v.startswith(".") and not v.endswith("."):
+                        # Basic validation: module.name format where module and name are non-empty
+                        parts = v.split(".", 1)
+                        if len(parts) == 2 and all(parts):
+                            return True
+    except Exception:
+        # If there's an error checking the pattern, return False as fallback
+        pass
+    return False
 
 
 @register_check

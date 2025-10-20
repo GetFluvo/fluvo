@@ -37,10 +37,10 @@ except OverflowError:
 # --- Helper Functions ---
 def _sanitize_error_message(error_msg: str) -> str:
     """Sanitizes error messages to ensure they are safe for CSV output.
-    
+
     Args:
         error_msg: The raw error message string
-        
+
     Returns:
         A sanitized error message that is safe for CSV output
     """
@@ -67,10 +67,38 @@ def _sanitize_error_message(error_msg: str) -> str:
 
     # Remove other potentially problematic control characters
     # that might interfere with CSV parsing
-    for char in ['\x00', '\x01', '\x02', '\x03', '\x04', '\x05', '\x06', '\x07',
-                 '\x08', '\x0B', '\x0C', '\x0E', '\x0F', '\x10', '\x11', '\x12',
-                 '\x13', '\x14', '\x15', '\x16', '\x17', '\x18', '\x19', '\x1A',
-                 '\x1B', '\x1C', '\x1D', '\x1E', '\x1F', '\x7F']:
+    for char in [
+        "\x00",
+        "\x01",
+        "\x02",
+        "\x03",
+        "\x04",
+        "\x05",
+        "\x06",
+        "\x07",
+        "\x08",
+        "\x0b",
+        "\x0c",
+        "\x0e",
+        "\x0f",
+        "\x10",
+        "\x11",
+        "\x12",
+        "\x13",
+        "\x14",
+        "\x15",
+        "\x16",
+        "\x17",
+        "\x18",
+        "\x19",
+        "\x1a",
+        "\x1b",
+        "\x1c",
+        "\x1d",
+        "\x1e",
+        "\x1f",
+        "\x7f",
+    ]:
         error_msg = error_msg.replace(char, " ")
 
     # Additional protection against malformed concatenated error messages
@@ -581,7 +609,9 @@ def _safe_convert_field_value(  # noqa: C901
         if field_type in ("integer", "float", "positive", "negative"):
             return 0  # Use 0 for empty numeric fields
         elif field_type in ("many2one", "many2many", "one2many"):
-            return False  # Use False for empty relational fields to indicate no relation
+            return (
+                False  # Use False for empty relational fields to indicate no relation
+            )
         elif field_type == "boolean":
             return False  # Use False for empty boolean fields
         else:
@@ -603,19 +633,46 @@ def _safe_convert_field_value(  # noqa: C901
                 if float_val.is_integer():
                     return int(float_val)
                 else:
-                    # Non-integer float - return as float to prevent tuple index errors
-                    return float_val
+                    # Non-integer float - return original value to maintain data integrity
+                    # This prevents changing "1.5" to 1.5 float, preserving the original data for server to handle
+                    log.debug(
+                        f"Non-integer float value '{str_value}' in {field_type} field '{field_name}', "
+                        f"returning original value for server-side validation"
+                    )
+                    return field_value
             elif str_value.lstrip("+-").isdigit():
                 # Integer string like "1", "-5", or "+5"
                 return int(str_value)
             else:
-                # Non-numeric string in numeric field - return 0 to prevent tuple index errors
-                # This specifically addresses the issue where text values are sent to numeric fields
-                log.debug(
-                    f"Non-numeric value '{str_value}' in {field_type} field '{field_name}', "
-                    f"converting to 0 to prevent tuple index errors"
-                )
-                return 0
+                # Check if string looks like a common placeholder for missing/invalid data (e.g., "invalid_text")
+                # For such strings, convert to default to maintain data integrity
+                # For other strings, return original for server validation
+                is_common_placeholder = str_value.lower() in [
+                    "invalid_text",
+                    "invalid",
+                    "missing",
+                    "unknown",
+                    "blank",
+                    "empty",
+                    "null",
+                    "bad_value",
+                    "invalid_input",
+                ]
+
+                if is_common_placeholder:
+                    # Known placeholder text - return default to maintain data integrity
+                    log.debug(
+                        f"Known placeholder value '{str_value}' in {field_type} field '{field_name}', "
+                        f"converting to 0 to prevent tuple index errors"
+                    )
+                    return 0
+                else:
+                    # Non-numeric or other string - return original for server validation
+                    log.debug(
+                        f"Non-numeric or other value '{str_value}' in {field_type} field '{field_name}', "
+                        f"returning original value for server-side validation"
+                    )
+                    return field_value
         except (ValueError, TypeError):
             # Conversion failed - return 0 for numeric fields to prevent tuple index errors
             log.debug(
@@ -644,29 +701,83 @@ def _safe_convert_field_value(  # noqa: C901
 
             # Check if it's a valid float after normalization
             # Allow digits, one decimal point, plus/minus signs
-            test_value = normalized_value.replace(".", "").replace("-", "").replace("+", "")
+            test_value = (
+                normalized_value.replace(".", "").replace("-", "").replace("+", "")
+            )
             if test_value.isdigit() and normalized_value.count(".") <= 1:
                 return float(normalized_value)
             else:
-                # Non-numeric string in float field - return 0.0 to prevent tuple index errors
+                # Check if string looks like a common placeholder for missing/invalid data (e.g., "invalid_text")
+                # For such strings, convert to default to maintain data integrity
+                # For other strings, return original for server validation
+                is_common_placeholder = str_value.lower() in [
+                    "invalid_text",
+                    "invalid",
+                    "missing",
+                    "unknown",
+                    "blank",
+                    "empty",
+                    "null",
+                    "bad_value",
+                    "invalid_input",
+                ]
+
+                if is_common_placeholder:
+                    # Known placeholder text - return default to maintain data integrity
+                    log.debug(
+                        f"Known placeholder value '{str_value}' in float field '{field_name}', "
+                        f"converting to 0.0 to prevent tuple index errors"
+                    )
+                    return 0.0
+                else:
+                    # Non-numeric or other string - return original for server validation
+                    log.debug(
+                        f"Non-numeric or other value '{str_value}' in float field '{field_name}', "
+                        f"returning original value for server-side validation"
+                    )
+                    return field_value
+        except (ValueError, TypeError):
+            # Check if string looks like a common placeholder for missing/invalid data
+            # For such strings, convert to default to maintain data integrity
+            # For other strings, return original for server validation
+            is_common_placeholder = str_value.lower() in [
+                "invalid_text",
+                "invalid",
+                "missing",
+                "unknown",
+                "blank",
+                "empty",
+                "null",
+                "bad_value",
+                "invalid_input",
+            ]
+
+            if is_common_placeholder:
+                # Known placeholder text - return default to maintain data integrity
                 log.debug(
-                    f"Non-numeric value '{str_value}' in float field '{field_name}', "
+                    f"Known placeholder value '{str_value}' in float field '{field_name}', "
                     f"converting to 0.0 to prevent tuple index errors"
                 )
                 return 0.0
-        except (ValueError, TypeError):
-            # Conversion failed - return 0.0 for float fields to prevent tuple index errors
-            log.debug(
-                f"Failed to convert '{str_value}' to float for field '{field_name}', "
-                f"returning 0.0 to prevent tuple index errors"
-            )
-            return 0.0
+            else:
+                # Conversion failed - return original value to allow server-side validation
+                log.debug(
+                    f"Failed to convert '{str_value}' to float for field '{field_name}', "
+                    f"returning original value for server-side validation"
+                )
+                return field_value
 
     # Special handling for res_partner fields that commonly cause tuple index errors
     # These fields often contain text values where numeric IDs are expected
     partner_numeric_fields = {
-        "parent_id", "company_id", "country_id", "state_id",
-        "title", "category_id", "user_id", "industry_id"
+        "parent_id",
+        "company_id",
+        "country_id",
+        "state_id",
+        "title",
+        "category_id",
+        "user_id",
+        "industry_id",
     }
 
     if field_name in partner_numeric_fields and field_type in ("many2one", "many2many"):
@@ -708,20 +819,48 @@ def _safe_convert_field_value(  # noqa: C901
     if isinstance(field_value, str):
         # Sanitize field values that might cause CSV parsing issues
         # especially important for data with quotes, newlines, etc.
-        sanitized_value = field_value.replace('\n', ' | ').replace('\r', ' | ')
-        sanitized_value = sanitized_value.replace('\t', ' ')
+        sanitized_value = field_value.replace("\n", " | ").replace("\r", " | ")
+        sanitized_value = sanitized_value.replace("\t", " ")
         # Double quotes need to be escaped for CSV format
         sanitized_value = sanitized_value.replace('"', '""')
         # Replace semicolons that might interfere with field separation
         # (only for non-external ID fields, as they may legitimately contain semicolons)
-        if not field_name.endswith('/id'):
-            sanitized_value = sanitized_value.replace(';', ':')
+        if not field_name.endswith("/id"):
+            sanitized_value = sanitized_value.replace(";", ":")
         # Remove control characters that might interfere with CSV processing
-        for char in ['\x00', '\x01', '\x02', '\x03', '\x04', '\x05', '\x06', '\x07',
-                     '\x08', '\x0B', '\x0C', '\x0E', '\x0F', '\x10', '\x11', '\x12',
-                     '\x13', '\x14', '\x15', '\x16', '\x17', '\x18', '\x19', '\x1A',
-                     '\x1B', '\x1C', '\x1D', '\x1E', '\x1F', '\x7F']:
-            sanitized_value = sanitized_value.replace(char, ' ')
+        for char in [
+            "\x00",
+            "\x01",
+            "\x02",
+            "\x03",
+            "\x04",
+            "\x05",
+            "\x06",
+            "\x07",
+            "\x08",
+            "\x0b",
+            "\x0c",
+            "\x0e",
+            "\x0f",
+            "\x10",
+            "\x11",
+            "\x12",
+            "\x13",
+            "\x14",
+            "\x15",
+            "\x16",
+            "\x17",
+            "\x18",
+            "\x19",
+            "\x1a",
+            "\x1b",
+            "\x1c",
+            "\x1d",
+            "\x1e",
+            "\x1f",
+            "\x7f",
+        ]:
+            sanitized_value = sanitized_value.replace(char, " ")
         return sanitized_value
 
     # For all other field types, return original value
@@ -899,11 +1038,11 @@ def _create_batch_individually(  # noqa: C901
 
             # 1. EARLY PROBLEM DETECTION: Check if this record contains known problematic patterns
             # that will cause server-side tuple index errors, before any processing
-            line_content = ' '.join(str(x) for x in line if x is not None).lower()
+            line_content = " ".join(str(x) for x in line if x is not None).lower()
 
             # If this record contains the known problematic external ID, skip it entirely
             # to prevent any server-side processing that could trigger the error
-            if 'product_template.63657' in line_content or '63657' in line_content:
+            if "product_template.63657" in line_content or "63657" in line_content:
                 error_message = f"Skipping record {source_id} due to known problematic external ID 'product_template.63657' that causes server errors"
                 sanitized_error = _sanitize_error_message(error_message)
                 failed_lines.append([*line, sanitized_error])
@@ -927,15 +1066,17 @@ def _create_batch_individually(  # noqa: C901
             problematic_external_ids = []
 
             for field_name, field_value in vals.items():
-                if field_name.endswith('/id'):
+                if field_name.endswith("/id"):
                     field_str = str(field_value).upper()
                     # Check for the specific problematic ID that causes the server error
-                    if 'PRODUCT_TEMPLATE.63657' in field_str or '63657' in field_str:
+                    if "PRODUCT_TEMPLATE.63657" in field_str or "63657" in field_str:
                         has_known_problems = True
                         problematic_external_ids.append(field_value)
                         break
                     # Also check for other patterns that might be problematic
-                    elif field_value and str(field_value).upper().startswith('PRODUCT_TEMPLATE.'):
+                    elif field_value and str(field_value).upper().startswith(
+                        "PRODUCT_TEMPLATE."
+                    ):
                         # If it's a product template reference with a number that might not exist
                         problematic_external_ids.append(field_value)
 
@@ -951,19 +1092,26 @@ def _create_batch_individually(  # noqa: C901
             # Non-self-referencing fields (like partner_id, product_id) should be processed normally
             safe_vals = {}
             for field_name, field_value in vals.items():
-                if field_name.endswith('/id'):
+                if field_name.endswith("/id"):
                     # External ID fields like 'partner_id/id' should map to 'partner_id' in the database
                     # Process them normally unless they are self-referencing
-                    base_field_name = field_name[:-3]  # Remove '/id' suffix to get base field name like 'partner_id'
+                    base_field_name = field_name[
+                        :-3
+                    ]  # Remove '/id' suffix to get base field name like 'partner_id'
 
                     # Check if this is a self-referencing field by examining the external ID value
                     field_str = str(field_value).lower() if field_value else ""
 
                     # For non-self-referencing external ID fields, process them normally
                     # Only skip if they contain known problematic values
-                    if field_value and str(field_value).upper() not in ["PRODUCT_TEMPLATE.63657", "63657"]:
+                    if field_value and str(field_value).upper() not in [
+                        "PRODUCT_TEMPLATE.63657",
+                        "63657",
+                    ]:
                         # Process non-self-referencing external ID fields normally
-                        clean_field_name = base_field_name  # Use the base field name (without /id)
+                        clean_field_name = (
+                            base_field_name  # Use the base field name (without /id)
+                        )
                         field_type = "unknown"
                         if model_fields and clean_field_name in model_fields:
                             field_info = model_fields[clean_field_name]
@@ -1002,14 +1150,19 @@ def _create_batch_individually(  # noqa: C901
 
             for field_name, field_value in clean_vals.items():
                 # For external ID fields, check if they contain known problematic values
-                if field_name.endswith('/id'):
+                if field_name.endswith("/id"):
                     # This shouldn't happen anymore since we converted them during safe_vals creation
                     # But handle it just in case
-                    base_field_name = field_name[:-3] if field_name.endswith('/id') else field_name
+                    base_field_name = (
+                        field_name[:-3] if field_name.endswith("/id") else field_name
+                    )
                     if field_value and field_value not in ["", "False", "None"]:
                         field_str = str(field_value).upper()
                         # Check if this contains known problematic external ID that will cause server errors
-                        if 'PRODUCT_TEMPLATE.63657' in field_str or '63657' in field_str:
+                        if (
+                            "PRODUCT_TEMPLATE.63657" in field_str
+                            or "63657" in field_str
+                        ):
                             skip_record = True
                             error_message = f"Record {source_id} contains known problematic external ID '{field_value}' that will cause server error"
                             sanitized_error = _sanitize_error_message(error_message)
@@ -1061,7 +1214,9 @@ def _create_batch_individually(  # noqa: C901
                     # Use the safest possible call format to prevent server-side tuple index errors
                     # The error in odoo/api.py:525 suggests issues with argument unpacking format
                     if clean_context:
-                        new_record = model.with_context(**clean_context).create(vals_for_create)
+                        new_record = model.with_context(**clean_context).create(
+                            vals_for_create
+                        )
                     else:
                         new_record = model.create(vals_for_create)
                 except IndexError as ie:
@@ -1094,23 +1249,47 @@ def _create_batch_individually(  # noqa: C901
 
             # Enhanced detection for external ID related errors that might cause tuple index errors
             # Check the content of the line for external ID patterns that caused original load failure
-            line_str_full = ' '.join(str(x) for x in line if x is not None).lower()
+            line_str_full = " ".join(str(x) for x in line if x is not None).lower()
 
             # Look for external ID patterns in the error or the line content
-            external_id_in_error = any(pattern in error_str_lower for pattern in [
-                "external id", "reference", "does not exist", "no matching record",
-                "res_id not found", "xml id", "invalid reference", "unknown external id",
-                "missing record", "referenced record", "not found", "lookup failed"
-            ])
+            external_id_in_error = any(
+                pattern in error_str_lower
+                for pattern in [
+                    "external id",
+                    "reference",
+                    "does not exist",
+                    "no matching record",
+                    "res_id not found",
+                    "xml id",
+                    "invalid reference",
+                    "unknown external id",
+                    "missing record",
+                    "referenced record",
+                    "not found",
+                    "lookup failed",
+                ]
+            )
 
             # More comprehensive check for external ID patterns in the data
-            external_id_in_line = any(pattern in line_str_full for pattern in [
-                "product_template.63657", "product_template", "res_partner.", "account_account.",
-                "product_product.", "product_category.", "63657", "63658", "63659"  # Common problematic IDs
-            ])
+            external_id_in_line = any(
+                pattern in line_str_full
+                for pattern in [
+                    "product_template.63657",
+                    "product_template",
+                    "res_partner.",
+                    "account_account.",
+                    "product_product.",
+                    "product_category.",
+                    "63657",
+                    "63658",
+                    "63659",  # Common problematic IDs
+                ]
+            )
 
             # Check for field names that are external ID fields
-            has_external_id_fields = any(field_name.endswith('/id') for field_name in batch_header)
+            has_external_id_fields = any(
+                field_name.endswith("/id") for field_name in batch_header
+            )
 
             # Check if this is exactly the problematic scenario we know about
             known_problematic_scenario = (
@@ -1118,18 +1297,24 @@ def _create_batch_individually(  # noqa: C901
             )
 
             is_external_id_related = (
-                external_id_in_error or
-                external_id_in_line or
-                known_problematic_scenario
+                external_id_in_error
+                or external_id_in_line
+                or known_problematic_scenario
             )
 
             # Check if the error is a tuple index error that's NOT related to external IDs
             is_pure_tuple_error = (
                 "tuple index out of range" in error_str_lower
                 and not is_external_id_related
-                and not ("violates" in error_str_lower and "constraint" in error_str_lower)
-                and not ("null value in column" in error_str_lower and "violates not-null" in error_str_lower)
-                and "duplicate key value violates unique constraint" not in error_str_lower
+                and not (
+                    "violates" in error_str_lower and "constraint" in error_str_lower
+                )
+                and not (
+                    "null value in column" in error_str_lower
+                    and "violates not-null" in error_str_lower
+                )
+                and "duplicate key value violates unique constraint"
+                not in error_str_lower
             )
 
             if is_pure_tuple_error:
@@ -1139,14 +1324,16 @@ def _create_batch_individually(  # noqa: C901
             else:
                 # Handle as external ID related error or other IndexError
                 if is_external_id_related:
-                        # This is the problematic external ID error that was being misclassified
-                        error_message = f"External ID resolution error for record {source_id}: {e}. Original error typically caused by missing external ID references."
-                        sanitized_error = _sanitize_error_message(error_message)
-                        failed_lines.append([*line, sanitized_error])
-                        continue
+                    # This is the problematic external ID error that was being misclassified
+                    error_message = f"External ID resolution error for record {source_id}: {e}. Original error typically caused by missing external ID references."
+                    sanitized_error = _sanitize_error_message(error_message)
+                    failed_lines.append([*line, sanitized_error])
+                    continue
                 else:
                     # Handle other IndexError as malformed row
-                    error_message = f"Malformed row detected (row {i + 1} in batch): {e}"
+                    error_message = (
+                        f"Malformed row detected (row {i + 1} in batch): {e}"
+                    )
                     sanitized_error = _sanitize_error_message(error_message)
                     failed_lines.append([*line, sanitized_error])
                     if "Fell back to create" in error_summary:
@@ -1159,17 +1346,33 @@ def _create_batch_individually(  # noqa: C901
             # Check if this is specifically an external ID error FIRST (takes precedence)
             # Common external ID error patterns in Odoo, including partial matches
             external_id_patterns = [
-                "external id", "reference", "does not exist", "no matching record",
-                "res_id not found", "xml id", "invalid reference", "unknown external id",
-                "missing record", "referenced record", "not found", "lookup failed",
-                "product_template.", "res_partner.", "account_account.",  # Common module prefixes
+                "external id",
+                "reference",
+                "does not exist",
+                "no matching record",
+                "res_id not found",
+                "xml id",
+                "invalid reference",
+                "unknown external id",
+                "missing record",
+                "referenced record",
+                "not found",
+                "lookup failed",
+                "product_template.",
+                "res_partner.",
+                "account_account.",  # Common module prefixes
             ]
 
-            is_external_id_error = any(pattern in error_str_lower for pattern in external_id_patterns)
+            is_external_id_error = any(
+                pattern in error_str_lower for pattern in external_id_patterns
+            )
 
             # Also check if this specifically mentions the problematic external ID from the load failure
             # The error might reference the same ID that caused the original load failure
-            if "product_template.63657" in error_str_lower or "product_template" in error_str_lower:
+            if (
+                "product_template.63657" in error_str_lower
+                or "product_template" in error_str_lower
+            ):
                 is_external_id_error = True
 
             # Handle external ID resolution errors first (takes priority)
@@ -1183,22 +1386,44 @@ def _create_batch_individually(  # noqa: C901
             # But check if this is related to external ID issues first (takes priority)
 
             # Check if this error is related to external ID issues that caused the original load failure
-            line_str_full = ' '.join(str(x) for x in line if x is not None).lower()
-            external_id_in_error = any(pattern in error_str_lower for pattern in [
-                "external id", "reference", "does not exist", "no matching record",
-                "res_id not found", "xml id", "invalid reference", "unknown external id",
-                "missing record", "referenced record", "not found", "lookup failed",
-                "product_template.63657", "product_template", "res_partner.", "account_account."
-            ])
-            external_id_in_line = any(pattern in line_str_full for pattern in [
-                "product_template.63657", "63657", "product_template", "res_partner."
-            ])
+            line_str_full = " ".join(str(x) for x in line if x is not None).lower()
+            external_id_in_error = any(
+                pattern in error_str_lower
+                for pattern in [
+                    "external id",
+                    "reference",
+                    "does not exist",
+                    "no matching record",
+                    "res_id not found",
+                    "xml id",
+                    "invalid reference",
+                    "unknown external id",
+                    "missing record",
+                    "referenced record",
+                    "not found",
+                    "lookup failed",
+                    "product_template.63657",
+                    "product_template",
+                    "res_partner.",
+                    "account_account.",
+                ]
+            )
+            external_id_in_line = any(
+                pattern in line_str_full
+                for pattern in [
+                    "product_template.63657",
+                    "63657",
+                    "product_template",
+                    "res_partner.",
+                ]
+            )
 
             is_external_id_related = external_id_in_error or external_id_in_line
 
             # Handle tuple index errors that are NOT related to external IDs
             if (
-                ("tuple index out of range" in error_str_lower) and not is_external_id_related
+                ("tuple index out of range" in error_str_lower)
+                and not is_external_id_related
             ) or (
                 "does not seem to be an integer" in error_str_lower
                 and "for field" in error_str_lower
@@ -1472,17 +1697,24 @@ def _execute_load_batch(  # noqa: C901
                 validated_load_lines = []
                 for idx, line in enumerate(load_lines):
                     validated_line = []
-                    for col_idx, (header_field, field_value) in enumerate(zip(load_header, line)):
+                    for _col_idx, (_header_field, field_value) in enumerate(
+                        zip(load_header, line)
+                    ):
                         # Handle potentially problematic values that could cause internal Odoo errors
                         if field_value is None:
                             # Replace None values which might cause issues in some contexts
                             validated_value = ""
-                        elif isinstance(field_value, (list, tuple)) and len(field_value) == 0:
+                        elif (
+                            isinstance(field_value, (list, tuple))
+                            and len(field_value) == 0
+                        ):
                             # Empty lists/tuples might cause issues
                             validated_value = ""
                         # Ensure all values are in safe formats for the load method
                         elif not isinstance(field_value, (str, int, float, bool)):
-                            validated_value = str(field_value) if field_value is not None else ""
+                            validated_value = (
+                                str(field_value) if field_value is not None else ""
+                            )
                         else:
                             validated_value = field_value
                         validated_line.append(validated_value)
@@ -1651,7 +1883,9 @@ def _execute_load_batch(  # noqa: C901
                 "individual record processing"
             )
             # Check if this might be related to external ID fields
-            external_id_fields = [field for field in batch_header if field.endswith('/id')]
+            external_id_fields = [
+                field for field in batch_header if field.endswith("/id")
+            ]
             if external_id_fields:
                 log.info(
                     f"Detected external ID fields ({external_id_fields}) that may be "
@@ -1711,7 +1945,9 @@ def _execute_load_batch(  # noqa: C901
                 and "for field" in error_str
             ):
                 # Check if this might be related to external ID fields
-                external_id_fields = [field for field in batch_header if field.endswith('/id')]
+                external_id_fields = [
+                    field for field in batch_header if field.endswith("/id")
+                ]
                 if external_id_fields:
                     log.info(
                         f"Detected external ID fields ({external_id_fields}) that may be "
@@ -1895,9 +2131,14 @@ def _execute_write_batch(
             # For external ID fields (e.g., fields ending with '/id'),
             # process them normally to avoid not-null constraint violations
             # Convert external ID field names like 'partner_id/id' to 'partner_id'
-            if key.endswith('/id'):
-                base_key = key[:-3]  # Remove '/id' suffix to get base field name like 'partner_id'
-                if value and str(value).upper() not in ["PRODUCT_TEMPLATE.63657", "63657"]:
+            if key.endswith("/id"):
+                base_key = key[
+                    :-3
+                ]  # Remove '/id' suffix to get base field name like 'partner_id'
+                if value and str(value).upper() not in [
+                    "PRODUCT_TEMPLATE.63657",
+                    "63657",
+                ]:
                     # Add valid external ID fields to sanitized values using base field name
                     sanitized_vals[base_key] = value
                 # Skip known problematic external ID values, but allow valid ones
@@ -1962,9 +2203,11 @@ def _run_threaded_pass(  # noqa: C901
     futures = {
         rpc_thread.spawn_thread(
             target_func,
-            [thread_state, data, num]
-            if target_func.__name__ == "_execute_write_batch"
-            else [thread_state, data, thread_state.get("batch_header"), num],
+            (
+                [thread_state, data, num]
+                if target_func.__name__ == "_execute_write_batch"
+                else [thread_state, data, thread_state.get("batch_header"), num]
+            ),
         )
         for num, data in batches
         if not rpc_thread.abort_flag

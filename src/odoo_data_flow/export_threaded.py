@@ -219,18 +219,14 @@ class RPCThreadExport(RpcThread):
                                 new_record[field] = (
                                     value[1]
                                     if len(value) >= 2
-                                    else str(value[0])
-                                    if value
-                                    else None
+                                    else str(value[0]) if value else None
                                 )
                         else:
                             # For regular many-to-one relationships
                             new_record[field] = (
                                 value[1]
                                 if len(value) >= 2
-                                else str(value[0])
-                                if value
-                                else None
+                                else str(value[0]) if value else None
                             )
                     else:
                         # Value is not a list/tuple, just assign it
@@ -740,9 +736,11 @@ def _process_export_batches(
     }
     if polars_schema:
         polars_schema = {
-            k: v()
-            if v is not None and isinstance(v, type) and issubclass(v, pl.DataType)
-            else v
+            k: (
+                v()
+                if v is not None and isinstance(v, type) and issubclass(v, pl.DataType)
+                else v
+            )
             for k, v in polars_schema.items()
         }
 
