@@ -162,6 +162,9 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
     mock_model = MagicMock()
     mock_model.load.side_effect = Exception("Load fails, forcing fallback")
     mock_model.browse.return_value.env.ref.return_value = None  # Force create
+    mock_model.with_context.return_value = (
+        mock_model  # Mock with_context to return self
+    )
 
     # Mock the create method to return a simple mock record
     def mock_create(vals: dict[str, Any]) -> Any:
