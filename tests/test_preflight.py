@@ -273,6 +273,50 @@ class TestLanguageCheck:
         )
         assert result is True
 
+    @patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=None)
+    def test_language_check_handles_get_required_languages_returning_none(
+        self, mock_get_req_langs: MagicMock, mock_polars_read_csv: MagicMock
+    ) -> None:
+        """Tests that language_check handles when _get_required_languages returns None."""
+        # Setup CSV data with languages that would require checking
+        (
+            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+        ) = ["fr_FR"]
+
+        result = preflight.language_check(
+            preflight_mode=PreflightMode.NORMAL,
+            model="res.partner",
+            filename="file.csv",
+            config="",
+            headless=False,
+        )
+
+        # Should return True when _get_required_languages returns None
+        assert result is True
+        mock_get_req_langs.assert_called_once_with("file.csv", ";")
+
+    @patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=[])
+    def test_language_check_handles_get_required_languages_returning_empty_list(
+        self, mock_get_req_langs: MagicMock, mock_polars_read_csv: MagicMock
+    ) -> None:
+        """Tests that language_check handles when _get_required_languages returns empty list."""
+        # Setup CSV data with languages that would require checking
+        (
+            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+        ) = ["fr_FR"]
+
+        result = preflight.language_check(
+            preflight_mode=PreflightMode.NORMAL,
+            model="res.partner",
+            filename="file.csv",
+            config="",
+            headless=False,
+        )
+
+        # Should return True when _get_required_languages returns empty list
+        assert result is True
+        mock_get_req_langs.assert_called_once_with("file.csv", ";")
+
     def test_all_languages_installed(
         self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
     ) -> None:
@@ -1357,3 +1401,46 @@ def test_type_correction_check_casting_exception_handler(tmp_path: Path) -> None
             assert result is True
             # Should still proceed and may or may not create corrected file depending
             # on flow
+
+
+@patch("odoo_data_flow.lib.preflight.Confirm.ask", return_value=True)
+@patch(
+    "odoo_data_flow.lib.preflight._get_installed_languages",
+    return_value={"en_US"},
+)
+def test_language_check_headless_mode(
+    mock_get_langs: Any,
+    mock_confirm: Any,
+    mock_polars_read_csv: Any,
+    mock_conf_lib: Any,
+    mock_show_error_panel: Any,
+) -> None:
+    """Tests that language installation fails gracefully with dict config in headless mode."""
+    # Setup data with missing languages
+    mock_df = MagicMock()
+    mock_df.columns = ["id", "name", "lang"]  # Add proper columns mock
+    (
+        mock_df.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+    ) = [
+        "fr_FR",
+    ]
+    mock_polars_read_csv.return_value = mock_df
+
+    # Use dict config (not supported for installation) in headless mode
+    config = {"hostname": "localhost", "database": "test_db"}
+    result = preflight.language_check(
+        preflight_mode=PreflightMode.NORMAL,
+        model="res.partner",
+        filename="file.csv",
+        config=config,
+        headless=True,
+    )
+
+    # Should fail when installation is attempted with dict config
+    assert result is False
+    mock_confirm.assert_not_called()  # Headless mode should not ask for confirmation
+    mock_show_error_panel.assert_called_once()
+    assert (
+        "Language installation from a dict config is not supported"
+        in mock_show_error_panel.call_args[0][0]
+    )

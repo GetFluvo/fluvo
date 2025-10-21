@@ -199,13 +199,10 @@ def _get_required_languages(filename: str, separator: str) -> Optional[list[str]
     try:
         # Read the lang column, make unique, drop nulls, and convert to list
         df = pl.read_csv(filename, separator=separator, truncate_ragged_lines=True)
-        print(f"DEBUG _get_required_languages: df.columns = {df.columns}")
         if "lang" not in df.columns:
-            print("DEBUG _get_required_languages: No 'lang' column found")
             return None
 
         result = df.get_column("lang").unique().drop_nulls().to_list()
-        print(f"DEBUG _get_required_languages: result = {result}")
 
         # Filter out empty strings and whitespace-only strings
         filtered_result = []
@@ -216,14 +213,11 @@ def _get_required_languages(filename: str, separator: str) -> Optional[list[str]
 
         # Return None if no valid language codes remain
         final_result = filtered_result if filtered_result else None
-        print(f"DEBUG _get_required_languages: final_result = {final_result}")
         return final_result
     except ColumnNotFoundError:
-        print("DEBUG _get_required_languages: ColumnNotFoundError")
         log.debug("No 'lang' column found in source file. Skipping language check.")
         return None  # Consistently return None for no data case
     except Exception as e:
-        print(f"DEBUG _get_required_languages: Exception = {e}")
         log.warning(
             f"Could not read languages from source file. Skipping check. Error: {e}"
         )
@@ -298,9 +292,7 @@ def language_check(
     log.info("Running pre-flight check: Verifying required languages...")
 
     required_languages = _get_required_languages(filename, kwargs.get("separator", ";"))
-    print(f"DEBUG: required_languages = {required_languages}")
     if required_languages is None or not required_languages:
-        print("DEBUG: No required languages, returning True")
         return True
 
     installed_languages = _get_installed_languages(config)
@@ -318,7 +310,6 @@ def language_check(
         return True
 
     result = _handle_missing_languages(config, missing_languages, headless)
-    log.debug(f"_handle_missing_languages returned: {result}")
     return result
 
 
