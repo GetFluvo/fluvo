@@ -42,7 +42,7 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
     mock_model.load.side_effect = Exception("Generic batch error")
     mock_model.browse.return_value.env.ref.return_value = None
 
-    def create_side_effect(vals: dict[str, Any], context: dict[str, Any]) -> Any:
+    def create_side_effect(vals: dict[str, Any]) -> Any:
         if vals["id"] == "rec_02":
             raise Exception("Validation Error")
         else:
@@ -162,6 +162,14 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
     mock_model = MagicMock()
     mock_model.load.side_effect = Exception("Load fails, forcing fallback")
     mock_model.browse.return_value.env.ref.return_value = None  # Force create
+
+    # Mock the create method to return a simple mock record
+    def mock_create(vals):
+        record = MagicMock()
+        record.id = 1
+        return record
+
+    mock_model.create.side_effect = mock_create
     mock_get_conn.return_value.get_model.return_value = mock_model
 
     # 2. ACT

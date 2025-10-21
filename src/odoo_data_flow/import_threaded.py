@@ -626,7 +626,24 @@ def _safe_convert_field_value(  # noqa: C901
 
     # Handle external ID fields specially (they should remain as strings)
     if field_name.endswith("/id"):
+        # For external ID fields, return empty string if value is empty after stripping
+        if not str_value:
+            return ""
         return str_value
+
+    # Handle string values that are empty after stripping (whitespace-only strings)
+    if not str_value:
+        # Return appropriate empty value based on field type
+        if field_type in ("integer", "float", "positive", "negative"):
+            return 0  # Use 0 for empty numeric fields
+        elif field_type in ("many2one", "many2many", "one2many"):
+            return (
+                False  # Use False for empty relational fields to indicate no relation
+            )
+        elif field_type == "boolean":
+            return False  # Use False for empty boolean fields
+        else:
+            return ""  # Use empty string for other field types
 
     # Handle numeric field conversions with enhanced safety
     if field_type in ("integer", "positive", "negative"):
