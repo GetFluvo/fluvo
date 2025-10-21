@@ -18,9 +18,9 @@ def test_setup_logging_console_only() -> None:
     setup_logging(verbose=True)
 
     # 3. Assertions
-    assert len(log.handlers) == 1, (
-        "There should be exactly one handler for the console."
-    )
+    assert (
+        len(log.handlers) == 1
+    ), "There should be exactly one handler for the console."
     # The console handler should now be a RichHandler
     assert isinstance(log.handlers[0], RichHandler)
 
