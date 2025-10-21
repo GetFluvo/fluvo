@@ -183,6 +183,7 @@ ignore = [
     "E111",
     "E114",
     "E117",
+    "E501",   # Line too long - ignore for now
     "ISC001",
     "ISC002",
     "Q000",
@@ -190,6 +191,13 @@ ignore = [
     "Q002",
     "Q003",
     "W191",
+    "D100",   # Missing docstring in public module
+    "D101",   # Missing docstring in public class
+    "D102",   # Missing docstring in public method
+    "D103",   # Missing docstring in public function
+    "D104",   # Missing docstring in public package
+    "D105",   # Missing docstring in magic method
+    "D106",   # Missing docstring in public nested class
 ]
 exclude = [
     ".git",

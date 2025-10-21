@@ -784,8 +784,9 @@ def _has_xml_id_pattern(df: Any, field_name: str) -> bool:
                         parts = v.split(".", 1)
                         if len(parts) == 2 and all(parts):
                             return True
-    except Exception:
+    except Exception as e:
         # If there's an error checking the pattern, return False as fallback
+        log.debug(f"Error checking XML ID pattern for field {field_name}: {e}")
         pass
     return False
 

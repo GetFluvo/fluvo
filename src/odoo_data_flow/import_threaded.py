@@ -1716,7 +1716,7 @@ def _execute_load_batch(  # noqa: C901
             # cause internal Odoo server errors during load processing
             if load_lines and load_header:
                 validated_load_lines = []
-                for idx, line in enumerate(load_lines):
+                for _idx, line in enumerate(load_lines):
                     validated_line = []
                     for _col_idx, (_header_field, field_value) in enumerate(
                         zip(load_header, line)

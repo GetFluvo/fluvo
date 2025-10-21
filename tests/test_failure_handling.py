@@ -164,7 +164,7 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
     mock_model.browse.return_value.env.ref.return_value = None  # Force create
 
     # Mock the create method to return a simple mock record
-    def mock_create(vals):
+    def mock_create(vals: dict[str, Any]) -> Any:
         record = MagicMock()
         record.id = 1
         return record
