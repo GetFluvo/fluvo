@@ -219,18 +219,14 @@ class RPCThreadExport(RpcThread):
                                 new_record[field] = (
                                     value[1]
                                     if len(value) >= 2
-                                    else str(value[0])
-                                    if value
-                                    else None
+                                    else str(value[0]) if value else None
                                 )
                         else:
                             # For regular many-to-one relationships
                             new_record[field] = (
                                 value[1]
                                 if len(value) >= 2
-                                else str(value[0])
-                                if value
-                                else None
+                                else str(value[0]) if value else None
                             )
                     else:
                         # Value is not a list/tuple, just assign it

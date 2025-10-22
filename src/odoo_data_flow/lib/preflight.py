@@ -79,6 +79,7 @@ def _handle_m2m_field(
                 "relation_field": relation_field,
                 "relation": relation,
             }
+        return True, strategy_details
     else:
         # Log a warning when relation information is incomplete
         log.warning(
@@ -94,8 +95,7 @@ def _handle_m2m_field(
             "relation_field": relation_field,
             "relation": relation,
         }
-
-    return True, strategy_details
+        return True, strategy_details
 
 
 def register_check(func: Callable[..., bool]) -> Callable[..., bool]:
@@ -140,12 +140,20 @@ def self_referencing_check(
     log.info("Running pre-flight check: Detecting self-referencing hierarchy...")
     # We assume 'id' and 'parent_id' as conventional names.
     # This could be made configurable later if needed.
-    result = sort.sort_for_self_referencing(
-        filename,
-        id_column="id",
-        parent_column="parent_id",
-        separator=kwargs.get("separator", ";"),
-    )
+    try:
+        result = sort.sort_for_self_referencing(
+            filename,
+            id_column="id",
+            parent_column="parent_id",
+            separator=kwargs.get("separator", ";"),
+        )
+    except Exception as e:
+        # Handle any errors from sort_for_self_referencing gracefully
+        log.warning(
+            f"Error in sort_for_self_referencing: {e}. This may indicate issues with "
+            f"CSV data or field mapping."
+        )
+        result = None
     if result is False:
         # This means there was an error in sort_for_self_referencing
         # The error would have been displayed by the function itself
@@ -291,7 +299,17 @@ def language_check(
 
     log.info("Running pre-flight check: Verifying required languages...")
 
-    required_languages = _get_required_languages(filename, kwargs.get("separator", ";"))
+    try:
+        required_languages = _get_required_languages(
+            filename, kwargs.get("separator", ";")
+        )
+    except Exception as e:
+        # Handle file read errors gracefully
+        log.warning(
+            f"Could not read languages from source file. Skipping check. Error: {e}"
+        )
+        return True
+
     if required_languages is None or not required_languages:
         return True
 
@@ -362,10 +380,13 @@ def _get_csv_header(filename: str, separator: str) -> Optional[list[str]]:
         separator: The delimiter used in the CSV file.
 
     Returns:
-        A list of strings representing the header, or None on failure.
+        A list of strings representing the header, or None on failure or when no columns.
     """
     try:
         columns = pl.read_csv(filename, separator=separator, n_rows=0).columns
+        # Return None when no columns (empty file)
+        if not columns:
+            return None
         # Explicitly convert to list[str] to satisfy mypy type checking
         return list(columns) if columns is not None else None
     except Exception as e:
