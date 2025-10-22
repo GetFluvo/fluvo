@@ -1,0 +1,1211 @@
+"""Additional tests to improve coverage for the preflight module."""
+
+from collections.abc import Generator
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from odoo_data_flow.enums import PreflightMode
+from odoo_data_flow.lib import preflight
+
+
+class TestPreflightCoverageImprovement:
+    """Tests to improve coverage for the preflight module."""
+
+    def test_preflight_handles_connection_check_with_dict_config(self) -> None:
+        """Test connection_check with dict config."""
+        with patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_dict") as mock_conf_lib:
+            mock_connection = MagicMock()
+            mock_conf_lib.return_value = mock_connection
+            
+            config = {"hostname": "localhost", "database": "test_db"}
+            result = preflight.connection_check(
+                preflight_mode=PreflightMode.NORMAL,
+                config=config,
+                model="res.partner",
+                filename="file.csv",
+                headless=False,
+                import_plan={},
+            )
+            
+            assert result is True
+            mock_conf_lib.assert_called_once_with(config)
+
+    def test_preflight_handles_connection_check_with_file_config(self) -> None:
+        """Test connection_check with file config."""
+        with patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib:
+            mock_connection = MagicMock()
+            mock_conf_lib.return_value = mock_connection
+            
+            config = "dummy.conf"
+            result = preflight.connection_check(
+                preflight_mode=PreflightMode.NORMAL,
+                config=config,
+                model="res.partner",
+                filename="file.csv",
+                headless=False,
+                import_plan={},
+            )
+            
+            assert result is True
+            mock_conf_lib.assert_called_once_with(config_file=config)
+
+    def test_preflight_handles_connection_check_with_exception(self) -> None:
+        """Test connection_check handles exceptions."""
+        with patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+            
+            mock_conf_lib.side_effect = Exception("Connection error")
+            
+            config = "dummy.conf"
+            result = preflight.connection_check(
+                preflight_mode=PreflightMode.NORMAL,
+                config=config,
+                model="res.partner",
+                filename="file.csv",
+                headless=False,
+                import_plan={},
+            )
+            
+            assert result is False
+            mock_conf_lib.assert_called_once_with(config_file=config)
+            mock_show_error_panel.assert_called_once()
+
+    def test_preflight_handles_self_referencing_check_with_no_hierarchy(self) -> None:
+        """Test self_referencing_check when no hierarchy is detected."""
+        with patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.sort.sort_for_self_referencing") as mock_sort:
+            
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "parent_id"]
+            mock_polars_read_csv.return_value = mock_df_header
+            
+            # Mock sort.sort_for_self_referencing to return None (no hierarchy)
+            mock_sort.return_value = None
+            
+            import_plan: dict[str, Any] = {}
+            result = preflight.self_referencing_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+                o2m=False,
+            )
+            
+            assert result is True
+
+    def test_preflight_handles_self_referencing_check_sort_function_error(self) -> None:
+        """Test self_referencing_check when sort function raises an error."""
+        with patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.sort.sort_for_self_referencing") as mock_sort:
+            
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "parent_id"]
+            mock_polars_read_csv.return_value = mock_df_header
+            
+            # Mock sort.sort_for_self_referencing to raise an exception
+            mock_sort.side_effect = Exception("Sort error")
+            
+            import_plan: dict[str, Any] = {}
+            result = preflight.self_referencing_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+                o2m=False,
+            )
+            
+            assert result is True
+
+    def test_preflight_handles_self_referencing_check_o2m_enabled(self) -> None:
+        """Test self_referencing_check when O2M mode is enabled."""
+        with patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.sort.sort_for_self_referencing") as mock_sort:
+            
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "parent_id"]
+            mock_polars_read_csv.return_value = mock_df_header
+            
+            # Mock sort.sort_for_self_referencing to return sorted data
+            mock_sort.return_value = ["1", "2", "3"]
+            
+            import_plan: dict[str, Any] = {}
+            result = preflight.self_referencing_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+                o2m=True,  # Enable O2M mode
+            )
+            
+            assert result is True
+            mock_sort.assert_not_called()  # Should skip sort when O2M is enabled
+
+    def test_preflight_handles_get_odoo_fields_cache_hit(self) -> None:
+        """Test _get_odoo_fields with cache hit."""
+        with patch("odoo_data_flow.lib.preflight.cache.load_fields_get_cache") as mock_cache_load, \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib:
+            
+            # Mock cache to return fields (cache hit)
+            mock_cache_load.return_value = {
+                "id": {"type": "integer"},
+                "name": {"type": "char"},
+            }
+            
+            result = preflight._get_odoo_fields("dummy.conf", "res.partner")
+            
+            # Should return cached fields
+            assert result == {
+                "id": {"type": "integer"},
+                "name": {"type": "char"},
+            }
+            
+            # Should not call Odoo connection
+            mock_conf_lib.assert_not_called()
+
+    def test_preflight_handles_get_odoo_fields_cache_miss(self) -> None:
+        """Test _get_odoo_fields with cache miss."""
+        with patch("odoo_data_flow.lib.preflight.cache.load_fields_get_cache") as mock_cache_load, \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.cache.save_fields_get_cache") as mock_cache_save:
+            
+            # Mock cache to return None (cache miss)
+            mock_cache_load.return_value = None
+            
+            # Mock Odoo connection to return fields
+            mock_connection = MagicMock()
+            mock_model = MagicMock()
+            mock_conf_lib.return_value = mock_connection
+            mock_connection.get_model.return_value = mock_model
+            mock_model.fields_get.return_value = {
+                "id": {"type": "integer"},
+                "name": {"type": "char"},
+            }
+            
+            result = preflight._get_odoo_fields("dummy.conf", "res.partner")
+            
+            # Should return Odoo fields
+            assert result == {
+                "id": {"type": "integer"},
+                "name": {"type": "char"},
+            }
+            
+            # Should save to cache
+            mock_cache_save.assert_called_once_with("dummy.conf", "res.partner", {
+                "id": {"type": "integer"},
+                "name": {"type": "char"},
+            })
+
+    def test_preflight_handles_get_odoo_fields_odoo_error(self) -> None:
+        """Test _get_odoo_fields with Odoo error."""
+        with patch("odoo_data_flow.lib.preflight.cache.load_fields_get_cache") as mock_cache_load, \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.cache.save_fields_get_cache") as mock_cache_save:
+            
+            # Mock cache to return None (cache miss)
+            mock_cache_load.return_value = None
+            
+            # Mock Odoo connection to raise an exception
+            mock_conf_lib.side_effect = Exception("Odoo connection error")
+            
+            result = preflight._get_odoo_fields("dummy.conf", "res.partner")
+            
+            # Should return None when Odoo connection fails
+            assert result is None
+            
+            # Should not save to cache
+            mock_cache_save.assert_not_called()
+
+    def test_preflight_handles_get_csv_header_success(self) -> None:
+        """Test _get_csv_header with successful file read."""
+        with patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv:
+            
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "email"]
+            mock_polars_read_csv.return_value = mock_df_header
+            
+            result = preflight._get_csv_header("file.csv", ";")
+            
+            # Should return column names
+            assert result == ["id", "name", "email"]
+
+    def test_preflight_handles_get_csv_header_file_not_found(self) -> None:
+        """Test _get_csv_header with file not found."""
+        with patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv:
+            
+            mock_polars_read_csv.side_effect = FileNotFoundError("File not found")
+            
+            result = preflight._get_csv_header("nonexistent.csv", ";")
+            
+            # Should return None when file not found
+            assert result is None
+
+    def test_preflight_handles_get_csv_header_empty_file(self) -> None:
+        """Test _get_csv_header with empty file."""
+        with patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv:
+            
+            mock_df_header = MagicMock()
+            mock_df_header.columns = []
+            mock_polars_read_csv.return_value = mock_df_header
+            
+            result = preflight._get_csv_header("empty.csv", ";")
+            
+            # Should return None when file is empty
+            assert result is None
+
+    def test_preflight_handles_validate_header_with_valid_fields(self) -> None:
+        """Test _validate_header with valid fields."""
+        with patch("odoo_data_flow.lib.preflight._get_odoo_fields") as mock_get_fields:
+            
+            # Mock Odoo fields
+            mock_get_fields.return_value = {
+                "id": {"type": "integer"},
+                "name": {"type": "char"},
+                "email": {"type": "char"},
+            }
+            
+            result = preflight._validate_header(
+                ["id", "name", "email"],
+                {"id": {"type": "integer"}, "name": {"type": "char"}, "email": {"type": "char"}},
+                "res.partner"
+            )
+            
+            # Should return True when all fields are valid
+            assert result is True
+
+    def test_preflight_handles_validate_header_with_invalid_fields(self) -> None:
+        """Test _validate_header with invalid fields."""
+        with patch("odoo_data_flow.lib.preflight._get_odoo_fields") as mock_get_fields, \
+             patch("odoo_data_flow.lib.preflight.log") as mock_log:
+            
+            # Mock Odoo fields
+            mock_get_fields.return_value = {
+                "id": {"type": "integer"},
+                "name": {"type": "char"},
+            }
+            
+            result = preflight._validate_header(
+                ["id", "name", "invalid_field"],
+                {"id": {"type": "integer"}, "name": {"type": "char"}},
+                "res.partner"
+            )
+            
+            # Should return False when invalid fields are present
+            assert result is False
+
+    def test_preflight_handles_validate_header_with_external_id_fields(self) -> None:
+        """Test _validate_header with external ID fields."""
+        with patch("odoo_data_flow.lib.preflight._get_odoo_fields") as mock_get_fields:
+            
+            # Mock Odoo fields
+            mock_get_fields.return_value = {
+                "id": {"type": "integer"},
+                "partner_id": {"type": "many2one", "relation": "res.partner"},
+            }
+            
+            result = preflight._validate_header(
+                ["id", "partner_id/id"],
+                {"id": {"type": "integer"}, "partner_id": {"type": "many2one", "relation": "res.partner"}},
+                "res.partner"
+            )
+            
+            # Should return True when external ID fields are valid
+            assert result is True
+
+    def test_preflight_handles_validate_header_with_readonly_fields(self) -> None:
+        """Test _validate_header with readonly fields."""
+        with patch("odoo_data_flow.lib.preflight._get_odoo_fields") as mock_get_fields, \
+             patch("odoo_data_flow.lib.preflight.log") as mock_log:
+            
+            # Mock Odoo fields with readonly field
+            mock_get_fields.return_value = {
+                "id": {"type": "integer"},
+                "name": {"type": "char", "readonly": True, "store": True},
+            }
+            
+            result = preflight._validate_header(
+                ["id", "name"],
+                {"id": {"type": "integer"}, "name": {"type": "char", "readonly": True, "store": True}},
+                "res.partner"
+            )
+            
+            # Should return True when readonly fields are valid
+            assert result is True
+
+    def test_preflight_handles_validate_header_with_multiple_readonly_fields(self) -> None:
+        """Test _validate_header with multiple readonly fields."""
+        with patch("odoo_data_flow.lib.preflight._get_odoo_fields") as mock_get_fields, \
+             patch("odoo_data_flow.lib.preflight.log") as mock_log:
+            
+            # Mock Odoo fields with multiple readonly fields
+            mock_get_fields.return_value = {
+                "id": {"type": "integer"},
+                "name": {"type": "char", "readonly": True, "store": True},
+                "email": {"type": "char", "readonly": True, "store": True},
+            }
+            
+            result = preflight._validate_header(
+                ["id", "name", "email"],
+                {"id": {"type": "integer"}, "name": {"type": "char", "readonly": True, "store": True}, "email": {"type": "char", "readonly": True, "store": True}},
+                "res.partner"
+            )
+            
+            # Should return True when multiple readonly fields are valid
+            assert result is True
+
+    def test_preflight_skips_language_check_when_no_required_languages(self) -> None:
+        """Test that preflight skips language check when no required languages."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=None), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask") as mock_confirm_ask, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            assert result is True
+            mock_get_req_langs.assert_called_once_with("file.csv", ";")
+
+    def test_preflight_skips_language_check_when_empty_required_languages(self) -> None:
+            """Test that preflight skips language check when empty required languages."""
+        with patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask") as mock_confirm_ask, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+        mock_df_header = MagicMock()
+        mock_df_header.columns = ["id", "name", "lang"]
+        (
+            mock_df_header.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list
+        ) = MagicMock(return_value=["fr_FR"])
+        mock_polars_read_csv.return_value = mock_df_header
+
+        # Set up the mock chain properly
+        mock_connection = MagicMock()
+        mock_model = MagicMock()
+        mock_conf_lib.return_value = mock_connection
+        mock_connection.get_model.return_value = mock_model
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+            "lang": {"type": "char"},
+        }
+
+        import_plan: dict[str, Any] = {}
+        result = preflight.language_check(
+            preflight_mode=PreflightMode.NORMAL,
+            model="res.partner",
+            filename="file.csv",
+            config="",
+            headless=False,
+            import_plan=import_plan,
+        )
+
+            # Should return False when _get_installed_languages fails
+            assert result is False
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "lang"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            assert result is True
+            mock_get_req_langs.assert_called_once_with("file.csv", ";")
+
+    def test_preflight_handles_get_installed_languages_failure(self) -> None:
+        """Test that preflight handles when _get_installed_languages fails."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=["fr_FR"]), \
+             patch("odoo_data_flow.lib.preflight._get_installed_languages", return_value=None), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask") as mock_confirm_ask, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "lang"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            # Should return False when _get_installed_languages fails
+            assert result is False
+
+    def test_preflight_handles_column_not_found_error_in_get_required_languages(self) -> None:
+        """Test that _get_required_languages handles ColumnNotFoundError."""
+        with patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv:
+            
+            # Setup polars read_csv to raise ColumnNotFoundError
+            mock_polars_read_csv.side_effect = ColumnNotFoundError
+            
+            result = preflight._get_required_languages("dummy.csv", ";")
+            
+            # Should return None when ColumnNotFoundError is raised
+            assert result is None
+
+    def test_preflight_handles_general_exception_in_get_required_languages(self) -> None:
+        """Test that _get_required_languages handles general exceptions."""
+        with patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.log") as mock_log:
+            
+            # Setup polars read_csv to raise a general exception
+            mock_polars_read_csv.side_effect = Exception("General error")
+            
+            result = preflight._get_required_languages("dummy.csv", ";")
+            
+            # Should return None when general exception is raised
+            assert result is None
+            mock_log.warning.assert_called_once()
+
+    def test_preflight_language_check_user_cancels_installation(self) -> None:
+        """Test that language check fails when user cancels installation."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=["fr_FR"]), \
+             patch("odoo_data_flow.lib.preflight._get_installed_languages", return_value={"en_US"}), \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask", return_value=False), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "lang"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            # Should return False when user cancels installation
+            assert result is False
+
+    def test_preflight_language_check_skips_if_lang_column_missing(self) -> None:
+        """Test that language check is skipped if lang column is missing."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=None), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask") as mock_confirm_ask, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name"]  # No lang column
+            mock_polars_read_csv.return_value = mock_df_header
+
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            # Should return True when lang column is missing (skipped check)
+            assert result is True
+
+    def test_preflight_language_check_handles_file_read_error(self) -> None:
+        """Test that language check handles file read errors gracefully."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", side_effect=Exception("File read error")), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask") as mock_confirm_ask, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "lang"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            # Should return True when file read error occurs (graceful degradation)
+            assert result is True
+
+    def test_preflight_language_check_no_required_languages(self) -> None:
+        """Test language_check when no required languages."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=None), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask") as mock_confirm_ask, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "lang"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            # Should return True when no required languages
+            assert result is True
+
+    def test_preflight_language_check_handles_get_required_languages_returning_none(self) -> None:
+        """Test language_check when _get_required_languages returns None."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=None), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask") as mock_confirm_ask, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "lang"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            # Should return True when _get_required_languages returns None
+            assert result is True
+
+    def test_preflight_language_check_handles_get_required_languages_returning_empty_list(self) -> None:
+        """Test language_check when _get_required_languages returns empty list."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=[]), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask") as mock_confirm_ask, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "lang"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            # Should return True when _get_required_languages returns empty list
+            assert result is True
+
+    def test_preflight_all_languages_installed(self) -> None:
+        """Test language_check when all languages are installed."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=["fr_FR"]), \
+             patch("odoo_data_flow.lib.preflight._get_installed_languages", return_value={"fr_FR"}), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask") as mock_confirm_ask, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "lang"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            # Should return True when all languages are installed
+            assert result is True
+
+    def test_preflight_language_check_dict_config_installation_not_supported(self) -> None:
+        """Test language_check when dict config is not supported for installation."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=["fr_FR"]), \
+             patch("odoo_data_flow.lib.preflight._get_installed_languages", return_value={"en_US"}), \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask", return_value=True), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "lang"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            # Use dict config (not supported for installation)
+            config = {"hostname": "localhost", "database": "test_db"}
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config=config,
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            # Should fail when installation is attempted with dict config
+            assert result is False
+
+    def test_preflight_language_check_handles_get_installed_languages_failure(self) -> None:
+        """Test language_check when _get_installed_languages fails."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=["fr_FR"]), \
+             patch("odoo_data_flow.lib.preflight._get_installed_languages", return_value=None), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask") as mock_confirm_ask, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "lang"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            # Should return False when _get_installed_languages fails
+            assert result is False
+
+    def test_preflight_missing_languages_user_confirms_install_fails(self) -> None:
+        """Tests missing languages where user confirms but install fails."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=["fr_FR"]), \
+             patch("odoo_data_flow.lib.preflight._get_installed_languages", return_value={"en_US"}), \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask", return_value=True), \
+             patch("odoo_data_flow.lib.preflight.language_installer.run_language_installation", return_value=False), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "lang"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="dummy.conf",
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            # Should fail when installation fails
+            assert result is False
+
+    def test_preflight_missing_languages_user_cancels(self) -> None:
+        """Tests missing languages where user cancels installation."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=["fr_FR"]), \
+             patch("odoo_data_flow.lib.preflight._get_installed_languages", return_value={"en_US"}), \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask", return_value=False), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "lang"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            # Should fail when user cancels installation
+            assert result is False
+
+    def test_preflight_missing_languages_headless_mode(self) -> None:
+        """Tests that languages are auto-installed in headless mode."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=["fr_FR"]), \
+             patch("odoo_data_flow.lib.preflight._get_installed_languages", return_value={"en_US"}), \
+             patch("odoo_data_flow.lib.preflight.language_installer.run_language_installation", return_value=True), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "lang"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="dummy.conf",
+                headless=True,
+                import_plan=import_plan,
+            )
+
+            # Should pass when languages are auto-installed in headless mode
+            assert result is True
+
+    def test_preflight_language_check_fail_mode_skips_entire_check(self) -> None:
+        """Tests that language check is skipped in FAIL_MODE."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=["fr_FR"]), \
+             patch("odoo_data_flow.lib.preflight._get_installed_languages", return_value={"en_US"}), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask") as mock_confirm_ask, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "lang"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.FAIL_MODE,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            # Should skip the entire check in FAIL_MODE
+            assert result is True
+
+    def test_preflight_language_check_dict_config_installation_not_supported_v2(self) -> None:
+        """Tests that language installation fails gracefully with dict config."""
+        with patch("odoo_data_flow.lib.preflight._get_required_languages", return_value=["fr_FR"]), \
+             patch("odoo_data_flow.lib.preflight._get_installed_languages", return_value={"en_US"}), \
+             patch("odoo_data_flow.lib.preflight.Confirm.ask", return_value=True), \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_show_error_panel:
+
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "lang"]
+            mock_polars_read_csv.return_value = mock_df_header
+
+            # Use dict config (not supported for installation)
+            config = {"hostname": "localhost", "database": "test_db"}
+            import_plan: dict[str, Any] = {}
+            result = preflight.language_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config=config,
+                headless=False,
+                import_plan=import_plan,
+            )
+
+            # Should fail when installation is attempted with dict config
+            assert result is False
+
+    def test_preflight_handles_m2m_field_small_count_branch(self) -> None:
+        """Test _handle_m2m_field with small relation count (< 500) branch."""
+        # Setup mock DataFrame with small relation count
+        mock_df = MagicMock()
+        mock_lazy_frame = MagicMock()
+        
+        # Mock the lazy frame chain for small count calculation
+        mock_df.lazy.return_value = mock_lazy_frame
+        mock_lazy_frame.select.return_value = mock_lazy_frame
+        mock_lazy_frame.sum.return_value = mock_lazy_frame
+        mock_lazy_frame.collect.return_value = MagicMock(item=MagicMock(return_value=100))  # Small count
+        
+        field_info = {
+            "relation_table": "res_groups",
+            "relation_field": "group_id",
+            "relation": "res.groups"
+        }
+        
+        # Call the function
+        result = preflight._handle_m2m_field(
+            field_name="group_ids",
+            clean_field_name="group_ids",
+            field_info=field_info,
+            df=mock_df
+        )
+        
+        # Should return (True, strategy_details) with write_tuple strategy for small counts
+        assert result[0] is True
+        assert result[1]["strategy"] == "write_tuple"
+        assert result[1]["relation_table"] == "res_groups"
+        assert result[1]["relation_field"] == "group_id"
+
+    def test_preflight_handles_m2m_field_missing_relation_info_branch(self) -> None:
+        """Test _handle_m2m_field with missing relation information branch."""
+        # Setup mock DataFrame
+        mock_df = MagicMock()
+        mock_lazy_frame = MagicMock()
+        
+        # Mock the lazy frame chain
+        mock_df.lazy.return_value = mock_lazy_frame
+        mock_lazy_frame.select.return_value = mock_lazy_frame
+        mock_lazy_frame.sum.return_value = mock_lazy_frame
+        mock_lazy_frame.collect.return_value = MagicMock(item=MagicMock(return_value=1000))  # Large count >= 500
+        
+        # Field info missing required relation information
+        field_info = {
+            "relation_table": None,  # Missing required info
+            "relation_field": "group_id",
+            "relation": "res.groups"
+        }
+        
+        # Mock logger to capture warnings
+        with patch("odoo_data_flow.lib.preflight.log") as mock_log:
+            # Call the function
+            result = preflight._handle_m2m_field(
+                field_name="group_ids",
+                clean_field_name="group_ids", 
+                field_info=field_info,
+                df=mock_df
+            )
+            
+            # Should return (True, strategy_details) with write_tuple strategy even with incomplete relation info
+            assert result[0] is True
+            assert result[1]["strategy"] == "write_tuple"
+            assert result[1]["relation_table"] is None
+            assert result[1]["relation_field"] == "group_id"
+
+    def test_preflight_handles_self_referencing_check_skip_branch(self) -> None:
+        """Test self_referencing_check skip branch for O2M mode."""
+        # Setup mock DataFrame
+        mock_df = MagicMock()
+        mock_lazy_frame = MagicMock()
+        
+        # Mock the lazy frame chain
+        mock_df.lazy.return_value = mock_lazy_frame
+        mock_lazy_frame.select.return_value = mock_lazy_frame
+        mock_lazy_frame.sum.return_value = mock_lazy_frame
+        mock_lazy_frame.collect.return_value = MagicMock(item=MagicMock(return_value=1000))  # Large count >= 500
+        
+        # Field info missing required relation information
+        field_info = {
+            "relation_table": None,  # Missing required info
+            "relation_field": "group_id",
+            "relation": "res.groups"
+        }
+        
+        # Mock logger to capture warnings
+        with patch("odoo_data_flow.lib.preflight.log") as mock_log:
+            # Call the function
+            result = preflight._handle_m2m_field(
+                field_name="group_ids",
+                clean_field_name="group_ids", 
+                field_info=field_info,
+                df=mock_df
+            )
+            
+            # Should return (True, strategy_details) with write_tuple strategy even with incomplete relation info
+            assert result[0] is True
+            assert result[1]["strategy"] == "write_tuple"
+            assert result[1]["relation_table"] is None
+            assert result[1]["relation_field"] == "group_id"
+
+    def test_preflight_handles_self_referencing_check_sort_function_error_branch(self) -> None:
+        """Test self_referencing_check sort function error branch."""
+        # Setup mock DataFrame
+        with patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv, \
+             patch("odoo_data_flow.lib.preflight.sort.sort_for_self_referencing") as mock_sort:
+            
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "parent_id"]
+            mock_polars_read_csv.return_value = mock_df_header
+            
+            # Mock sort.sort_for_self_referencing to raise an exception
+            mock_sort.side_effect = Exception("Sort error")
+            
+            import_plan: dict[str, Any] = {}
+            result = preflight.self_referencing_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="res.partner",
+                filename="file.csv",
+                config="",
+                headless=False,
+                import_plan=import_plan,
+                o2m=False,
+            )
+            
+            # Should return True when sort function raises an error (graceful degradation)
+            assert result is True
+
+    def test_preflight_handles_get_odoo_fields_cache_hit_branch(self) -> None:
+        """Test _get_odoo_fields cache hit branch."""
+        # Mock cache to return fields
+        with patch("odoo_data_flow.lib.preflight.cache.load_fields_get_cache") as mock_cache_load, \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib:
+            
+            # Mock cache to return fields (cache hit)
+            mock_cache_load.return_value = {
+                "id": {"type": "integer"},
+                "name": {"type": "char"},
+            }
+            
+            result = preflight._get_odoo_fields("dummy.conf", "res.partner")
+            
+            # Should return cached fields
+            assert result == {
+                "id": {"type": "integer"},
+                "name": {"type": "char"},
+            }
+            
+            # Should not call Odoo connection
+            mock_conf_lib.assert_not_called()
+
+    def test_preflight_handles_get_odoo_fields_cache_miss_branch(self) -> None:
+        """Test _get_odoo_fields cache miss branch."""
+        # Mock cache to return None (cache miss)
+        with patch("odoo_data_flow.lib.preflight.cache.load_fields_get_cache") as mock_cache_load, \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.cache.save_fields_get_cache") as mock_cache_save:
+            
+            # Mock cache to return None (cache miss)
+            mock_cache_load.return_value = None
+            
+            # Mock Odoo connection to return fields
+            mock_connection = MagicMock()
+            mock_model = MagicMock()
+            mock_conf_lib.return_value = mock_connection
+            mock_connection.get_model.return_value = mock_model
+            mock_model.fields_get.return_value = {
+                "id": {"type": "integer"},
+                "name": {"type": "char"},
+            }
+            
+            result = preflight._get_odoo_fields("dummy.conf", "res.partner")
+            
+            # Should return Odoo fields
+            assert result == {
+                "id": {"type": "integer"},
+                "name": {"type": "char"},
+            }
+            
+            # Should save to cache
+            mock_cache_save.assert_called_once_with("dummy.conf", "res.partner", {
+                "id": {"type": "integer"},
+                "name": {"type": "char"},
+            })
+
+    def test_preflight_handles_get_odoo_fields_odoo_error_branch(self) -> None:
+        """Test _get_odoo_fields Odoo error branch."""
+        # Mock cache to return None (cache miss)
+        with patch("odoo_data_flow.lib.preflight.cache.load_fields_get_cache") as mock_cache_load, \
+             patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config") as mock_conf_lib, \
+             patch("odoo_data_flow.lib.preflight.cache.save_fields_get_cache") as mock_cache_save:
+            
+            # Mock cache to return None (cache miss)
+            mock_cache_load.return_value = None
+            
+            # Mock Odoo connection to raise an exception
+            mock_conf_lib.side_effect = Exception("Odoo connection error")
+            
+            result = preflight._get_odoo_fields("dummy.conf", "res.partner")
+            
+            # Should return None when Odoo connection fails
+            assert result is None
+            
+            # Should not save to cache
+            mock_cache_save.assert_not_called()
+
+    def test_preflight_handles_get_csv_header_success_branch(self) -> None:
+        """Test _get_csv_header success branch."""
+        # Mock pl.read_csv to return DataFrame
+        with patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv:
+            
+            mock_df_header = MagicMock()
+            mock_df_header.columns = ["id", "name", "email"]
+            mock_polars_read_csv.return_value = mock_df_header
+            
+            result = preflight._get_csv_header("file.csv", ";")
+            
+            # Should return column names
+            assert result == ["id", "name", "email"]
+
+    def test_preflight_handles_get_csv_header_file_not_found_branch(self) -> None:
+        """Test _get_csv_header file not found branch."""
+        # Mock pl.read_csv to raise FileNotFoundError
+        with patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv:
+            
+            mock_polars_read_csv.side_effect = FileNotFoundError("File not found")
+            
+            result = preflight._get_csv_header("nonexistent.csv", ";")
+            
+            # Should return None when file not found
+            assert result is None
+
+    def test_preflight_handles_get_csv_header_empty_file_branch(self) -> None:
+        """Test _get_csv_header empty file branch."""
+        # Mock pl.read_csv to return DataFrame with no columns
+        with patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_polars_read_csv:
+            
+            mock_df_header = MagicMock()
+            mock_df_header.columns = []
+            mock_polars_read_csv.return_value = mock_df_header
+            
+            result = preflight._get_csv_header("empty.csv", ";")
+            
+            # Should return None when file is empty
+            assert result is None
+
+    def test_preflight_handles_validate_header_with_valid_fields_branch(self) -> None:
+        """Test _validate_header with valid fields branch."""
+        # Mock _get_odoo_fields to return model fields
+        with patch("odoo_data_flow.lib.preflight._get_odoo_fields") as mock_get_fields:
+            
+            # Mock Odoo fields
+            mock_get_fields.return_value = {
+                "id": {"type": "integer"},
+                "name": {"type": "char"},
+                "email": {"type": "char"},
+            }
+            
+            result = preflight._validate_header(
+                ["id", "name", "email"],
+                {"id": {"type": "integer"}, "name": {"type": "char"}, "email": {"type": "char"}},
+                "res.partner"
+            )
+            
+            # Should return True when all fields are valid
+            assert result is True
+
+    def test_preflight_handles_validate_header_with_invalid_fields_branch(self) -> None:
+        """Test _validate_header with invalid fields branch."""
+        # Mock _get_odoo_fields to return model fields
+        with patch("odoo_data_flow.lib.preflight._get_odoo_fields") as mock_get_fields, \
+             patch("odoo_data_flow.lib.preflight.log") as mock_log:
+            
+            # Mock Odoo fields
+            mock_get_fields.return_value = {
+                "id": {"type": "integer"},
+                "name": {"type": "char"},
+            }
+            
+            result = preflight._validate_header(
+                ["id", "name", "invalid_field"],
+                {"id": {"type": "integer"}, "name": {"type": "char"}},
+                "res.partner"
+            )
+            
+            # Should return False when invalid fields are present
+            assert result is False
+
+    def test_preflight_handles_validate_header_with_external_id_fields_branch(self) -> None:
+        """Test _validate_header with external ID fields branch."""
+        # Mock _get_odoo_fields to return model fields
+        with patch("odoo_data_flow.lib.preflight._get_odoo_fields") as mock_get_fields:
+            
+            # Mock Odoo fields
+            mock_get_fields.return_value = {
+                "id": {"type": "integer"},
+                "partner_id": {"type": "many2one", "relation": "res.partner"},
+            }
+            
+            result = preflight._validate_header(
+                ["id", "partner_id/id"],
+                {"id": {"type": "integer"}, "partner_id": {"type": "many2one", "relation": "res.partner"}},
+                "res.partner"
+            )
+            
+            # Should return True when external ID fields are valid
+            assert result is True
+
+    def test_preflight_handles_validate_header_with_readonly_fields_branch(self) -> None:
+        """Test _validate_header with readonly fields branch."""
+        # Mock _get_odoo_fields to return model fields
+        with patch("odoo_data_flow.lib.preflight._get_odoo_fields") as mock_get_fields, \
+             patch("odoo_data_flow.lib.preflight.log") as mock_log:
+            
+            # Mock Odoo fields with readonly field
+            mock_get_fields.return_value = {
+                "id": {"type": "integer"},
+                "name": {"type": "char", "readonly": True, "store": True},
+            }
+            
+            result = preflight._validate_header(
+                ["id", "name"],
+                {"id": {"type": "integer"}, "name": {"type": "char", "readonly": True, "store": True}},
+                "res.partner"
+            )
+            
+            # Should return True when readonly fields are valid
+            assert result is True
+
+    def test_preflight_handles_validate_header_with_multiple_readonly_fields_branch(self) -> None:
+        """Test _validate_header with multiple readonly fields branch."""
+        # Mock _get_odoo_fields to return model fields
+        with patch("odoo_data_flow.lib.preflight._get_odoo_fields") as mock_get_fields, \
+             patch("odoo_data_flow.lib.preflight.log") as mock_log:
+            
+            # Mock Odoo fields with multiple readonly fields
+            mock_get_fields.return_value = {
+                "id": {"type": "integer"},
+                "name": {"type": "char", "readonly": True, "store": True},
+                "email": {"type": "char", "readonly": True, "store": True},
+            }
+            
+            result = preflight._validate_header(
+                ["id", "name", "email"],
+                {"id": {"type": "integer"}, "name": {"type": "char", "readonly": True, "store": True}, "email": {"type": "char", "readonly": True, "store": True}},
+                "res.partner"
+            )
+            
+            # Should return True when multiple readonly fields are valid
+            assert result is True
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
