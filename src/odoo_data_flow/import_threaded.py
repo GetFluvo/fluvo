@@ -230,6 +230,58 @@ def _sanitize_error_message(error_msg: Union[str, None]) -> str:
     return error_msg
 
 
+def _is_self_referencing_field(model: Any, field_name: str) -> bool:
+    """Check if a field is self-referencing (references the same model).
+
+    This function determines whether a field like 'parent_id' references the same
+    model as the one it belongs to. For example, in res.partner, 'parent_id'
+    references res.partner (self-referencing), but in product.supplierinfo,
+    'partner_id' references res.partner (not self-referencing).
+
+    Args:
+        model: The Odoo model object
+        field_name: The name of the field to check
+
+    Returns:
+        True if the field references the same model, False otherwise
+    """
+    try:
+        # Get model fields information using existing safe function
+        model_fields = _get_model_fields_safe(model)
+        if not model_fields:
+            # If we can't determine field info, assume it's not self-referencing to be safe
+            return False
+
+        # Check if the field exists in the model fields
+        if field_name not in model_fields:
+            return False
+
+        field_info = model_fields[field_name]
+        field_type = field_info.get("type")
+
+        # Only check relational fields (many2one, many2many, one2many)
+        if field_type not in ("many2one", "many2many", "one2many"):
+            return False
+
+        # Get the relation model name
+        relation_model: Optional[str] = field_info.get("relation")
+        if not relation_model:
+            # If no relation info, it's not self-referencing
+            return False
+
+        # Get the current model name
+        current_model: Optional[str] = getattr(model, "_name", None)
+        if not current_model:
+            return False
+
+        # Check if the relation model is the same as the current model
+        return bool(relation_model == current_model)
+
+    except Exception:
+        # On any error, assume it's not self-referencing to avoid deferring unnecessarily
+        return False
+
+
 def _format_odoo_error(error: Any) -> str:
     """Tries to extract the meaningful message from an Odoo RPC error.
 
@@ -2445,8 +2497,12 @@ def _orchestrate_pass_1(
         ignore_list = [ignore]
     else:
         ignore_list = ignore
-    pass_1_ignore_list = deferred_fields + ignore_list
+    pass_1_ignore_list = [
+        _f for _f in deferred_fields if _is_self_referencing_field(model_obj, _f)
+    ] + ignore_list
 
+    # Validate that the unique ID field exists in the header
+    # This is critical for the import process to function correctly
     try:
         pass_1_uid_index = pass_1_header.index(unique_id_field)
     except ValueError:
