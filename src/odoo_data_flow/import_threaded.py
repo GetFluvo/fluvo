@@ -50,14 +50,6 @@ COMMON_PLACEHOLDER_VALUES = frozenset(
     ]
 )
 
-# Known problematic external ID patterns that cause server errors
-PROBLEMATIC_EXTERNAL_ID_PATTERNS = frozenset(
-    [
-        "product_template.63657",  # Known problematic template that causes server errors
-        "63657",  # Specific ID that causes server errors
-    ]
-)
-
 # Common patterns that indicate external ID errors
 EXTERNAL_ID_ERROR_PATTERNS = frozenset(
     [
@@ -158,7 +150,7 @@ def _is_external_id_error(error: Exception, line_content: Optional[str] = None) 
     # If we have line content, also check for external ID patterns there
     if line_content:
         line_str = line_content.lower()
-        return any(pattern in line_str for pattern in PROBLEMATIC_EXTERNAL_ID_PATTERNS)
+        return any(pattern in line_str for pattern in EXTERNAL_ID_ERROR_PATTERNS)
 
     return False
 
@@ -1175,17 +1167,7 @@ def _create_batch_individually(  # noqa: C901
 
             # 1. EARLY PROBLEM DETECTION: Check if this record contains patterns that are likely to cause server errors
             # This includes specific problematic patterns that have been identified in the past
-            line_content = " ".join(str(x) for x in line if x is not None).lower()
-
-            # Check for any of the known problematic patterns in the line content
-            has_problematic_pattern = any(
-                pattern in line_content for pattern in PROBLEMATIC_EXTERNAL_ID_PATTERNS
-            )
-            if has_problematic_pattern:
-                error_message = f"Skipping record {source_id} due to known problematic patterns that cause server errors"
-                sanitized_error = _sanitize_error_message(error_message)
-                failed_lines.append([*line, sanitized_error])
-                continue
+            " ".join(str(x) for x in line if x is not None).lower()
 
             # 1. SEARCH BEFORE CREATE
             existing_record = model.browse().env.ref(
@@ -1201,34 +1183,6 @@ def _create_batch_individually(  # noqa: C901
             vals = dict(zip(batch_header, line))
 
             # Check if this record contains external ID references that are known to be problematic
-            has_known_problems = False
-            problematic_external_ids = []
-
-            for field_name, field_value in vals.items():
-                if field_name.endswith("/id"):
-                    field_str = str(field_value).upper()
-                    # Check for known problematic patterns from our configurable list
-                    if any(
-                        pattern in field_str
-                        for pattern in PROBLEMATIC_EXTERNAL_ID_PATTERNS
-                    ):
-                        has_known_problems = True
-                        problematic_external_ids.append(field_value)
-                        break
-                    # Also check for other patterns that might be problematic based on naming conventions
-                    elif field_value and str(field_value).upper().startswith(
-                        "PRODUCT_TEMPLATE."
-                    ):
-                        # If it's a product template reference, it might be problematic if it doesn't exist
-                        problematic_external_ids.append(field_value)
-
-            if has_known_problems:
-                # Skip this record entirely since it's known to cause server-side errors
-                error_message = f"Skipping record {source_id} due to known problematic external ID references: {problematic_external_ids}"
-                sanitized_error = _sanitize_error_message(error_message)
-                failed_lines.append([*line, sanitized_error])
-                continue
-
             # Apply safe field value conversion to prevent type errors
             # Only skip self-referencing external ID fields that would cause import dependencies
             # Non-self-referencing fields (like partner_id, product_id) should be processed normally
@@ -1242,15 +1196,14 @@ def _create_batch_individually(  # noqa: C901
                     ]  # Remove '/id' suffix to get base field name like 'partner_id'
 
                     # Check if this is a self-referencing field by examining the external ID value
-                    field_str = str(field_value).lower() if field_value else ""
+                    str(field_value).lower() if field_value else ""
 
                     # For non-self-referencing external ID fields, process them normally
-                    # Only skip if they contain known problematic values
-                    if (
-                        field_value
-                        and str(field_value).upper()
-                        not in PROBLEMATIC_EXTERNAL_ID_PATTERNS
-                    ):
+                    if field_value and str(field_value).upper() not in [
+                        "",
+                        "False",
+                        "None",
+                    ]:
                         # Process non-self-referencing external ID fields normally
                         clean_field_name = (
                             base_field_name  # Use the base field name (without /id)
@@ -1300,21 +1253,9 @@ def _create_batch_individually(  # noqa: C901
                         field_name[:-3] if field_name.endswith("/id") else field_name
                     )
                     if field_value and field_value not in ["", "False", "None"]:
-                        field_str = str(field_value).upper()
-                        # Check if this contains known problematic external ID that will cause server errors
-                        if any(
-                            pattern in field_str
-                            for pattern in PROBLEMATIC_EXTERNAL_ID_PATTERNS
-                        ):
-                            skip_record = True
-                            error_message = f"Record {source_id} contains known problematic external ID '{field_value}' that will cause server error"
-                            sanitized_error = _sanitize_error_message(error_message)
-                            failed_lines.append([*line, sanitized_error])
-                            break
-                        else:
-                            # For valid external ID fields, add them to the values for create
-                            # Use the base field name (without /id) which maps to the database field
-                            vals_for_create[base_field_name] = field_value
+                        # For valid external ID fields, add them to the values for create
+                        # Use the base field name (without /id) which maps to the database field
+                        vals_for_create[base_field_name] = field_value
                     else:
                         # For empty/invalid external ID values, add them as the base field name
                         vals_for_create[base_field_name] = field_value
@@ -1414,27 +1355,16 @@ def _create_batch_individually(  # noqa: C901
             )
 
             # More comprehensive check for external ID patterns in the data
-            # Check for general external ID patterns plus our specific problematic ones
-            all_patterns = list(EXTERNAL_ID_ERROR_PATTERNS) + list(
-                PROBLEMATIC_EXTERNAL_ID_PATTERNS
-            )
+            # Check for general external ID patterns
             external_id_in_line = any(
-                pattern in line_str_full for pattern in all_patterns
+                pattern in line_str_full for pattern in EXTERNAL_ID_ERROR_PATTERNS
             )
 
             # Check for field names that are external ID fields
-            has_external_id_fields = any(
-                field_name.endswith("/id") for field_name in batch_header
-            )
+            any(field_name.endswith("/id") for field_name in batch_header)
 
             # Check if this is exactly the problematic scenario we know about
-            known_problematic_scenario = (
-                any(
-                    pattern in line_str_full
-                    for pattern in PROBLEMATIC_EXTERNAL_ID_PATTERNS
-                )
-                and has_external_id_fields
-            )
+            known_problematic_scenario = False
 
             is_external_id_related = (
                 external_id_in_error
@@ -2208,10 +2138,8 @@ def _execute_write_batch(
                 base_key = key[
                     :-3
                 ]  # Remove '/id' suffix to get base field name like 'partner_id'
-                if value and str(value).upper() not in PROBLEMATIC_EXTERNAL_ID_PATTERNS:
-                    # Add valid external ID fields to sanitized values using base field name
-                    sanitized_vals[base_key] = value
-                # Skip known problematic external ID values, but allow valid ones
+                # Add all external ID fields to sanitized values using base field name
+                sanitized_vals[base_key] = value
             else:
                 # For other fields, ensure valid values
                 if value is None:

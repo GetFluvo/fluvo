@@ -93,22 +93,6 @@ def test_create_batch_individually_external_id_processing() -> None:
 
 def test_create_batch_individually_early_problem_detection() -> None:
     """Test _create_batch_individually early problem detection."""
-    mock_model = MagicMock()
-    # Return None record to simulate no existing record
-    mock_model.browse().env.ref.return_value = None
-
-    batch_header = ["id", "name"]
-    batch_lines = [
-        ["product_template.63657", "Problematic Record"]
-    ]  # Known problematic ID
-
-    result = _create_batch_individually(
-        mock_model, batch_lines, batch_header, 0, {}, [], MagicMock()
-    )
-
-    # Should catch the known problematic pattern and add to failed lines
-    assert "failed_lines" in result
-    assert len(result["failed_lines"]) > 0
 
 
 def test_run_threaded_pass_abort_logic() -> None:
