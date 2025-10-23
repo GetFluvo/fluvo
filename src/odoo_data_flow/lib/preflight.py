@@ -380,7 +380,8 @@ def _get_csv_header(filename: str, separator: str) -> Optional[list[str]]:
         separator: The delimiter used in the CSV file.
 
     Returns:
-        A list of strings representing the header, or None on failure or when no columns.
+        A list of strings representing the header, or None on failure or
+        when no columns.
     """
     try:
         columns = pl.read_csv(filename, separator=separator, n_rows=0).columns

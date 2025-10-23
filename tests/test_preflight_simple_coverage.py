@@ -1,5 +1,6 @@
 """Simple tests to improve coverage for the preflight module."""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -57,7 +58,7 @@ class TestPreflightSimpleCoverage:
             # Make the sort function return a file path (truthy result)
             mock_sort.return_value = "sorted_file.csv"
 
-            import_plan = {}
+            import_plan: dict[str, Any] = {}
             result = preflight.self_referencing_check(
                 preflight_mode=PreflightMode.NORMAL,
                 filename="file.csv",

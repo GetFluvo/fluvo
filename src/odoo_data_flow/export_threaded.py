@@ -219,14 +219,18 @@ class RPCThreadExport(RpcThread):
                                 new_record[field] = (
                                     value[1]
                                     if len(value) >= 2
-                                    else str(value[0]) if value else None
+                                    else str(value[0])
+                                    if value
+                                    else None
                                 )
                         else:
                             # For regular many-to-one relationships
                             new_record[field] = (
                                 value[1]
                                 if len(value) >= 2
-                                else str(value[0]) if value else None
+                                else str(value[0])
+                                if value
+                                else None
                             )
                     else:
                         # Value is not a list/tuple, just assign it
@@ -530,11 +534,12 @@ def _initialize_export(
         try:
             field_metadata = model_obj.fields_get(fields_for_metadata)
         except json.JSONDecodeError as e:
-            log.error(
-                f"Failed to decode JSON response from Odoo server during fields_get() call. "
-                f"This usually indicates an authentication failure, server error, or the server "
+            log_msg = (
+                "Failed to decode JSON response from Odoo server during fields_get() call. "
+                "This usually indicates an authentication failure, server error, or the server "
                 f"returned an HTML error page instead of JSON. Error: {e}"
             )
+            log.error(log_msg)
             return None, None, None
         except Exception as e:
             log.error(

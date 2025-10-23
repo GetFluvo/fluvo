@@ -1,4 +1,8 @@
-"initialize Library."
+"""Library initialization module.
+
+This module initializes the library by importing and exposing
+submodules for use throughout the application.
+"""
 
 from . import (
     checker,

@@ -79,8 +79,3 @@ def run_invoice_v9_workflow(
         wf.rename(rename_field)
 
     log.info("--- Invoice Workflow Finished ---")
-
-
-# We can add runners for other workflows here in the future
-# def run_sale_order_workflow(...):
-#     pass
