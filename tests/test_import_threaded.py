@@ -166,7 +166,9 @@ def test_handle_tuple_index_error() -> None:
     # Mock progress object
     mock_progress = MagicMock()
 
-    _handle_tuple_index_error(mock_progress, "test_id", ["col1", "col2"], failed_lines)
+    _handle_tuple_index_error(
+        mock_progress, "test_id", ["col1", "col2"], failed_lines, 3
+    )  # header_length=3
 
     # Should add the failed line to the list
     assert len(failed_lines) == 1

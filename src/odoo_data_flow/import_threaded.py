@@ -424,6 +424,44 @@ def _setup_fail_file(
         return None, None
 
 
+def _pad_line_to_header_length(line: list[Any], header_length: int) -> list[Any]:
+    """Pad a line to match the header length by adding empty strings.
+
+    This ensures all lines have consistent column counts for CSV output.
+
+    Args:
+        line: The data line to pad
+        header_length: The expected number of columns
+
+    Returns:
+        A new list with the line padded to match header_length
+    """
+    if len(line) >= header_length:
+        return list(line)
+    else:
+        return list(line) + [""] * (header_length - len(line))
+
+
+def _create_padded_failed_line(
+    line: list[Any], header_length: int, error_message: str
+) -> list[Any]:
+    """Create a properly padded failed line with error message.
+
+    Ensures the failed line has consistent column count by padding to header length
+    and appending the error message as the final column.
+
+    Args:
+        line: The original data line that failed
+        header_length: The expected number of columns in the original header
+        error_message: The error message to append
+
+    Returns:
+        A properly padded line with the error message as the final column
+    """
+    padded_line = _pad_line_to_header_length(line, header_length)
+    return [*padded_line, error_message]
+
+
 def _prepare_pass_2_data(
     all_data: list[list[Any]],
     header: list[str],
@@ -1116,6 +1154,7 @@ def _handle_tuple_index_error(
     source_id: str,
     line: list[Any],
     failed_lines: list[list[Any]],
+    header_length: int,
 ) -> None:
     """Handles tuple index out of range errors by logging and recording failure."""
     if progress is not None:
@@ -1132,7 +1171,11 @@ def _handle_tuple_index_error(
     )
     # Apply comprehensive error message sanitization to ensure CSV safety
     sanitized_error = _sanitize_error_message(error_message)
-    failed_lines.append([*line, sanitized_error])
+    # Create properly padded failed line with consistent column count
+    padded_failed_line = _create_padded_failed_line(
+        line, header_length, sanitized_error
+    )
+    failed_lines.append(padded_failed_line)
 
 
 def _create_batch_individually(  # noqa: C901
@@ -1309,7 +1352,11 @@ def _create_batch_individually(  # noqa: C901
                         # The RPC argument format is being misinterpreted by the server
                         error_message = f"Server API error creating record {source_id}: {ie}. This indicates the RPC call structure is incompatible with this server version or the record has unresolvable references."
                         sanitized_error = _sanitize_error_message(error_message)
-                        failed_lines.append([*line, sanitized_error])
+                        # Create properly padded failed line with consistent column count
+                        padded_failed_line = _create_padded_failed_line(
+                            line, header_len, sanitized_error
+                        )
+                        failed_lines.append(padded_failed_line)
                         continue  # Skip this record and continue processing others
                     else:
                         # Some other IndexError
@@ -1318,13 +1365,21 @@ def _create_batch_individually(  # noqa: C901
                     # Handle any other errors from create operation
                     error_message = f"Error creating record {source_id}: {str(e).replace(chr(10), ' | ').replace(chr(13), ' | ')}"
                     sanitized_error = _sanitize_error_message(error_message)
-                    failed_lines.append([*line, sanitized_error])
+                    # Create properly padded failed line with consistent column count
+                    padded_failed_line = _create_padded_failed_line(
+                        line, header_len, sanitized_error
+                    )
+                    failed_lines.append(padded_failed_line)
                     continue  # Skip this record and continue processing others
             else:
                 # If no valid values to create with, skip this record
                 error_message = f"No valid values to create for record {source_id} - all fields were filtered out"
                 sanitized_error = _sanitize_error_message(error_message)
-                failed_lines.append([*line, sanitized_error])
+                # Create properly padded failed line with consistent column count
+                padded_failed_line = _create_padded_failed_line(
+                    line, header_len, sanitized_error
+                )
+                failed_lines.append(padded_failed_line)
                 continue
             id_map[sanitized_source_id] = new_record.id
         except IndexError as e:
@@ -1389,7 +1444,9 @@ def _create_batch_individually(  # noqa: C901
 
             if is_pure_tuple_error:
                 # Only treat as tuple index error if it's definitely not external ID related
-                _handle_tuple_index_error(progress, source_id, line, failed_lines)
+                _handle_tuple_index_error(
+                    progress, source_id, line, failed_lines, len(batch_header)
+                )
                 continue
             else:
                 # Handle as external ID related error or other IndexError
@@ -1397,7 +1454,11 @@ def _create_batch_individually(  # noqa: C901
                     # This is the problematic external ID error that was being misclassified
                     error_message = f"External ID resolution error for record {source_id}: {e}. Original error typically caused by missing external ID references."
                     sanitized_error = _sanitize_error_message(error_message)
-                    failed_lines.append([*line, sanitized_error])
+                    # Create properly padded failed line with consistent column count
+                    padded_failed_line = _create_padded_failed_line(
+                        line, len(batch_header), sanitized_error
+                    )
+                    failed_lines.append(padded_failed_line)
                     continue
                 else:
                     # Handle other IndexError as malformed row
@@ -1405,7 +1466,11 @@ def _create_batch_individually(  # noqa: C901
                         f"Malformed row detected (row {i + 1} in batch): {e}"
                     )
                     sanitized_error = _sanitize_error_message(error_message)
-                    failed_lines.append([*line, sanitized_error])
+                    # Create properly padded failed line with consistent column count
+                    padded_failed_line = _create_padded_failed_line(
+                        line, len(batch_header), sanitized_error
+                    )
+                    failed_lines.append(padded_failed_line)
                     if "Fell back to create" in error_summary:
                         error_summary = "Malformed CSV row detected"
                     continue
@@ -1427,7 +1492,11 @@ def _create_batch_individually(  # noqa: C901
             if is_external_id_error:
                 error_message = f"External ID resolution error for record {source_id}: {create_error}"
                 sanitized_error = _sanitize_error_message(error_message)
-                failed_lines.append([*line, sanitized_error])
+                # Create properly padded failed line with consistent column count
+                padded_failed_line = _create_padded_failed_line(
+                    line, len(batch_header), sanitized_error
+                )
+                failed_lines.append(padded_failed_line)
                 continue
             # Special handling for tuple index out of range errors
             # These can occur when sending wrong types to Odoo fields
@@ -1439,13 +1508,19 @@ def _create_batch_individually(  # noqa: C901
 
             # Handle tuple index errors that are NOT related to external IDs
             if _is_tuple_index_error(create_error) and not is_external_id_related:
-                _handle_tuple_index_error(progress, source_id, line, failed_lines)
+                _handle_tuple_index_error(
+                    progress, source_id, line, failed_lines, len(batch_header)
+                )
                 continue
             elif is_external_id_related:
                 # Handle as external ID error instead of tuple index error
                 error_message = f"External ID resolution error for record {source_id}: {create_error}. Original error typically caused by missing external ID references."
                 sanitized_error = _sanitize_error_message(error_message)
-                failed_lines.append([*line, sanitized_error])
+                # Create properly padded failed line with consistent column count
+                padded_failed_line = _create_padded_failed_line(
+                    line, len(batch_header), sanitized_error
+                )
+                failed_lines.append(padded_failed_line)
                 continue
 
             # Special handling for database connection pool exhaustion errors
@@ -1795,8 +1870,11 @@ def _execute_load_batch(  # noqa: C901
                 # Add all current chunk records to failed lines since there are
                 # error messages
                 for line in current_chunk:
-                    failed_line = [*line, f"Load failed: {error_msg}"]
-                    aggregated_failed_lines.append(failed_line)
+                    # Create properly padded failed line with consistent column count
+                    padded_failed_line = _create_padded_failed_line(
+                        line, len(batch_header), f"Load failed: {error_msg}"
+                    )
+                    aggregated_failed_lines.append(padded_failed_line)
 
             # Create id_map and track failed records separately
             id_map = {}
@@ -2010,8 +2088,11 @@ def _execute_load_batch(  # noqa: C901
                 error_msg = f"Constraint violation: {clean_error}"
 
                 for line in current_chunk:
-                    failed_line = [*line, error_msg]
-                    aggregated_failed_lines.append(failed_line)
+                    # Create properly padded failed line with consistent column count
+                    padded_failed_line = _create_padded_failed_line(
+                        line, len(batch_header), error_msg
+                    )
+                    aggregated_failed_lines.append(padded_failed_line)
 
                 lines_to_process = lines_to_process[chunk_size:]
                 continue
