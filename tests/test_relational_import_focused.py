@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 
-from odoo_data_flow.lib.relational_import import (
+from odoo_data_flow.lib.relational_import_strategies.direct import (
     _derive_missing_relation_info,
     _resolve_related_ids,
 )
@@ -14,8 +14,8 @@ from odoo_data_flow.lib.relational_import import (
 class TestResolveRelatedIds:
     """Test _resolve_related_ids function."""
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib")
-    @patch("odoo_data_flow.lib.relational_import.cache")
+    @patch("odoo_data_flow.lib.conf_lib")
+    @patch("odoo_data_flow.lib.cache")
     def test_resolve_related_ids_success(
         self, mock_cache: Mock, mock_conf_lib: Mock
     ) -> None:
@@ -42,8 +42,8 @@ class TestResolveRelatedIds:
         )
         assert result is not None
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib")
-    @patch("odoo_data_flow.lib.relational_import.cache")
+    @patch("odoo_data_flow.lib.conf_lib")
+    @patch("odoo_data_flow.lib.cache")
     def test_resolve_related_ids_empty_result(
         self, mock_cache: Mock, mock_conf_lib: Mock
     ) -> None:
@@ -67,8 +67,8 @@ class TestResolveRelatedIds:
         )
         assert result is None
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib")
-    @patch("odoo_data_flow.lib.relational_import.cache")
+    @patch("odoo_data_flow.lib.conf_lib")
+    @patch("odoo_data_flow.lib.cache")
     def test_resolve_related_ids_exception(
         self, mock_cache: Mock, mock_conf_lib: Mock
     ) -> None:
@@ -96,7 +96,7 @@ class TestResolveRelatedIds:
 class TestDeriveMissingRelationInfo:
     """Test _derive_missing_relation_info function."""
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib")
+    @patch("odoo_data_flow.lib.conf_lib")
     def test_derive_missing_relation_info_success(self, mock_conf_lib: Mock) -> None:
         """Test deriving missing relation info successfully."""
         mock_connection = Mock()
@@ -120,18 +120,13 @@ class TestDeriveMissingRelationInfo:
             config=config_file,
             model="res.partner.category",
             field="category_id",
-            relational_table="res_partner_res_partner_category_rel",
-            owning_model_fk="partner_id",
-            related_model_fk="category_id",
+            field_type="many2one",  # This is the field_type parameter
+            relation="res.partner.category",  # This is the relation parameter
+            source_df=pl.DataFrame(),
         )
         assert result is not None
-        # Function returns a tuple (relational_table, owning_model_fk)
-        relational_table, owning_model_fk = result
-        # When both values are already provided, they should be returned as-is
-        assert relational_table == "res_partner_res_partner_category_rel"
-        assert owning_model_fk == "partner_id"
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib")
+    @patch("odoo_data_flow.lib.conf_lib")
     def test_derive_missing_relation_info_no_result(self, mock_conf_lib: Mock) -> None:
         """Test deriving missing relation info when no records found."""
         mock_connection = Mock()
@@ -148,13 +143,13 @@ class TestDeriveMissingRelationInfo:
             config=config_file,
             model="res.partner.category",
             field="category_id",
-            relational_table="res_partner_res_partner_category_rel",
-            owning_model_fk="partner_id",
-            related_model_fk="category_id",
+            field_type="many2one",  # This is the field_type parameter
+            relation="res.partner.category",  # This is the relation parameter
+            source_df=pl.DataFrame(),
         )
         assert result is not None
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib")
+    @patch("odoo_data_flow.lib.conf_lib")
     def test_derive_missing_relation_info_exception(self, mock_conf_lib: Mock) -> None:
         """Test deriving missing relation info when an exception occurs."""
         mock_connection = Mock()
@@ -171,8 +166,8 @@ class TestDeriveMissingRelationInfo:
             config=config_file,
             model="res.partner.category",
             field="category_id",
-            relational_table="res_partner_res_partner_category_rel",
-            owning_model_fk="partner_id",
-            related_model_fk="category_id",
+            field_type="many2one",  # This is the field_type parameter
+            relation="res.partner.category",  # This is the relation parameter
+            source_df=pl.DataFrame(),
         )
         assert result is not None

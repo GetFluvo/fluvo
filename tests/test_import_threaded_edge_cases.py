@@ -1,5 +1,9 @@
 """Additional targeted tests to cover remaining missed lines."""
 
+import sys
+
+sys.path.insert(0, "src")
+
 from typing import Any
 from unittest.mock import MagicMock, patch
 

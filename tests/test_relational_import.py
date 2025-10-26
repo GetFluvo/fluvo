@@ -7,11 +7,14 @@ import polars as pl
 from rich.progress import Progress
 
 from odoo_data_flow.lib import relational_import
+from odoo_data_flow.lib.relational_import_strategies import direct as direct_strategy
 
 
-@patch("odoo_data_flow.lib.relational_import.cache.load_id_map")
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("odoo_data_flow.lib.cache.load_id_map")
 def test_run_direct_relational_import(
     mock_load_id_map: MagicMock,
+    mock_get_connection_from_config: MagicMock,
     tmp_path: Path,
 ) -> None:
     """Verify the direct relational import workflow."""
@@ -26,6 +29,13 @@ def test_run_direct_relational_import(
     mock_load_id_map.return_value = pl.DataFrame(
         {"external_id": ["cat1", "cat2", "cat3"], "db_id": [11, 12, 13]}
     )
+
+    # Mock the connection setup to prevent configuration errors
+    mock_connection = MagicMock()
+    mock_get_connection_from_config.return_value = mock_connection
+    mock_model = MagicMock()
+    mock_connection.get_model.return_value = mock_model
+    mock_model.export_data.return_value = {"datas": [["Test"]]}
 
     strategy_details = {
         "relation_table": "res.partner.category.rel",
@@ -60,9 +70,11 @@ def test_run_direct_relational_import(
     assert mock_load_id_map.call_count == 1
 
 
-@patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
-@patch("odoo_data_flow.lib.relational_import.cache.load_id_map")
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("odoo_data_flow.lib.cache.load_id_map")
+@patch("odoo_data_flow.lib.relational_import_strategies.write_tuple.pl.read_csv")
 def test_run_write_tuple_import(
+    mock_polars_read_csv: MagicMock,
     mock_load_id_map: MagicMock,
     mock_get_connection_from_config: MagicMock,
     tmp_path: Path,
@@ -76,6 +88,9 @@ def test_run_write_tuple_import(
             "category_id": ["cat1,cat2", "cat2,cat3"],
         }
     )
+    # Mock pl.read_csv to return the source_df when called with "test.csv"
+    mock_polars_read_csv.return_value = source_df
+
     mock_load_id_map.return_value = pl.DataFrame(
         {"external_id": ["cat1", "cat2", "cat3"], "db_id": [11, 12, 13]}
     )
@@ -96,6 +111,7 @@ def test_run_write_tuple_import(
     task_id = progress.add_task("test")
 
     # Act
+    print("DEBUG: About to call run_write_tuple_import")
     result = relational_import.run_write_tuple_import(
         "dummy.conf",
         "res.partner",
@@ -109,13 +125,15 @@ def test_run_write_tuple_import(
         task_id,
         "test.csv",
     )
+    print(f"DEBUG: run_write_tuple_import returned: {result}")
+    print(f"DEBUG: mock_load_id_map.call_count: {mock_load_id_map.call_count}")
 
     # Assert
     assert result is True
     assert mock_load_id_map.call_count == 1
 
 
-@patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
 def test_resolve_related_ids_failure(
     mock_get_connection_from_config: MagicMock,
 ) -> None:
@@ -126,14 +144,14 @@ def test_resolve_related_ids_failure(
     mock_connection.get_model.return_value = mock_model
     mock_model.search_read.side_effect = Exception("Test error")
 
-    result = relational_import._resolve_related_ids(
+    result = direct_strategy._resolve_related_ids(
         "dummy.conf", "res.partner.category", pl.Series(["cat1", "cat2"])
     )
 
-    assert result is None
+    assert result == ("unknown", "")
 
 
-@patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_dict")
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_dict")
 def test_resolve_related_ids_with_dict(mock_get_conn_dict: MagicMock) -> None:
     """Test _resolve_related_ids with a dictionary config."""
     mock_connection = MagicMock()
@@ -145,7 +163,7 @@ def test_resolve_related_ids_with_dict(mock_get_conn_dict: MagicMock) -> None:
         {"module": "base", "name": "partner_category_2", "res_id": 12},
     ]
 
-    result = relational_import._resolve_related_ids(
+    result = direct_strategy._resolve_related_ids(
         {"hostname": "localhost"},
         "res.partner.category",
         pl.Series(["cat1", "cat2"]),
@@ -166,22 +184,22 @@ def test_resolve_related_ids_with_dict(mock_get_conn_dict: MagicMock) -> None:
     assert 12 in db_ids
 
 
-@patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
 def test_resolve_related_ids_connection_error(
     mock_get_connection_from_config: MagicMock,
 ) -> None:
     """Test that _resolve_related_ids returns None on connection error."""
     mock_get_connection_from_config.side_effect = Exception("Connection error")
 
-    result = relational_import._resolve_related_ids(
+    result = direct_strategy._resolve_related_ids(
         "dummy.conf", "res.partner.category", pl.Series(["cat1", "cat2"])
     )
 
-    assert result is None
+    assert result == ("unknown", "")
 
 
-@patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
-@patch("odoo_data_flow.lib.relational_import.cache.load_id_map")
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("odoo_data_flow.lib.cache.load_id_map")
 def test_run_write_o2m_tuple_import(
     mock_load_id_map: MagicMock,
     mock_get_connection_from_config: MagicMock,
@@ -237,7 +255,7 @@ def test_run_write_o2m_tuple_import(
 class TestQueryRelationInfoFromOdoo:
     """Tests for the _query_relation_info_from_odoo function."""
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
     def test_query_relation_info_from_odoo_success(
         self, mock_get_connection: MagicMock
     ) -> None:
@@ -255,7 +273,7 @@ class TestQueryRelationInfoFromOdoo:
         ]
 
         # Act
-        result = relational_import._query_relation_info_from_odoo(
+        result = direct_strategy._query_relation_info_from_odoo(
             "dummy.conf", "product.template", "product.attribute.value"
         )
 
@@ -266,7 +284,7 @@ class TestQueryRelationInfoFromOdoo:
         mock_get_connection.assert_called_once_with(config_file="dummy.conf")
         mock_model.search_read.assert_called_once()
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
     def test_query_relation_info_from_odoo_no_results(
         self, mock_get_connection: MagicMock
     ) -> None:
@@ -276,19 +294,19 @@ class TestQueryRelationInfoFromOdoo:
         mock_get_connection.return_value = mock_connection
         mock_model = MagicMock()
         mock_connection.get_model.return_value = mock_model
-        mock_model.search_read.return_value = []
+        mock_model.fields_get.return_value = {}
 
         # Act
-        result = relational_import._query_relation_info_from_odoo(
+        result = direct_strategy._query_relation_info_from_odoo(
             "dummy.conf", "product.template", "product.attribute.value"
         )
 
         # Assert
-        assert result is None
+        assert result == ("unknown", "")
         mock_get_connection.assert_called_once_with(config_file="dummy.conf")
-        mock_model.search_read.assert_called_once()
+        mock_model.fields_get.assert_called_once_with(["product.attribute.value"])
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
     def test_query_relation_info_from_odoo_value_error_handling(
         self, mock_get_connection: MagicMock
     ) -> None:
@@ -300,22 +318,22 @@ class TestQueryRelationInfoFromOdoo:
         mock_connection.get_model.return_value = mock_model
         # Simulate Odoo raising a ValueError with a field validation error
         # that includes ir.model.relation
-        mock_model.search_read.side_effect = ValueError(
+        mock_model.fields_get.side_effect = ValueError(
             "Invalid field 'comodel' in domain [('model', '=', 'product.template')]"
             " for model ir.model.relation"
         )
 
         # Act
-        result = relational_import._query_relation_info_from_odoo(
+        result = direct_strategy._query_relation_info_from_odoo(
             "dummy.conf", "product.template", "product.attribute.value"
         )
 
         # Assert
-        assert result is None
+        assert result == ("unknown", "")
         mock_get_connection.assert_called_once_with(config_file="dummy.conf")
-        mock_model.search_read.assert_called_once()
+        mock_model.fields_get.assert_called_once_with(["product.attribute.value"])
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
     def test_query_relation_info_from_odoo_general_exception(
         self, mock_get_connection: MagicMock
     ) -> None:
@@ -324,14 +342,14 @@ class TestQueryRelationInfoFromOdoo:
         mock_get_connection.side_effect = Exception("Connection failed")
 
         # Act
-        result = relational_import._query_relation_info_from_odoo(
+        result = direct_strategy._query_relation_info_from_odoo(
             "dummy.conf", "product.template", "product.attribute.value"
         )
 
         # Assert
-        assert result is None
+        assert result == ("unknown", "")
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_dict")
+    @patch("odoo_data_flow.lib.conf_lib.get_connection_from_dict")
     def test_query_relation_info_from_odoo_with_dict_config(
         self, mock_get_connection: MagicMock
     ) -> None:
@@ -351,7 +369,7 @@ class TestQueryRelationInfoFromOdoo:
         config_dict = {"hostname": "localhost", "database": "test_db"}
 
         # Act
-        result = relational_import._query_relation_info_from_odoo(
+        result = direct_strategy._query_relation_info_from_odoo(
             config_dict, "product.template", "product.attribute.value"
         )
 
@@ -369,7 +387,7 @@ class TestDeriveMissingRelationInfo:
     def test_derive_missing_relation_info_with_all_info(self) -> None:
         """Test derive missing relation info when all info is already present."""
         # Act
-        result = relational_import._derive_missing_relation_info(
+        result = direct_strategy._derive_missing_relation_info(
             "dummy.conf",
             "product.template",
             "attribute_line_ids",
@@ -382,7 +400,9 @@ class TestDeriveMissingRelationInfo:
         assert result[0] == "product_template_attribute_line_rel"
         assert result[1] == "product_template_id"
 
-    @patch("odoo_data_flow.lib.relational_import._query_relation_info_from_odoo")
+    @patch(
+        "odoo_data_flow.lib.relational_import_strategies.direct._query_relation_info_from_odoo"
+    )
     def test_derive_missing_relation_info_without_table(
         self, mock_query: MagicMock
     ) -> None:
@@ -391,7 +411,7 @@ class TestDeriveMissingRelationInfo:
         mock_query.return_value = ("derived_table", "derived_field")
 
         # Act
-        result = relational_import._derive_missing_relation_info(
+        result = direct_strategy._derive_missing_relation_info(
             "dummy.conf",
             "product.template",
             "attribute_line_ids",
@@ -405,7 +425,9 @@ class TestDeriveMissingRelationInfo:
         assert result[1] == "product_template_id"
         mock_query.assert_called_once()
 
-    @patch("odoo_data_flow.lib.relational_import._query_relation_info_from_odoo")
+    @patch(
+        "odoo_data_flow.lib.relational_import_strategies.direct._query_relation_info_from_odoo"
+    )
     def test_derive_missing_relation_info_without_field(
         self, mock_query: MagicMock
     ) -> None:
@@ -417,7 +439,7 @@ class TestDeriveMissingRelationInfo:
         )
 
         # Act
-        result = relational_import._derive_missing_relation_info(
+        result = direct_strategy._derive_missing_relation_info(
             "dummy.conf",
             "product.template",
             "attribute_line_ids",
@@ -431,7 +453,9 @@ class TestDeriveMissingRelationInfo:
         assert result[1] == "derived_field"
         mock_query.assert_called_once()
 
-    @patch("odoo_data_flow.lib.relational_import._query_relation_info_from_odoo")
+    @patch(
+        "odoo_data_flow.lib.relational_import_strategies.direct._query_relation_info_from_odoo"
+    )
     def test_derive_missing_relation_info_without_both(
         self, mock_query: MagicMock
     ) -> None:
@@ -440,7 +464,7 @@ class TestDeriveMissingRelationInfo:
         mock_query.return_value = ("derived_table", "derived_field")
 
         # Act
-        result = relational_import._derive_missing_relation_info(
+        result = direct_strategy._derive_missing_relation_info(
             "dummy.conf",
             "product.template",
             "attribute_line_ids",
@@ -454,7 +478,9 @@ class TestDeriveMissingRelationInfo:
         assert result[1] == "derived_field"
         mock_query.assert_called_once()
 
-    @patch("odoo_data_flow.lib.relational_import._query_relation_info_from_odoo")
+    @patch(
+        "odoo_data_flow.lib.relational_import_strategies.direct._query_relation_info_from_odoo"
+    )
     def test_derive_missing_relation_info_query_returns_none(
         self, mock_query: MagicMock
     ) -> None:
@@ -463,7 +489,7 @@ class TestDeriveMissingRelationInfo:
         mock_query.return_value = None
 
         # Act
-        result = relational_import._derive_missing_relation_info(
+        result = direct_strategy._derive_missing_relation_info(
             "dummy.conf",
             "product.template",
             "attribute_line_ids",
@@ -485,8 +511,8 @@ class TestDeriveRelationInfo:
     def test_derive_relation_info_known_mapping(self) -> None:
         """Test derive relation info with a known self-referencing field mapping."""
         # Act
-        result = relational_import._derive_relation_info(
-            "product.template", "optional_product_ids", "product.template"
+        result = direct_strategy._derive_relation_info(
+            "dummy.conf", "product.template", "optional_product_ids", pl.DataFrame()
         )
 
         # Assert
@@ -496,8 +522,8 @@ class TestDeriveRelationInfo:
     def test_derive_relation_info_derived_mapping(self) -> None:
         """Test derive relation info with derived mapping."""
         # Act
-        result = relational_import._derive_relation_info(
-            "product.template", "attribute_line_ids", "product.attribute.value"
+        result = direct_strategy._derive_relation_info(
+            "dummy.conf", "product.template", "attribute_line_ids", pl.DataFrame()
         )
 
         # Assert
@@ -507,10 +533,11 @@ class TestDeriveRelationInfo:
     def test_derive_relation_info_reverse_order(self) -> None:
         """Test derive relation info with reversed model order."""
         # Act
-        result = relational_import._derive_relation_info(
-            "product.attribute.value",  # Reversed order
+        result = direct_strategy._derive_relation_info(
+            "dummy.conf",
+            "product.attribute.value",
             "attribute_line_ids",
-            "product.template",
+            pl.DataFrame(),
         )
 
         # Assert

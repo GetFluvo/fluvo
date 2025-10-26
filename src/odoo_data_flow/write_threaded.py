@@ -21,6 +21,9 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+# Import the error message sanitization function from import_threaded
+# Import the error message sanitization function from import_threaded (avoid circular import issues)
+from .import_threaded import _sanitize_error_message
 from .lib import conf_lib
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch  # FIX: Add missing import
@@ -111,7 +114,7 @@ class RPCThreadWrite(RpcThread):
                     log.error(f"Failed to process batch {num}. {error_summary}")
                     summary["failed"] += len(record_ids)
                 except Exception as e:
-                    error_summary = str(e)
+                    error_summary = _sanitize_error_message(str(e))
                     log.error(f"Failed to update records {record_ids}: {error_summary}")
                     summary["failed"] += len(record_ids)
                     if self.writer:
@@ -119,9 +122,9 @@ class RPCThreadWrite(RpcThread):
                             self.writer.writerow([record_id, error_summary])
 
         except Exception as e:
-            error_summary = str(e)
+            error_summary = _sanitize_error_message(str(e))
             log.error(
-                f"Batch {num} failed with an unexpected error: {e}",
+                f"Batch {num} failed with an unexpected error: {error_summary}",
                 exc_info=True,
             )
             summary["failed"] = len(lines)

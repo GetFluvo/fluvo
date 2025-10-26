@@ -227,6 +227,22 @@ def _sanitize_error_message(error_msg: Union[str, None]) -> str:
     # "second cell" in JSON parsing errors
     error_msg = error_msg.replace("sencond", "second")
 
+    # Additional sanitization for JSON characters that might interfere with CSV structure
+    # Replace characters that might be interpreted as field separators
+    error_msg = error_msg.replace("{", " { ").replace(
+        "}", " } "
+    )  # Add spaces around braces
+    error_msg = error_msg.replace("[", " [ ").replace(
+        "]", " ] "
+    )  # Add spaces around brackets
+    # More comprehensive sanitization for potential CSV structure issues
+    error_msg = error_msg.replace(",,", ", ").replace(";;", "; ")  # Multiple separators
+    error_msg = error_msg.replace(
+        ": ", " : "
+    )  # Ensure spacing around colons in case of JSON
+
+    # Final safeguard: remove import re and simplify to avoid potential runtime issues
+    # Ensure we return a properly sanitized error message
     return error_msg
 
 
@@ -1977,26 +1993,33 @@ def _execute_load_batch(  # noqa: C901
             len(load_lines)
 
             # Check if Odoo server returned messages with validation errors
+            # Only mark records as failed if they weren't already successfully created
             if res.get("messages"):
                 log.info(
-                    f"All {len(current_chunk)} records in chunk marked as "
-                    f"failed due to Odoo server messages: {res.get('messages')}"
+                    f"Processing {len(res.get('messages', []))} Odoo server messages "
+                    f"for chunk of {len(current_chunk)} records, "
+                    f"{len(created_ids)} of which were successfully created"
                 )
-                # Add all records in current chunk to failed lines with server messages
-                for line in current_chunk:
-                    message_details = res.get("messages", [])
-                    error_msg = (
-                        str(
-                            message_details[0].get(
-                                "message", "Unknown error from Odoo server"
+                # Only add records to failed lines that weren't successfully created
+                # This prevents successfully imported records from being incorrectly marked as failed
+                for i, line in enumerate(current_chunk):
+                    # Only mark as failed if this record was not in the successfully created list
+                    if i >= len(created_ids) or created_ids[i] is None:
+                        message_details = res.get("messages", [])
+                        error_msg = (
+                            str(
+                                message_details[0].get(
+                                    "message", "Unknown error from Odoo server"
+                                )
                             )
+                            if message_details
+                            else "Unknown error"
                         )
-                        if message_details
-                        else "Unknown error"
-                    )
-                    failed_line = [*list(line), f"Load failed: {error_msg}"]
-                    if failed_line not in aggregated_failed_lines:  # Avoid duplicates
-                        aggregated_failed_lines.append(failed_line)
+                        failed_line = [*list(line), f"Load failed: {error_msg}"]
+                        if (
+                            failed_line not in aggregated_failed_lines
+                        ):  # Avoid duplicates
+                            aggregated_failed_lines.append(failed_line)
             elif len(aggregated_failed_lines_batch) > 0:
                 # Add the specific records that failed to the aggregated failed lines
                 log.info(

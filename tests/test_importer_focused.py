@@ -38,7 +38,7 @@ def test_importer_main_process_with_relational_strategies() -> None:
                     mock_import.return_value = (True, {"id_map": {"1": 101, "2": 102}})
 
                     with patch(
-                        "odoo_data_flow.importer.relational_import.run_direct_relational_import"
+                        "odoo_data_flow.importer.relational_import_strategies.direct.run_direct_relational_import"
                     ) as mock_rel_import:
                         # Return None to skip additional import call
                         mock_rel_import.return_value = None
@@ -114,7 +114,7 @@ def test_importer_with_write_tuple_strategy() -> None:
                     mock_import.return_value = (True, {"id_map": {"1": 101, "2": 102}})
 
                     with patch(
-                        "odoo_data_flow.importer.relational_import.run_write_tuple_import"
+                        "odoo_data_flow.importer.relational_import_strategies.write_tuple.run_write_tuple_import"
                     ) as mock_write_tuple:
                         mock_write_tuple.return_value = True  # Success
 
@@ -187,7 +187,7 @@ def test_importer_with_write_o2m_tuple_strategy() -> None:
                     mock_import.return_value = (True, {"id_map": {"1": 101, "2": 102}})
 
                     with patch(
-                        "odoo_data_flow.importer.relational_import.run_write_o2m_tuple_import"
+                        "odoo_data_flow.importer.relational_import_strategies.write_o2m_tuple.run_write_o2m_tuple_import"
                     ) as mock_write_o2m:
                         mock_write_o2m.return_value = True  # Success
 
@@ -323,7 +323,7 @@ def test_importer_with_write_tuple_failure() -> None:
                     mock_import.return_value = (True, {"id_map": {"1": 101, "2": 102}})
 
                     with patch(
-                        "odoo_data_flow.importer.relational_import.run_write_tuple_import"
+                        "odoo_data_flow.importer.relational_import_strategies.write_tuple.run_write_tuple_import"
                     ) as mock_write_tuple:
                         mock_write_tuple.return_value = False  # Failure case
 

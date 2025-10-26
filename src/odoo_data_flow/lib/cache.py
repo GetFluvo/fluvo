@@ -182,3 +182,87 @@ def get_session_dir(session_id: str) -> Optional[Path]:
     except Exception as e:
         log.error(f"Could not create or access session directory '{session_id}': {e}")
         return None
+
+
+def save_relation_info(
+    config_file: str,
+    model: str,
+    field: str,
+    relation_df: pl.DataFrame,
+    derived_type: str,
+    derived_relation: str,
+) -> None:
+    """Saves relation information to cache files.
+
+    This enables faster subsequent relational imports by avoiding redundant Odoo RPC calls.
+
+    Args:
+        config_file: Path to the Odoo connection configuration file.
+        model: The Odoo model name (e.g., 'res.partner').
+        field: The field name.
+        relation_df: DataFrame with relation information.
+        derived_type: The field type.
+        derived_relation: The relation model name.
+    """
+    cache_dir = get_cache_dir(config_file)
+    if not cache_dir:
+        return
+
+    try:
+        # Save the relation DataFrame
+        relation_file_path = cache_dir / f"{model}.{field}.relation.parquet"
+        relation_df.write_parquet(relation_file_path)
+
+        # Save the metadata (type and relation)
+        metadata = {"derived_type": derived_type, "derived_relation": derived_relation}
+        metadata_file_path = cache_dir / f"{model}.{field}.relation.json"
+        metadata_file_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+        log.info(f"Saved relation info cache for {model}.{field} to: {cache_dir}")
+    except Exception as e:
+        log.error(f"Failed to save relation info cache for {model}.{field}: {e}")
+
+
+def load_relation_info(
+    config_file: str, model: str, field: str
+) -> Optional[tuple[pl.DataFrame, str, str]]:
+    """Loads relation information from cache files.
+
+    Args:
+        config_file: Path to the Odoo connection configuration file.
+        model: The Odoo model name (e.g., 'res.partner').
+        field: The field name.
+
+    Returns:
+        A tuple of (DataFrame, field_type, relation_model) or None if not found.
+    """
+    cache_dir = get_cache_dir(config_file)
+    if not cache_dir:
+        return None
+
+    try:
+        # Load the relation DataFrame
+        relation_file_path = cache_dir / f"{model}.{field}.relation.parquet"
+        if not relation_file_path.exists():
+            log.debug(f"No cached relation info found for {model}.{field}")
+            return None
+
+        relation_df = pl.read_parquet(relation_file_path)
+
+        # Load the metadata
+        metadata_file_path = cache_dir / f"{model}.{field}.relation.json"
+        if not metadata_file_path.exists():
+            log.warning(
+                f"Metadata file missing for cached relation info {model}.{field}"
+            )
+            return None
+
+        metadata = json.loads(metadata_file_path.read_text(encoding="utf-8"))
+        derived_type = metadata.get("derived_type", "")
+        derived_relation = metadata.get("derived_relation", "")
+
+        log.info(f"Loaded cached relation info for {model}.{field}")
+        return relation_df, derived_type, derived_relation
+    except Exception as e:
+        log.error(f"Failed to load relation info cache for {model}.{field}: {e}")
+        return None
