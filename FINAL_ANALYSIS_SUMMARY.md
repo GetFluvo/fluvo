@@ -10,7 +10,7 @@
 
 ### 1. Monolithic Module Problem (TOP PRIORITY)
 - `import_threaded.py`: 2711 lines - Contains mixed threading, business logic, validation
-- `export_threaded.py`: 1190 lines - Similar complexity issues  
+- `export_threaded.py`: 1190 lines - Similar complexity issues
 - `relational_import.py`: 1069 lines - Complex relationship handling
 
 **Impact**: Extremely difficult to maintain, debug, or extend

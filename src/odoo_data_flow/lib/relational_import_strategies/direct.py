@@ -355,9 +355,7 @@ def run_direct_relational_import(  # noqa: C901
             # Filter out None values
             valid_updates = [
                 (source_id, db_id)
-                for source_id, db_id in zip(
-                    list(id_map.keys())[i:batch_end], batch_ids, strict=False
-                )
+                for source_id, db_id in zip(list(id_map.keys())[i:batch_end], batch_ids)
                 if db_id is not None
             ]
 
@@ -372,7 +370,6 @@ def run_direct_relational_import(  # noqa: C901
                                 (id_map[source_id], db_id)
                                 for source_id, db_id in valid_updates
                             ],
-                            strict=False,
                         )
                     ]
 

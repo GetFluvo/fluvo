@@ -187,7 +187,7 @@ These should be removed or made more targeted to only sanitize actual CSV-breaki
 
 Fixing the 59 failing tests requires:
 1. **✅ Update all patch decorators** to point to new module locations (45-50 tests)
-2. **✅ Fix parameter ordering** for multiple patches (10-15 tests) 
+2. **✅ Fix parameter ordering** for multiple patches (10-15 tests)
 3. **✅ Update behavioral expectations** to match new flexible architecture (5-10 tests)
 4. **✅ Fix error message sanitization** if over-aggressive (2-5 tests)
 

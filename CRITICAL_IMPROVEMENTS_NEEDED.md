@@ -13,7 +13,7 @@ Break these monoliths into focused, single-responsibility modules:
 
 #### For `import_threaded.py`:
 1. **Extract Threading Infrastructure** → `lib/threading_utils.py`
-2. **Separate Business Logic** → `lib/import_logic.py` 
+2. **Separate Business Logic** → `lib/import_logic.py`
 3. **Move Validation** → `lib/validation.py`
 4. **Extract Error Handling** → `lib/error_handling.py`
 5. **Create Utility Functions** → `lib/utils.py`
@@ -102,7 +102,7 @@ Clean up and improve documentation:
 
 ### Phase 1: Foundation (Week 1)
 1. Create new module structure
-2. Extract simple utility functions  
+2. Extract simple utility functions
 3. Set up shared components
 4. Run all tests to ensure no regressions
 
@@ -165,7 +165,7 @@ Clean up and improve documentation:
 
 The most critical improvements needed are:
 1. **Split monolithic modules** to reduce complexity
-2. **Eliminate code duplication** to improve maintainability  
+2. **Eliminate code duplication** to improve maintainability
 3. **Simplify complex logic** to enhance readability
 
 These changes can be made incrementally while preserving all existing functionality and maintaining the excellent test coverage that already exists. The key is to focus on small, focused changes that gradually improve the codebase structure without disrupting its proven reliability.

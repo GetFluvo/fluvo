@@ -61,7 +61,7 @@ Break down large functions into smaller, focused units.
 
 **Target Functions for Refactoring:**
 - `_safe_convert_field_value` (~150 lines)
-- `_create_batch_individually` (~200 lines)  
+- `_create_batch_individually` (~200 lines)
 - `_handle_fallback_create` (~100 lines)
 - `_execute_write_tuple_updates` (~150 lines)
 
@@ -70,17 +70,17 @@ Break down large functions into smaller, focused units.
 # Before: Large function with multiple responsibilities
 def _safe_convert_field_value(field_name, field_value, field_type):
     # 150 lines of mixed logic
-    
+
 # After: Smaller focused functions
 def _is_empty_value(field_value):
     """Check if a field value is considered empty."""
-    
+
 def _convert_numeric_field(field_value, field_type):
     """Convert numeric field values with enhanced safety."""
-    
+
 def _convert_relational_field(field_value, field_type):
     """Convert relational field values."""
-    
+
 def _safe_convert_field_value(field_name, field_value, field_type):
     """Orchestrate field value conversion."""
     if _is_empty_value(field_value):

@@ -127,7 +127,7 @@ Functions moved to strategy modules during architectural refactoring, but tests 
    ```python
    # Old patch that fails
    @patch("odoo_data_flow.lib.relational_import._resolve_related_ids")
-   
+
    # New patch that should work
    @patch("odoo_data_flow.lib.relational_import_strategies.direct._resolve_related_ids")
    ```

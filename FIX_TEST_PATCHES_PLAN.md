@@ -82,7 +82,7 @@ If issues arise:
 - Fix high priority tests (4 tests)
 - Verify no regressions in existing tests
 
-### Day 2:  
+### Day 2:
 - Fix medium priority tests (4 tests)
 - Address any complications from strategy module patches
 

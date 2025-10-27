@@ -5,7 +5,7 @@ This guide provides step-by-step instructions to restore the Odoo Data Flow proj
 
 ## Current Status
 - **✅ 634 tests passing**
-- **❌ 59 tests failing** 
+- **❌ 59 tests failing**
 - **❌ Nox sessions failing**
 - **❌ Critical import bug** (500 valid records incorrectly failing)
 
@@ -37,13 +37,13 @@ Many tests mock functions that were moved during refactoring.
 
 **Fix:**
 ```python
-# CORRECT - Point to new location  
+# CORRECT - Point to new location
 @patch("odoo_data_flow.lib.relational_import_strategies.direct._resolve_related_ids")
 ```
 
 #### Files to Fix:
 1. `tests/test_relational_import.py` (16 failing tests)
-2. `tests/test_relational_import_edge_cases.py` (25 failing tests)  
+2. `tests/test_relational_import_edge_cases.py` (25 failing tests)
 3. `tests/test_relational_import_focused.py` (6 failing tests)
 4. `tests/test_m2m_missing_relation_info.py` (8 failing tests)
 5. `tests/test_failure_handling.py` (4 failing tests)
@@ -65,7 +65,7 @@ The new architecture is more flexible than the old one:
 # OLD TEST EXPECTATION (broken)
 assert "category_id" in import_plan["deferred_fields"]
 
-# NEW TEST EXPECTATION (fixed) 
+# NEW TEST EXPECTATION (fixed)
 # category_id relates to res.partner.category, not res.partner (not self-referencing)
 # So it should NOT be in deferred_fields according to new architecture
 if "deferred_fields" in import_plan:
@@ -95,7 +95,7 @@ The issue is likely in one of these areas:
 ```
 
 #### Area 3: Error Message Sanitization
-```python  
+```python
 # Check _sanitize_error_message in import_threaded.py
 # Ensure it's not corrupting valid error messages
 ```
@@ -152,14 +152,14 @@ Fix formatting and style issues automatically where possible.
 
 #### Subtasks:
 1. **Update `relational_import` patches** in all test files
-2. **Update `conf_lib` patches** to point to `lib.conf_lib`  
+2. **Update `conf_lib` patches** to point to `lib.conf_lib`
 3. **Update `cache` patches** to point to `lib.cache`
 4. **Update strategy function patches** to point to correct modules
 
 #### Priority Files:
 1. `tests/test_relational_import.py` - 16 failing tests
 2. `tests/test_relational_import_edge_cases.py` - 25 failing tests
-3. `tests/test_relational_import_focused.py` - 6 failing tests  
+3. `tests/test_relational_import_focused.py` - 6 failing tests
 4. `tests/test_m2m_missing_relation_info.py` - 8 failing tests
 5. `tests/test_failure_handling.py` - 4 failing tests
 
@@ -190,7 +190,7 @@ Fix formatting and style issues automatically where possible.
 
 ### Test Patch Fixes:
 - [ ] `tests/test_relational_import.py` - Update all patch decorators
-- [ ] `tests/test_relational_import_edge_cases.py` - Update all patch decorators  
+- [ ] `tests/test_relational_import_edge_cases.py` - Update all patch decorators
 - [ ] `tests/test_relational_import_focused.py` - Update all patch decorators
 - [ ] `tests/test_m2m_missing_relation_info.py` - Update all patch decorators
 - [ ] `tests/test_failure_handling.py` - Update all patch decorators
@@ -209,7 +209,7 @@ Fix formatting and style issues automatically where possible.
 ### Nox Session Restoration:
 - [ ] `pre-commit run --all-files` - All hooks pass
 - [ ] `mypy src tests docs/conf.py` - 0 errors
-- [ ] `ruff check src tests` - 0 errors  
+- [ ] `ruff check src tests` - 0 errors
 - [ ] `ruff format src tests` - Consistent formatting
 - [ ] `pydoclint src tests` - 0 errors
 
@@ -264,7 +264,7 @@ grep -r "def function_name" src/ --include="*.py"
 ### Preserve Architectural Improvements:
 ✅ **DO NOT UNDO:**
 - Selective field deferral (only self-referencing fields deferred)
-- External ID flexibility (no hardcoded dependencies)  
+- External ID flexibility (no hardcoded dependencies)
 - Enhanced numeric safety (0/0.0 for invalid values)
 - XML ID pattern detection (direct resolution)
 
@@ -276,7 +276,7 @@ grep -r "def function_name" src/ --include="*.py"
 ### Ensure Backward Compatibility:
 ✅ **DO MAINTAIN:**
 - CLI interface compatibility
-- Configuration file compatibility  
+- Configuration file compatibility
 - Core import/export functionality
 - Error handling consistency
 
@@ -340,7 +340,7 @@ git reset --hard 706af79
 
 ### Long-term (Beyond 12 hours):
 - ✅ **Enhanced maintainability**
-- ✅ **Improved code organization**  
+- ✅ **Improved code organization**
 - ✅ **Better documentation**
 - ✅ **Industry-standard code quality**
 

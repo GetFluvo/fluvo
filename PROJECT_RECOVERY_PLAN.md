@@ -134,7 +134,7 @@ ruff check src tests --fix
 #### File: `tests/test_relational_import_edge_cases.py`
 **Same pattern** - update all patch decorators to point to new module locations.
 
-#### File: `tests/test_relational_import_focused.py`  
+#### File: `tests/test_relational_import_focused.py`
 **Same pattern** - update all patch decorators.
 
 ### Task 2: Fix Behavioral Test Expectations (🔴 CRITICAL)
@@ -182,7 +182,7 @@ mypy src tests docs/conf.py --python-executable=/usr/bin/python
 # 3. Ruff linting
 ruff check src tests
 
-# 4. Ruff formatting  
+# 4. Ruff formatting
 ruff format src tests
 
 # 5. Pydoclint

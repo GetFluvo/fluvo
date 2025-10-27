@@ -22,7 +22,7 @@ Update all test patches to point to correct module locations.
 
 #### Affected Tests:
 1. `tests/test_m2m_missing_relation_info.py::test_run_write_tuple_import_derives_missing_info`
-2. `tests/test_m2m_missing_relation_info.py::test_run_direct_relational_import_derives_missing_info` 
+2. `tests/test_m2m_missing_relation_info.py::test_run_direct_relational_import_derives_missing_info`
 3. `tests/test_relational_import.py::test_run_direct_relational_import`
 4. `tests/test_relational_import.py::test_run_write_tuple_import`
 5. `tests/test_relational_import.py::test_resolve_related_ids_failure`
@@ -67,7 +67,7 @@ Enhance type safety by adding explicit type annotations.
 2. Verify full test suite passes (653/653)
 3. Add regression tests to prevent future patch mismatches
 
-### Week 2: Code Quality Improvements  
+### Week 2: Code Quality Improvements
 1. Remove unused imports and code
 2. Simplify complex functions
 3. Consolidate duplicated logic

@@ -1,7 +1,7 @@
 # Consolidated TODO List for Codebase Improvements
 
 ## CURRENT STATUS
-- ✅ 632 tests passing  
+- ✅ 632 tests passing
 - ❌ 21 tests failing (due to patching moved functions)
 - ✅ All architectural improvements implemented and working
 - ✅ MyPy type checking passing
@@ -20,7 +20,7 @@ Update test patches to point to new module locations using the PATCH_MIGRATION_M
 
 1. **High Priority Tests (Core Functionality)**:
    - [ ] `tests/test_m2m_missing_relation_info.py::test_run_write_tuple_import_derives_missing_info`
-   - [ ] `tests/test_m2m_missing_relation_info.py::test_run_direct_relational_import_derives_missing_info` 
+   - [ ] `tests/test_m2m_missing_relation_info.py::test_run_direct_relational_import_derives_missing_info`
    - [ ] `tests/test_relational_import.py::test_run_direct_relational_import`
    - [ ] `tests/test_relational_import.py::test_run_write_tuple_import`
 
@@ -45,7 +45,7 @@ Update test patches to point to new module locations using the PATCH_MIGRATION_M
 
 ### Key Functions to Protect:
 - `_safe_convert_field_value` - Enhanced value conversion
-- `_handle_field_deferral` - Selective deferral logic  
+- `_handle_field_deferral` - Selective deferral logic
 - `_has_xml_id_pattern` - XML ID pattern detection
 - `_resolve_related_ids` - Relation ID resolution (now in strategy modules)
 - `_create_batch_individually` - Fallback import processing (now in import_threaded)
@@ -109,7 +109,7 @@ Update test patches to point to new module locations using the PATCH_MIGRATION_M
 
 ### Qualitative Improvements:
 - ✅ **Enhanced maintainability**
-- ✅ **Improved developer experience**  
+- ✅ **Improved developer experience**
 - ✅ **Preserved architectural improvements**
 - ✅ **Better error handling and user feedback**
 

@@ -39,7 +39,7 @@ Functions that moved during refactoring:
 
 ### Step 3: Systematically Fix Each Test File
 1. **tests/test_relational_import.py** - 21 failing tests
-2. **tests/test_relational_import_focused.py** - 12 failing tests  
+2. **tests/test_relational_import_focused.py** - 12 failing tests
 3. **tests/test_relational_import_edge_cases.py** - 8 failing tests
 4. **tests/test_m2m_missing_relation_info.py** - 8 failing tests
 5. **tests/test_import_threaded_edge_cases.py** - 5 failing tests

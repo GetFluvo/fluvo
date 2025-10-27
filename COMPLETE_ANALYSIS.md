@@ -112,7 +112,7 @@ The **59 failing tests** are failing due to **architectural refactoring** that m
 
 #### Mapping of Function Relocations:
 ```
-odoo_data_flow.lib.relational_import._resolve_related_ids 
+odoo_data_flow.lib.relational_import._resolve_related_ids
   → odoo_data_flow.lib.relational_import_strategies.direct._resolve_related_ids
 
 odoo_data_flow.lib.relational_import._prepare_link_dataframe
@@ -163,7 +163,7 @@ odoo_data_flow.lib.import_threaded._safe_convert_field_value
 ## Risk Mitigation
 
 ### Preserving Architectural Improvements
-**✅ Must Not Undo**: 
+**✅ Must Not Undo**:
 - Selective field deferral (only self-referencing fields deferred)
 - External ID pattern detection (flexible resolution)
 - Enhanced numeric field safety (prevent tuple index errors)

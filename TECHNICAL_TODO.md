@@ -20,7 +20,7 @@
 - [ ] Create unified threading framework in `src/odoo_data_flow/lib/threading_framework.py`
 - [ ] Extract common threading patterns from:
   - [ ] `import_threaded.py`
-  - [ ] `export_threaded.py` 
+  - [ ] `export_threaded.py`
   - [ ] `write_threaded.py`
 - [ ] Create reusable thread pool manager
 
