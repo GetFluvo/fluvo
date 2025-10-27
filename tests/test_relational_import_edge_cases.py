@@ -234,7 +234,11 @@ def test_run_direct_relational_import_missing_info(
     mock_resolve_ids.return_value = pl.DataFrame(
         {"external_id": ["cat1"], "db_id": [1]}
     )
-    mock_derive_info.return_value = (None, None)  # Missing table and field
+    mock_derive_info.return_value = (
+        pl.DataFrame(),
+        None,
+        None,
+    )  # Missing table and field
 
     with Progress() as progress:
         task_id = progress.add_task("test")
@@ -260,7 +264,10 @@ def test_run_direct_relational_import_missing_info(
 @patch(
     "odoo_data_flow.lib.relational_import_strategies.direct._derive_missing_relation_info"
 )
-@patch("odoo_data_flow.lib._resolve_related_ids", return_value=None)
+@patch(
+    "odoo_data_flow.lib.relational_import_strategies.direct._resolve_related_ids",
+    return_value=None,
+)
 def test_run_direct_relational_import_resolve_fail(
     mock_resolve_ids: MagicMock, mock_derive_info: MagicMock
 ) -> None:
@@ -268,7 +275,11 @@ def test_run_direct_relational_import_resolve_fail(
     source_df = pl.DataFrame(
         {"id": ["p1"], "name": ["Partner 1"], "category_id/id": ["cat1"]}
     )
-    mock_derive_info.return_value = ("res_partner_category_rel", "partner_id")
+    mock_derive_info.return_value = (
+        pl.DataFrame(),
+        "res_partner_category_rel",
+        "partner_id",
+    )
 
     with Progress() as progress:
         task_id = progress.add_task("test")
@@ -309,7 +320,11 @@ def test_run_direct_relational_import_field_not_found(
     mock_resolve_ids.return_value = pl.DataFrame(
         {"external_id": ["cat1"], "db_id": [1]}
     )
-    mock_derive_info.return_value = ("res_partner_category_rel", "partner_id")
+    mock_derive_info.return_value = (
+        pl.DataFrame(),
+        "res_partner_category_rel",
+        "partner_id",
+    )
 
     with Progress() as progress:
         task_id = progress.add_task("test")
@@ -434,8 +449,11 @@ def test_execute_write_tuple_updates_invalid_related_id_format(
     "odoo_data_flow.lib.relational_import_strategies.write_tuple._execute_write_tuple_updates",
     return_value=True,
 )
+@patch(
+    "odoo_data_flow.lib.relational_import_strategies.direct._derive_missing_relation_info"
+)
 def test__execute_write_tuple_updates_field_not_found(
-    mock_execute: MagicMock, mock_resolve_ids: MagicMock, mock_derive_info: MagicMock
+    mock_derive_info: MagicMock, mock_execute: MagicMock, mock_resolve_ids: MagicMock
 ) -> None:
     """Test _execute_write_tuple_updates when field is not found in DataFrame."""
     pl.DataFrame(
@@ -447,7 +465,11 @@ def test__execute_write_tuple_updates_field_not_found(
     mock_resolve_ids.return_value = pl.DataFrame(
         {"external_id": ["cat1"], "db_id": [1]}
     )
-    mock_derive_info.return_value = ("res_partner_category_rel", "partner_id")
+    mock_derive_info.return_value = (
+        pl.DataFrame(),
+        "res_partner_category_rel",
+        "partner_id",
+    )
 
     with Progress() as progress:
         progress.add_task("test")
@@ -456,7 +478,7 @@ def test__execute_write_tuple_updates_field_not_found(
             "dummy.conf",
             "res.partner",
             "category_id",
-            pl.DataFrame({"relation": ["res.partner.category"]}),
+            pl.DataFrame({"source_id": ["p1"], "field_value": ["cat1"]}),
             {"p1": 1},
             1000,  # batch_size
         )
