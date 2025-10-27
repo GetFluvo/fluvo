@@ -32,7 +32,7 @@ class TestResolveRelatedIds:
 
         # Create a temporary config file
         with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as f:
-            f.write("[test]\nhostname=localhost\n")
+            f.write("[Connection]\nhostname=localhost\ndatabase=test_db\nlogin=admin\npassword=secret\nport=8069\n")
             config_file = f.name
 
         result = _resolve_related_ids(
@@ -57,7 +57,7 @@ class TestResolveRelatedIds:
         mock_conf_lib.get_connection_from_config.return_value = mock_connection
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as f:
-            f.write("[test]\nhostname=localhost\n")
+            f.write("[Connection]\nhostname=localhost\ndatabase=test_db\nlogin=admin\npassword=secret\nport=8069\n")
             config_file = f.name
 
         result = _resolve_related_ids(
@@ -82,7 +82,7 @@ class TestResolveRelatedIds:
         mock_conf_lib.get_connection_from_config.return_value = mock_connection
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as f:
-            f.write("[test]\nhostname=localhost\n")
+            f.write("[Connection]\nhostname=localhost\ndatabase=test_db\nlogin=admin\npassword=secret\nport=8069\n")
             config_file = f.name
 
         result = _resolve_related_ids(
@@ -113,7 +113,7 @@ class TestDeriveMissingRelationInfo:
         mock_conf_lib.get_connection_from_config.return_value = mock_connection
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as f:
-            f.write("[test]\nhostname=localhost\n")
+            f.write("[Connection]\nhostname=localhost\ndatabase=test_db\nlogin=admin\npassword=secret\nport=8069\n")
             config_file = f.name
 
         result = _derive_missing_relation_info(
@@ -136,7 +136,7 @@ class TestDeriveMissingRelationInfo:
         mock_conf_lib.get_connection_from_config.return_value = mock_connection
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as f:
-            f.write("[test]\nhostname=localhost\n")
+            f.write("[Connection]\nhostname=localhost\ndatabase=test_db\nlogin=admin\npassword=secret\nport=8069\n")
             config_file = f.name
 
         result = _derive_missing_relation_info(
@@ -159,7 +159,7 @@ class TestDeriveMissingRelationInfo:
         mock_conf_lib.get_connection_from_config.return_value = mock_connection
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as f:
-            f.write("[test]\nhostname=localhost\n")
+            f.write("[Connection]\nhostname=localhost\ndatabase=test_db\nlogin=admin\npassword=secret\nport=8069\n")
             config_file = f.name
 
         result = _derive_missing_relation_info(
