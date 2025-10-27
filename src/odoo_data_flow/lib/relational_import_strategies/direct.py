@@ -10,7 +10,7 @@ from ...logging_config import log
 from .. import cache, conf_lib
 
 
-def _resolve_related_ids(  # noqa: C901
+def _resolve_related_ids(
     config: Union[str, dict[str, Any]], related_model: str, external_ids: pl.Series
 ) -> Optional[pl.DataFrame]:
     """Resolve related ids.
@@ -256,7 +256,7 @@ def _derive_relation_info(
     return relation_df, derived_type, derived_relation
 
 
-def run_direct_relational_import(  # noqa: C901
+def run_direct_relational_import(
     config: Union[str, dict[str, Any]],
     model: str,
     field: str,

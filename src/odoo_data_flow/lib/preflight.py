@@ -464,7 +464,7 @@ def _validate_header(
 
 
 @register_check
-def type_correction_check(  # noqa: C901
+def type_correction_check(
     preflight_mode: "PreflightMode",
     model: str,
     filename: str,

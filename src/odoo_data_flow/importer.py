@@ -127,7 +127,7 @@ def _run_preflight_checks(
     return True
 
 
-def run_import(  # noqa: C901
+def run_import(
     config: Union[str, dict[str, Any]],
     filename: str,
     model: Optional[str],

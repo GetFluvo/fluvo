@@ -1190,6 +1190,3 @@ def _sanitize_utf8_string(text: Any) -> str:
             # character-by-character loop
             result = str(text).translate(_CONTROL_CHAR_MAP)
             return str(result)  # Explicitly convert to str to satisfy MyPy
-
-
-# ruff: noqa: C901

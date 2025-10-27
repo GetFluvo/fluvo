@@ -571,7 +571,7 @@ def _prepare_pass_2_data(
     return pass_2_data_to_write  # This fixed it
 
 
-def _recursive_create_batches(  # noqa: C901
+def _recursive_create_batches(
     current_data: list[list[Any]],
     group_cols: list[str],
     header: list[str],
@@ -839,7 +839,7 @@ def _convert_external_id_field(
             return base_field_name, None
 
 
-def _safe_convert_field_value(  # noqa: C901
+def _safe_convert_field_value(
     field_name: str, field_value: Any, field_type: str
 ) -> Any:
     """Safely convert field values to prevent type-related errors.
@@ -1147,7 +1147,7 @@ def _process_external_id_fields(
     return converted_vals, external_id_fields
 
 
-def _handle_create_error(  # noqa: C901
+def _handle_create_error(
     i: int,
     create_error: Exception,
     line: list[Any],
@@ -1246,7 +1246,7 @@ def _handle_tuple_index_error(
     failed_lines.append(padded_failed_line)
 
 
-def _create_batch_individually(  # noqa: C901
+def _create_batch_individually(
     model: Any,
     batch_lines: list[list[Any]],
     batch_header: list[str],
@@ -1677,7 +1677,7 @@ def _handle_fallback_create(
     aggregated_failed_lines.extend(fallback_result.get("failed_lines", []))
 
 
-def _execute_load_batch(  # noqa: C901
+def _execute_load_batch(
     thread_state: dict[str, Any],
     batch_lines: list[list[Any]],
     batch_header: list[str],
@@ -2323,7 +2323,7 @@ def _execute_write_batch(
         }
 
 
-def _run_threaded_pass(  # noqa: C901
+def _run_threaded_pass(
     rpc_thread: RPCThreadImport,
     target_func: Any,
     batches: Iterable[tuple[int, Any]],

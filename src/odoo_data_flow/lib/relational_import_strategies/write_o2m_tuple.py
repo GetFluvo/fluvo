@@ -90,7 +90,7 @@ def _create_relational_records(
         return [], failed_records
 
 
-def run_write_o2m_tuple_import(  # noqa: C901
+def run_write_o2m_tuple_import(
     config: Union[str, dict[str, Any]],
     model: str,
     field: str,

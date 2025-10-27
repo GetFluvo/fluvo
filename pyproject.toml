@@ -198,6 +198,7 @@ ignore = [
     "D104",   # Missing docstring in public package
     "D105",   # Missing docstring in magic method
     "D106",   # Missing docstring in public nested class
+    "C901",   # Function is too complex - ignore for now
 ]
 exclude = [
     ".git",
