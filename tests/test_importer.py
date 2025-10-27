@@ -336,7 +336,7 @@ def test_run_import_invalid_context(mock_show_error: MagicMock) -> None:
 
 
 @patch(
-    "odoo_data_flow.importer.relational_import_strategies.direct.run_direct_relational_import"
+    "odoo_data_flow.lib.relational_import_strategies.direct.run_direct_relational_import"
 )
 @patch("odoo_data_flow.importer.import_threaded.import_data")
 @patch("odoo_data_flow.importer._run_preflight_checks")
@@ -503,7 +503,7 @@ def test_run_import_invalid_json_type_context(mock_show_error: MagicMock) -> Non
 
 @patch("odoo_data_flow.importer.cache.save_id_map")
 @patch(
-    "odoo_data_flow.importer.relational_import_strategies.direct.run_direct_relational_import"
+    "odoo_data_flow.lib.relational_import_strategies.direct.run_direct_relational_import"
 )
 @patch("odoo_data_flow.importer.import_threaded.import_data")
 @patch("odoo_data_flow.importer._run_preflight_checks")

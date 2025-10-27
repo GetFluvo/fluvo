@@ -223,7 +223,7 @@ def test_query_relation_info_from_odoo_value_error(mock_get_conn: MagicMock) -> 
 @patch(
     "odoo_data_flow.lib.relational_import_strategies.direct._derive_missing_relation_info"
 )
-@patch("odoo_data_flow.lib._resolve_related_ids")
+@patch("odoo_data_flow.lib.relational_import_strategies.direct._resolve_related_ids")
 def test_run_direct_relational_import_missing_info(
     mock_resolve_ids: MagicMock, mock_derive_info: MagicMock
 ) -> None:
@@ -294,7 +294,7 @@ def test_run_direct_relational_import_resolve_fail(
 @patch(
     "odoo_data_flow.lib.relational_import_strategies.direct._derive_missing_relation_info"
 )
-@patch("odoo_data_flow.lib._resolve_related_ids")
+@patch("odoo_data_flow.lib.relational_import_strategies.direct._resolve_related_ids")
 def test_run_direct_relational_import_field_not_found(
     mock_resolve_ids: MagicMock, mock_derive_info: MagicMock
 ) -> None:
@@ -341,9 +341,6 @@ def test_prepare_link_dataframe_field_not_found() -> None:
         }
     )
 
-    pl.DataFrame({"external_id": ["p1"], "db_id": [1]})
-    pl.DataFrame({"external_id": ["cat1"], "db_id": [1]})
-
     result = _prepare_link_dataframe(
         "dummy.conf",  # config
         "res.partner.category",  # model
@@ -353,18 +350,13 @@ def test_prepare_link_dataframe_field_not_found() -> None:
         1000,  # batch_size
     )
 
-    # Should return empty DataFrame with expected schema
-    assert result is not None
-    assert result.shape[0] == 0
-    assert "partner_id" in result.columns
-    assert "res.partner.category/id" in result.columns
+    # Should return False when field is not found
+    assert result is False
 
 
 def test_execute_write_tuple_updates_invalid_config_dict() -> None:
     """Test _execute_write_tuple_updates with dictionary config."""
-    link_df = pl.DataFrame(
-        {"external_id": ["p1", "p2"], "res.partner.category/id": [1, 2]}
-    )
+    link_df = pl.DataFrame({"source_id": ["p1", "p2"], "field_value": [1, 2]})
 
     with patch(
         "odoo_data_flow.lib.conf_lib.get_connection_from_dict"
@@ -386,8 +378,11 @@ def test_execute_write_tuple_updates_invalid_config_dict() -> None:
             1000,  # batch_size
         )
 
-        # Should handle dict config and return success status
-        assert isinstance(result, bool)
+        # Should handle dict config and return (successful_updates, failed_records)
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        assert isinstance(result[0], int)  # successful_updates
+        assert isinstance(result[1], list)  # failed_records
 
 
 @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
@@ -397,7 +392,7 @@ def test_execute_write_tuple_updates_model_access_error(
     """Test _execute_write_tuple_updates when model access fails."""
     mock_get_conn.return_value.get_model.side_effect = Exception("Model access error")
 
-    link_df = pl.DataFrame({"external_id": ["p1"], "res.partner.category/id": [1]})
+    link_df = pl.DataFrame({"source_id": ["p1"], "field_value": [1]})
 
     _execute_write_tuple_updates(
         "dummy.conf",
@@ -416,8 +411,8 @@ def test_execute_write_tuple_updates_invalid_related_id_format(
     """Test _execute_write_tuple_updates with invalid related ID format."""
     link_df = pl.DataFrame(
         {
-            "external_id": ["p1"],
-            "res.partner.category/id": ["invalid"],  # Non-numeric ID
+            "source_id": ["p1"],
+            "field_value": ["invalid"],  # Non-numeric ID
         }
     )
 
@@ -434,7 +429,7 @@ def test_execute_write_tuple_updates_invalid_related_id_format(
     )
 
 
-@patch("odoo_data_flow.lib._resolve_related_ids")
+@patch("odoo_data_flow.lib.relational_import_strategies.direct._resolve_related_ids")
 @patch(
     "odoo_data_flow.lib.relational_import_strategies.write_tuple._execute_write_tuple_updates",
     return_value=True,

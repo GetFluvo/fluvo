@@ -177,7 +177,7 @@ def test_run_import_relational_import_paths(
     mock_import_data.return_value = (True, {"id_map": {"1": 101}, "total_records": 1})
 
     with patch(
-        "odoo_data_flow.importer.relational_import_strategies.direct.run_direct_relational_import"
+        "odoo_data_flow.lib.relational_import_strategies.direct.run_direct_relational_import"
     ) as mock_rel_import:
         with patch("odoo_data_flow.importer.Progress"):
             mock_rel_import.return_value = None
@@ -234,7 +234,7 @@ def test_run_import_write_tuple_strategy(
     mock_import_data.return_value = (True, {"id_map": {"1": 101}, "total_records": 1})
 
     with patch(
-        "odoo_data_flow.importer.relational_import_strategies.write_tuple.run_write_tuple_import"
+        "odoo_data_flow.lib.relational_import_strategies.write_tuple.run_write_tuple_import"
     ) as mock_write_tuple:
         with patch("odoo_data_flow.importer.Progress"):
             mock_write_tuple.return_value = True
@@ -293,7 +293,7 @@ def test_run_import_write_o2m_tuple_strategy(
     mock_import_data.return_value = (True, {"id_map": {"1": 101}, "total_records": 1})
 
     with patch(
-        "odoo_data_flow.importer.relational_import_strategies.write_o2m_tuple.run_write_o2m_tuple_import"
+        "odoo_data_flow.lib.relational_import_strategies.write_o2m_tuple.run_write_o2m_tuple_import"
     ) as mock_write_o2m:
         with patch("odoo_data_flow.importer.Progress"):
             mock_write_o2m.return_value = True
