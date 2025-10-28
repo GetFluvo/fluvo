@@ -144,7 +144,7 @@ def test_resolve_related_ids_failure(
         "dummy.conf", "res.partner.category", pl.Series(["cat1", "cat2"])
     )
 
-    assert result == ("unknown", "")
+    assert result is None
 
 
 @patch("odoo_data_flow.lib.conf_lib.get_connection_from_dict")
