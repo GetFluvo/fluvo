@@ -519,7 +519,11 @@ def test_create_relational_records_dict_config() -> None:
             {},  # context
         )
         # Should handle dict config
-        assert isinstance(result, bool)
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        created_ids, failed_records = result
+        assert isinstance(created_ids, list)
+        assert isinstance(failed_records, list)
 
 
 @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")

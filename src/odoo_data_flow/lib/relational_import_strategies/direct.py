@@ -132,7 +132,20 @@ def _derive_missing_relation_info(
             - The derived field type.
             - The derived relation model.
     """
-    # Connect to Odoo to get field information
+    # Derive missing information from Odoo if needed
+    if field_type is None or relation is None:
+        try:
+            result = _query_relation_info_from_odoo(config, model, field)
+            if result is not None:
+                field_type, relation = result
+            else:
+                field_type = field_type or ""
+                relation = relation or ""
+        except Exception as e:
+            log.error(f"Could not query relation info from Odoo: {e}")
+            return pl.DataFrame(), field_type or "", relation or ""
+
+    # Connect to Odoo to get detailed field information
     try:
         if isinstance(config, dict):
             connection = conf_lib.get_connection_from_dict(config)
@@ -175,7 +188,7 @@ def _derive_missing_relation_info(
 
 def _query_relation_info_from_odoo(
     config: Union[str, dict[str, Any]], model: str, field: str
-) -> tuple[str, str]:
+) -> Optional[tuple[str, str]]:
     """Query relation info from Odoo for a specific field.
 
     Args:
@@ -184,8 +197,15 @@ def _query_relation_info_from_odoo(
         field: Field name to query.
 
     Returns:
-        A tuple of (field_type, relation_model).
+        A tuple of (field_type, relation_model), or None on exception.
     """
+    # Handle self-referencing models to avoid constraint errors
+    if model == field:
+        log.debug(
+            f"Self-referencing model detected: {model}.{field}. Returning None to skip."
+        )
+        return None
+
     try:
         if isinstance(config, dict):
             connection = conf_lib.get_connection_from_dict(config)
@@ -200,10 +220,10 @@ def _query_relation_info_from_odoo(
             relation_model = field_info.get("relation", "")
             return field_type, relation_model
         else:
-            return "unknown", ""
+            return None  # Return None when field not found
     except Exception as e:
         log.error(f"Failed to query relation info from Odoo for {model}.{field}: {e}")
-        return "unknown", ""
+        return None  # Return None on exception
 
 
 def _derive_relation_info(
@@ -240,7 +260,12 @@ def _derive_relation_info(
 
     # If no cache or cache miss, derive from Odoo
     if field_type is None or relation is None:
-        field_type, relation = _query_relation_info_from_odoo(config, model, field)
+        result = _query_relation_info_from_odoo(config, model, field)
+        if result is not None:
+            field_type, relation = result
+        else:
+            field_type = field_type or ""
+            relation = relation or ""
 
     # Derive missing information
     relation_df, derived_type, derived_relation = _derive_missing_relation_info(

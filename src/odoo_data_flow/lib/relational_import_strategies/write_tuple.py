@@ -76,7 +76,7 @@ def _prepare_link_dataframe(
                     f"Field '{field}' not found in source data (checked also for '{id_variant}')"
                 )
                 log.error(f"Available columns: {list(source_df.columns)}")
-                return False
+                return None
         elif (field + "/id") in source_df.columns:
             # Both base field and /id variant exist - prefer the /id variant for external IDs
             actual_field_name = field + "/id"
@@ -180,7 +180,7 @@ def _prepare_link_dataframe(
 
     except Exception as e:
         log.error(f"Failed to prepare link dataframe for {model}.{field}: {e}")
-        return False
+        return None
 
 
 def _execute_write_tuple_updates(
