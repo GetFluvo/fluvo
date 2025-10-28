@@ -35,12 +35,9 @@ def test_run_direct_relational_import(
     mock_get_connection_from_config.return_value = mock_connection
     mock_model = MagicMock()
     mock_connection.get_model.return_value = mock_model
-    mock_model.export_data.return_value = {"datas": [["Test"]]}
-
     strategy_details = {
-        "relation_table": "res.partner.category.rel",
-        "relation_field": "partner_id",
-        "relation": "category_id",
+        "type": "many2one",
+        "relation": "res.partner.category",
     }
     id_map = {"p1": 1, "p2": 2}
     progress = Progress()
@@ -102,9 +99,8 @@ def test_run_write_tuple_import(
     mock_model.export_data.return_value = {"datas": [["Test"]]}
 
     strategy_details = {
-        "relation_table": "res.partner.category.rel",
-        "relation_field": "partner_id",
-        "relation": "category_id",
+        "type": "many2one",
+        "relation": "res.partner.category",
     }
     id_map = {"p1": 1, "p2": 2}
     progress = Progress()
