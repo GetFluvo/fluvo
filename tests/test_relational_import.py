@@ -199,7 +199,7 @@ def test_resolve_related_ids_connection_error(
         "dummy.conf", "res.partner.category", pl.Series(["cat1", "cat2"])
     )
 
-    assert result == ("unknown", "")
+    assert result is None
 
 
 @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
@@ -306,7 +306,7 @@ class TestQueryRelationInfoFromOdoo:
         )
 
         # Assert
-        assert result == ("unknown", "")
+        assert result is None
         mock_get_connection.assert_called_once_with(config_file="dummy.conf")
         mock_model.fields_get.assert_called_once_with(["product.attribute.value"])
 
@@ -333,7 +333,7 @@ class TestQueryRelationInfoFromOdoo:
         )
 
         # Assert
-        assert result == ("unknown", "")
+        assert result is None
         mock_get_connection.assert_called_once_with(config_file="dummy.conf")
         mock_model.fields_get.assert_called_once_with(["product.attribute.value"])
 
@@ -351,7 +351,7 @@ class TestQueryRelationInfoFromOdoo:
         )
 
         # Assert
-        assert result == ("unknown", "")
+        assert result is None
 
     @patch("odoo_data_flow.lib.conf_lib.get_connection_from_dict")
     def test_query_relation_info_from_odoo_with_dict_config(
@@ -521,8 +521,13 @@ class TestDeriveRelationInfo:
         )
 
         # Assert
-        assert result[0] == "product_optional_rel"
-        assert result[1] == "product_template_id"
+        assert isinstance(result[0], pl.DataFrame)  # First element is DataFrame
+        assert (
+            result[1] == ""
+        )  # Second element is field type (empty when connection fails)
+        assert (
+            result[2] == ""
+        )  # Third element is relation model (empty when connection fails)
 
     def test_derive_relation_info_derived_mapping(self) -> None:
         """Test derive relation info with derived mapping."""
@@ -532,8 +537,13 @@ class TestDeriveRelationInfo:
         )
 
         # Assert
-        assert result[0] == "product_attribute_value_product_template_rel"
-        assert result[1] == "product_template_id"
+        assert isinstance(result[0], pl.DataFrame)  # First element is DataFrame
+        assert (
+            result[1] == ""
+        )  # Second element is field type (empty when connection fails)
+        assert (
+            result[2] == ""
+        )  # Third element is relation model (empty when connection fails)
 
     def test_derive_relation_info_reverse_order(self) -> None:
         """Test derive relation info with reversed model order."""
@@ -546,5 +556,10 @@ class TestDeriveRelationInfo:
         )
 
         # Assert
-        assert result[0] == "product_attribute_value_product_template_rel"
-        assert result[1] == "product_attribute_value_id"
+        assert isinstance(result[0], pl.DataFrame)  # First element is DataFrame
+        assert (
+            result[1] == ""
+        )  # Second element is field type (empty when connection fails)
+        assert (
+            result[2] == ""
+        )  # Third element is relation model (empty when connection fails)

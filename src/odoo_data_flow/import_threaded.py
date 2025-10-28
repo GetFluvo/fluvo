@@ -2663,7 +2663,9 @@ def _orchestrate_pass_2(
             source_id = reverse_id_map.get(db_id)
             if source_id and source_id in source_data_map:
                 original_row = list(source_data_map[source_id])
-                original_row.append(error_message)
+                # Sanitize error message to prevent CSV formatting issues
+                sanitized_error = _sanitize_error_message(error_message)
+                original_row.append(sanitized_error)
                 failed_lines.append(original_row)
         if failed_lines:
             fail_writer.writerows(failed_lines)

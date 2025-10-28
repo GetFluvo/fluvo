@@ -6,7 +6,7 @@ Restore the Odoo Data Flow project to a stable, production-ready state with all 
 ## Key Knowledge
 - **Technology Stack**: Python 3.13, Polars, Odoo client library, MyPy, Nox, Ruff, Pytest
 - **Architecture**: Modular strategy-based import system with relational import strategies (direct, write_tuple, write_o2m_tuple)
-- **Key Modules**: 
+- **Key Modules**:
   - `src/odoo_data_flow/lib/relational_import_strategies/` - Contains strategy implementations
   - `src/odoo_data_flow/lib/relational_import.py` - Re-exports strategy functions
 - **Testing**: Uses pytest with extensive mocking; 684 total tests in the suite
@@ -14,7 +14,7 @@ Restore the Odoo Data Flow project to a stable, production-ready state with all 
 
 ## Recent Actions
 1. **[DONE]** Fixed 40+ incorrect test patch locations that were pointing to wrong module paths
-2. **[DONE]** Corrected test mock return values to match actual function signatures  
+2. **[DONE]** Corrected test mock return values to match actual function signatures
 3. **[DONE]** Updated import paths from `odoo_data_flow.importer.relational_import_strategies.*` to `odoo_data_flow.lib.relational_import_strategies.*`
 4. **[DONE]** Fixed test expectations to match actual function behavior (e.g., returning `False` vs. DataFrames)
 5. **[DONE]** Restored MyPy type checking to 0 errors
@@ -32,4 +32,4 @@ Restore the Odoo Data Flow project to a stable, production-ready state with all 
 ---
 
 ## Summary Metadata
-**Update time**: 2025-10-28T18:00:00.493Z 
+**Update time**: 2025-10-28T18:00:00.493Z
