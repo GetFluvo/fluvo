@@ -365,8 +365,8 @@ def test_prepare_link_dataframe_field_not_found() -> None:
         1000,  # batch_size
     )
 
-    # Should return False when field is not found
-    assert result is False
+    # Should return None when field is not found
+    assert result is None
 
 
 def test_execute_write_tuple_updates_invalid_config_dict() -> None:
@@ -620,8 +620,8 @@ def test_run_write_o2m_tuple_import_field_not_found(mock_get_conn: MagicMock) ->
             "source.csv",
         )
 
-        # Should return False when field is not found
-        assert result is False
+        # Should return None when field is not found
+        assert result is None
 
 
 @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
