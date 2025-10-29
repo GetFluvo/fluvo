@@ -391,7 +391,23 @@ def _get_csv_header(filename: str, separator: str) -> Optional[list[str]]:
         # Explicitly convert to list[str] to satisfy mypy type checking
         return list(columns) if columns is not None else None
     except Exception as e:
-        _show_error_panel("File Read Error", f"Could not read CSV header. Error: {e}")
+        error_str = str(e).lower()
+        # Check if this is a common CSV parsing error related to wrong separator or malformed data
+        if (
+            "expected" in error_str and "rows" in error_str and "actual" in error_str
+        ) or ("malformed" in error_str):
+            # This indicates a likely separator or formatting issue
+            _show_error_panel(
+                "CSV Parsing Error",
+                f"CSV parsing failed - likely wrong separator or malformed data.\\n"
+                f"The file may not be using the separator you specified (--separator '{separator}').\\n"
+                f"Please check your CSV file format and specify the correct separator.\\n"
+                f"For example, if your CSV uses commas, use '--separator ,'",
+            )
+        else:
+            _show_error_panel(
+                "File Read Error", f"Could not read CSV header. Error: {e}"
+            )
         return None
 
 
@@ -400,6 +416,29 @@ def _validate_header(
 ) -> bool:
     """Validates that all CSV columns exist as fields on the Odoo model."""
     odoo_field_names = set(odoo_fields.keys())
+
+    # Check if any field contains common separators, which might indicate wrong separator used
+    potential_separator_issues = []
+    for field in csv_header:
+        # If a "field name" contains multiple common separators, it might be due to wrong separator
+        if any(separator in field for separator in [",", ";", "\t", "|"]):
+            potential_separator_issues.append(field)
+
+    if potential_separator_issues:
+        error_message = (
+            "Potential CSV separator issue detected:\n"
+            "The following field names appear to contain multiple values separated by common separators.\n"
+            "This often happens when the wrong separator is used for the CSV file.\n"
+            "Please check that you're using the correct separator (--separator option).\n"
+            "For example, if your CSV uses commas, use '--separator ,'\n\n"
+        )
+        for field in potential_separator_issues:
+            error_message += (
+                f"  - Field appears to contain multiple values: '{field}'\n"
+            )
+        _show_error_panel("Potential Separator Issue", error_message)
+        return False
+
     missing_fields = [
         field
         for field in csv_header

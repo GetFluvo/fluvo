@@ -526,8 +526,10 @@ def _create_padded_failed_line(
     Returns:
         A properly padded line with the error message as the final column
     """
+    # Sanitize the error message to prevent CSV formatting issues
+    sanitized_error = _sanitize_error_message(error_message)
     padded_line = _pad_line_to_header_length(line, header_length)
-    return [*padded_line, error_message]
+    return [*padded_line, sanitized_error]
 
 
 def _prepare_pass_2_data(
@@ -824,10 +826,16 @@ def _convert_external_id_field(
                 )
                 return base_field_name, converted_value
             else:
-                # If we can't find the external ID, omit the field entirely
+                # If we can't find the external ID, for the create fallback method,
+                # it might be better to return the original value instead of None,
+                # so that Odoo can provide its own validation error message
+                # However, returning the original external ID string to create
+                # might cause type mismatch errors in some cases
+                # So instead, we'll log the issue and return None to omit the field
                 log.warning(
                     f"Could not find record for external ID '{field_value}', "
-                    f"omitting field {base_field_name} entirely"
+                    f"omitting field {base_field_name} entirely. "
+                    f"This may cause record creation to fail if the field is required."
                 )
                 return base_field_name, None
         except Exception as e:
@@ -1022,7 +1030,10 @@ def _safe_convert_field_value(
         "industry_id",
     }
 
-    if field_name in partner_numeric_fields and field_type in ("many2one", "many2many"):
+    if field_name in partner_numeric_fields and field_type in (
+        "many2one",
+        "many2many",
+    ):
         # For res_partner fields that should be numeric but contain text values,
         # return 0 to prevent tuple index errors when text is sent to numeric fields
         try:
@@ -1759,7 +1770,11 @@ def _execute_load_batch(
                 for row in current_chunk:
                     padded_row = list(row) + [""] * (len(batch_header) - len(row))
                     error_msg = f"All fields in row were ignored by {ignore_list}"
-                    failed_line = [*padded_row, f"Load failed: {error_msg}"]
+                    sanitized_error = _sanitize_error_message(error_msg)
+                    failed_line = [
+                        *padded_row,
+                        f"Load failed: {sanitized_error}",
+                    ]
                     aggregated_failed_lines.append(failed_line)
                 # Move to next chunk
                 lines_to_process = lines_to_process[chunk_size:]
@@ -1783,7 +1798,11 @@ def _execute_load_batch(
                             f"Row has {len(row)} columns but requires "
                             f"at least {max_index + 1} columns based on header"
                         )
-                        failed_line = [*padded_row, f"Load failed: {error_msg}"]
+                        sanitized_error = _sanitize_error_message(error_msg)
+                        failed_line = [
+                            *padded_row,
+                            f"Load failed: {sanitized_error}",
+                        ]
                         aggregated_failed_lines.append(failed_line)
 
         if not load_lines:
@@ -1878,6 +1897,12 @@ def _execute_load_batch(
                     validated_load_lines.append(validated_line)
                 load_lines = validated_load_lines  # Use validated data
 
+            # Validate that we have headers and data before calling load
+            if not load_header or not load_lines:
+                log.warning(
+                    f"No header or data to load for batch {batch_number}, skipping."
+                )
+                continue
             res = model.load(load_header, load_lines, context=context)
 
             if res.get("messages"):
@@ -1939,8 +1964,11 @@ def _execute_load_batch(
                 # error messages
                 for line in current_chunk:
                     # Create properly padded failed line with consistent column count
+                    sanitized_error = _sanitize_error_message(
+                        f"Load failed: {error_msg}"
+                    )
                     padded_failed_line = _create_padded_failed_line(
-                        line, len(batch_header), f"Load failed: {error_msg}"
+                        line, len(batch_header), sanitized_error
                     )
                     aggregated_failed_lines.append(padded_failed_line)
 
@@ -1967,7 +1995,11 @@ def _execute_load_batch(
                             f"Record creation failed - Odoo returned None "
                             f"for record index {i}"
                         )
-                        failed_line = [*list(line), f"Load failed: {error_msg}"]
+                        sanitized_error = _sanitize_error_message(error_msg)
+                        failed_line = [
+                            *list(line),
+                            f"Load failed: {sanitized_error}",
+                        ]
                         aggregated_failed_lines_batch.append(failed_line)
                 else:
                     # Record wasn't in the created_ids list (fewer IDs
@@ -1978,7 +2010,11 @@ def _execute_load_batch(
                         f"only {len(created_ids)} returned by Odoo "
                         f"load() method"
                     )
-                    failed_line = [*list(line), f"Load failed: {error_msg}"]
+                    sanitized_error = _sanitize_error_message(error_msg)
+                    failed_line = [
+                        *list(line),
+                        f"Load failed: {sanitized_error}",
+                    ]
                     aggregated_failed_lines_batch.append(failed_line)
 
             # Log id_map information for debugging
@@ -2015,7 +2051,11 @@ def _execute_load_batch(
                             if message_details
                             else "Unknown error"
                         )
-                        failed_line = [*list(line), f"Load failed: {error_msg}"]
+                        sanitized_error = _sanitize_error_message(error_msg)
+                        failed_line = [
+                            *list(line),
+                            f"Load failed: {sanitized_error}",
+                        ]
                         if (
                             failed_line not in aggregated_failed_lines
                         ):  # Avoid duplicates
@@ -2389,7 +2429,7 @@ def _run_threaded_pass(
                     consecutive_failures += 1
                     # Only abort after a very large number of consecutive failures
                     # to allow processing of datasets with many validation errors
-                    if consecutive_failures >= 500:  # Increased from 50 to 500
+                    if consecutive_failures >= 1000:  # Increased from 50 to 1000
                         log.warning(
                             f"Stopping import: {consecutive_failures} "
                             f"consecutive batches have failed. "

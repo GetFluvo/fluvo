@@ -99,6 +99,9 @@ class RPCThreadWrite(RpcThread):
 
             for dict_items, record_ids in grouped_updates.items():
                 values_to_write = dict(dict_items)
+                # Skip write operation if there are no record IDs to update
+                if not record_ids:
+                    continue
                 try:
                     self.model.write(record_ids, values_to_write)
                     log.debug(

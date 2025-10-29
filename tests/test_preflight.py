@@ -1010,6 +1010,32 @@ class TestValidateHeader:
         assert "non-stored" in call_args[0][1]
         assert "1 non-stored readonly" in call_args[0][1]
 
+    def test_validate_header_detects_separator_issues(
+        self, mock_show_error_panel: MagicMock
+    ) -> None:
+        """Verify _validate_header detects potential separator issues."""
+        # Test with a field that contains commas (typical CSV separator issue)
+        csv_header = [
+            "id,name,parent_id/id,is_company,street"
+        ]  # Single field but looks like multiple fields
+        odoo_fields = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+            "parent_id": {"type": "many2one", "relation": "res.partner"},
+            "is_company": {"type": "boolean"},
+            "street": {"type": "char"},
+        }
+
+        result = preflight._validate_header(csv_header, odoo_fields, "res.partner")
+        assert result is False
+        mock_show_error_panel.assert_called_once()
+        call_args = mock_show_error_panel.call_args
+        assert call_args[0][0] == "Potential Separator Issue"
+        assert "Potential CSV separator issue detected:" in call_args[0][1]
+        assert "multiple values separated by common separators" in call_args[0][1]
+        assert "id,name,parent_id/id,is_company,street" in call_args[0][1]
+        assert "Please check that you're using the correct separator" in call_args[0][1]
+
 
 def test_type_correction_check_no_corrections_needed(tmp_path: Path) -> None:
     """Test type correction check when no corrections are needed."""
