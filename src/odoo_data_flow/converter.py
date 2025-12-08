@@ -63,7 +63,12 @@ def run_path_to_image(
     if cast_expressions:
         result_df = result_df.with_columns(cast_expressions)
 
-    result_df.write_csv(out, separator=delimiter)
+    result_df.write_csv(
+        out,
+        separator=delimiter,
+        date_format="%Y-%m-%d",
+        datetime_format="%Y-%m-%d %H:%M:%S",
+    )
 
 
 def run_url_to_image(
@@ -106,4 +111,9 @@ def run_url_to_image(
     if cast_expressions:
         result_df = result_df.with_columns(cast_expressions)
 
-    result_df.write_csv(out, separator=delimiter)
+    result_df.write_csv(
+        out,
+        separator=delimiter,
+        date_format="%Y-%m-%d",
+        datetime_format="%Y-%m-%d %H:%M:%S",
+    )

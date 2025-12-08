@@ -219,18 +219,14 @@ class RPCThreadExport(RpcThread):
                                 new_record[field] = (
                                     value[1]
                                     if len(value) >= 2
-                                    else str(value[0])
-                                    if value
-                                    else None
+                                    else str(value[0]) if value else None
                                 )
                         else:
                             # For regular many-to-one relationships
                             new_record[field] = (
                                 value[1]
                                 if len(value) >= 2
-                                else str(value[0])
-                                if value
-                                else None
+                                else str(value[0]) if value else None
                             )
                     else:
                         # Value is not a list/tuple, just assign it
@@ -594,7 +590,14 @@ def _clean_and_transform_batch(
     transform_exprs = []
     for col_name in df.columns:
         if df[col_name].dtype in (pl.List, pl.Object):
-            transform_exprs.append(pl.col(col_name).cast(pl.String))
+            # Handle complex types including List[Null] that cannot be directly cast to String
+            # Use map_elements with a safe string conversion that handles all data types
+            transform_exprs.append(
+                pl.col(col_name).map_elements(
+                    lambda x: str(x) if x is not None else "",
+                    return_dtype=pl.String
+                ).alias(col_name)
+            )
     if transform_exprs:
         df = df.with_columns(transform_exprs)
 
@@ -656,6 +659,29 @@ def _clean_and_transform_batch(
             df = df.with_columns(
                 pl.lit(None, dtype=polars_schema[col_name]).alias(col_name)
             )
+
+    # Step 5.5: Parse date and datetime strings before casting.
+    # Odoo returns dates/datetimes as strings that need explicit parsing.
+    # Direct casting with strict=False silently converts unparseable strings to null.
+    datetime_parse_exprs = []
+    for col_name, dtype in polars_schema.items():
+        if col_name in df.columns and df[col_name].dtype == pl.String:
+            if dtype == pl.Datetime or (isinstance(dtype, pl.Datetime)):
+                # Parse datetime strings in Odoo's format: "YYYY-MM-DD HH:MM:SS"
+                datetime_parse_exprs.append(
+                    pl.col(col_name)
+                    .str.to_datetime("%Y-%m-%d %H:%M:%S", strict=False)
+                    .alias(col_name)
+                )
+            elif dtype == pl.Date or (isinstance(dtype, pl.Date)):
+                # Parse date strings in Odoo's format: "YYYY-MM-DD"
+                datetime_parse_exprs.append(
+                    pl.col(col_name)
+                    .str.to_date("%Y-%m-%d", strict=False)
+                    .alias(col_name)
+                )
+    if datetime_parse_exprs:
+        df = df.with_columns(datetime_parse_exprs)
 
     # Step 6: Final cast to the target schema.
     casted_df = df.cast(polars_schema, strict=False)
@@ -802,18 +828,26 @@ def _process_export_batches(
                                         f,
                                         separator=separator,
                                         include_header=False,
+                                        date_format="%Y-%m-%d",
+                                        datetime_format="%Y-%m-%d %H:%M:%S",
                                     )
                             else:
                                 final_batch_df.write_csv(
                                     output,
                                     separator=separator,
                                     include_header=True,
+                                    date_format="%Y-%m-%d",
+                                    datetime_format="%Y-%m-%d %H:%M:%S",
                                 )
                             header_written = True
                         else:
                             with open(output, "a", newline="", encoding=encoding) as f:
                                 final_batch_df.write_csv(
-                                    f, separator=separator, include_header=False
+                                    f,
+                                    separator=separator,
+                                    include_header=False,
+                                    date_format="%Y-%m-%d",
+                                    datetime_format="%Y-%m-%d %H:%M:%S",
                                 )
                     else:
                         all_cleaned_dfs.append(final_batch_df)
@@ -851,9 +885,20 @@ def _process_export_batches(
         if output:
             if is_resuming:
                 with open(output, "a", newline="", encoding=encoding) as f:
-                    empty_df.write_csv(f, separator=separator, include_header=False)
+                    empty_df.write_csv(
+                        f,
+                        separator=separator,
+                        include_header=False,
+                        date_format="%Y-%m-%d",
+                        datetime_format="%Y-%m-%d %H:%M:%S",
+                    )
             else:
-                empty_df.write_csv(output, separator=separator)
+                empty_df.write_csv(
+                    output,
+                    separator=separator,
+                    date_format="%Y-%m-%d",
+                    datetime_format="%Y-%m-%d %H:%M:%S",
+                )
         return empty_df
 
     final_df = pl.concat(all_cleaned_dfs)
@@ -861,9 +906,20 @@ def _process_export_batches(
         log.info(f"Writing {len(final_df)} records to {output}...")
         if is_resuming:
             with open(output, "a", newline="", encoding=encoding) as f:
-                final_df.write_csv(f, separator=separator, include_header=False)
+                final_df.write_csv(
+                    f,
+                    separator=separator,
+                    include_header=False,
+                    date_format="%Y-%m-%d",
+                    datetime_format="%Y-%m-%d %H:%M:%S",
+                )
         else:
-            final_df.write_csv(output, separator=separator)
+            final_df.write_csv(
+                output,
+                separator=separator,
+                date_format="%Y-%m-%d",
+                datetime_format="%Y-%m-%d %H:%M:%S",
+            )
 
         if not rpc_thread.has_failures:
             log.info("Export complete.")
@@ -1083,7 +1139,12 @@ def export_data(
     if not ids_to_export:
         log.info("All records have already been exported. Nothing to do.")
         if output and not Path(output).exists():
-            pl.DataFrame(schema=header).write_csv(output, separator=separator)
+            pl.DataFrame(schema=header).write_csv(
+                output,
+                separator=separator,
+                date_format="%Y-%m-%d",
+                datetime_format="%Y-%m-%d %H:%M:%S",
+            )
         if not is_resuming:
             shutil.rmtree(session_dir)
         return True, session_id, total_record_count, pl.DataFrame(schema=header)
