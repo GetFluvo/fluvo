@@ -190,6 +190,7 @@ def _execute_write_tuple_updates(
     link_df: pl.DataFrame,
     id_map: dict[str, int],
     batch_size: int,
+    context: Optional[dict[str, Any]] = None,
 ) -> tuple[int, list[dict[str, Any]]]:
     """Execute write tuple updates for a batch of records.
 
@@ -246,7 +247,10 @@ def _execute_write_tuple_updates(
             if update_data:
                 try:
                     # Execute the write operation
-                    model_obj.write(update_data)
+                    if context:
+                        model_obj.with_context(**context).write(update_data)
+                    else:
+                        model_obj.write(update_data)
                     successful_updates += len(update_data)
                 except Exception as e:
                     # Record failures for this batch
@@ -291,6 +295,7 @@ def run_write_tuple_import(
     progress: Progress,
     task_id: TaskID,
     filename: str,
+    context: Optional[dict[str, Any]] = None,
 ) -> bool:
     """Run the write tuple import strategy.
 
@@ -329,7 +334,7 @@ def run_write_tuple_import(
 
         # Execute the write tuple updates
         successful_updates, failed_records = _execute_write_tuple_updates(
-            config, model, field, link_df, id_map, batch_size
+            config, model, field, link_df, id_map, batch_size, context
         )
 
         # Report results

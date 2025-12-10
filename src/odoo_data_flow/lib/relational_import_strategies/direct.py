@@ -36,7 +36,7 @@ def _resolve_related_ids(
         if isinstance(config, dict):
             connection = conf_lib.get_connection_from_dict(config)
         else:
-            connection = conf_lib.get_connection_from_config(config)
+            connection = conf_lib.get_connection_from_config(config_file=config)
     except Exception as e:
         log.error(f"Could not connect to Odoo: {e}")
         return None
@@ -150,7 +150,7 @@ def _derive_missing_relation_info(
         if isinstance(config, dict):
             connection = conf_lib.get_connection_from_dict(config)
         else:
-            connection = conf_lib.get_connection_from_config(config)
+            connection = conf_lib.get_connection_from_config(config_file=config)
         model_obj = connection.get_model(model)
     except Exception as e:
         log.error(f"Could not connect to Odoo to derive relation info: {e}")
@@ -210,7 +210,7 @@ def _query_relation_info_from_odoo(
         if isinstance(config, dict):
             connection = conf_lib.get_connection_from_dict(config)
         else:
-            connection = conf_lib.get_connection_from_config(config)
+            connection = conf_lib.get_connection_from_config(config_file=config)
         model_obj = connection.get_model(model)
 
         fields_info = model_obj.fields_get([field])
@@ -293,6 +293,7 @@ def run_direct_relational_import(
     progress: Progress,
     task_id: TaskID,
     filename: str,
+    context: Optional[dict[str, Any]] = None,
 ) -> Optional[dict[str, Any]]:
     """Run the direct relational import strategy.
 
@@ -368,7 +369,7 @@ def run_direct_relational_import(
         if isinstance(config, dict):
             connection = conf_lib.get_connection_from_dict(config)
         else:
-            connection = conf_lib.get_connection_from_config(config)
+            connection = conf_lib.get_connection_from_config(config_file=config)
         model_obj = connection.get_model(model)
 
         # Process in batches
@@ -399,7 +400,10 @@ def run_direct_relational_import(
                     ]
 
                     # Perform the write operation
-                    model_obj.write(update_data)
+                    if context:
+                        model_obj.with_context(**context).write(update_data)
+                    else:
+                        model_obj.write(update_data)
                     success_count += len(valid_updates)
                 except Exception as e:
                     log.error(f"Failed to update batch {i // batch_size + 1}: {e}")
