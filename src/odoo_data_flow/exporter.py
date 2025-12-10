@@ -142,7 +142,7 @@ def run_export_for_migration(
     domain: str = "[]",
     worker: int = 1,
     batch_size: int = 10,
-    context: str = "{'tracking_disable' : True}",
+    context: str = "{'tracking_disable': True, 'mail_create_nolog': True, 'mail_notrack': True, 'import_file': True}",
     encoding: str = "utf-8",
     technical_names: bool = False,
 ) -> tuple[Optional[list[str]], Optional[list[list[Any]]]]:
