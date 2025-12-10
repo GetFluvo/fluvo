@@ -14,85 +14,70 @@ from odoo_data_flow.lib.relational_import_strategies.direct import (
 class TestResolveRelatedIds:
     """Test _resolve_related_ids function."""
 
-    @patch("odoo_data_flow.lib.conf_lib")
-    @patch("odoo_data_flow.lib.cache")
+    @patch("odoo_data_flow.lib.relational_import_strategies.direct.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.lib.cache.load_id_map")
     def test_resolve_related_ids_success(
-        self, mock_cache: Mock, mock_conf_lib: Mock
+        self, mock_load_id_map: Mock, mock_get_connection: Mock
     ) -> None:
         """Test resolving related IDs successfully."""
         # Mock cache behavior
-        mock_cache.load_id_map.return_value = None  # Force fallback to bulk resolution
+        mock_load_id_map.return_value = None  # Force fallback to bulk resolution
 
         # Mock connection
         mock_connection = Mock()
         mock_model = Mock()
+        mock_get_connection.return_value = mock_connection
         mock_connection.get_model.return_value = mock_model
-        mock_model.search_read.return_value = [{"res_id": 1, "name": "Test"}]
-        mock_conf_lib.get_connection_from_config.return_value = mock_connection
-
-        # Create a temporary config file
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as f:
-            f.write(
-                "[Connection]\nhostname=localhost\ndatabase=test_db\nlogin=admin\npassword=secret\nport=8069\n"
-            )
-            config_file = f.name
+        mock_model.search_read.return_value = [
+            {"name": "test_id", "res_id": 1}
+        ]
 
         result = _resolve_related_ids(
-            config=config_file,
+            config="dummy.conf",  # Use dummy config since it's mocked
             related_model="res.partner",
             external_ids=pl.Series(["test_id"]),
         )
         assert result is not None
 
-    @patch("odoo_data_flow.lib.conf_lib")
-    @patch("odoo_data_flow.lib.cache")
+    @patch("odoo_data_flow.lib.relational_import_strategies.direct.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.lib.cache.load_id_map")
     def test_resolve_related_ids_empty_result(
-        self, mock_cache: Mock, mock_conf_lib: Mock
+        self, mock_load_id_map: Mock, mock_get_connection: Mock
     ) -> None:
         """Test resolving related IDs when no records found."""
-        mock_cache.load_id_map.return_value = None
+        mock_load_id_map.return_value = None
 
         mock_connection = Mock()
         mock_model = Mock()
+        mock_get_connection.return_value = mock_connection
         mock_connection.get_model.return_value = mock_model
         mock_model.search_read.return_value = []
-        mock_conf_lib.get_connection_from_config.return_value = mock_connection
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as f:
-            f.write(
-                "[Connection]\nhostname=localhost\ndatabase=test_db\nlogin=admin\npassword=secret\nport=8069\n"
-            )
-            config_file = f.name
-
+        
         result = _resolve_related_ids(
-            config=config_file,
+            config="dummy.conf",  # Use dummy config since it's mocked
             related_model="res.partner",
             external_ids=pl.Series(["nonexistent"]),
         )
-        assert result is None
+        # Should return an empty DataFrame, not None
+        assert result is not None  # Empty DataFrame, not None
+        assert result.height == 0  # Empty result
 
-    @patch("odoo_data_flow.lib.conf_lib")
-    @patch("odoo_data_flow.lib.cache")
+    @patch("odoo_data_flow.lib.relational_import_strategies.direct.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.lib.cache.load_id_map")
     def test_resolve_related_ids_exception(
-        self, mock_cache: Mock, mock_conf_lib: Mock
+        self, mock_load_id_map: Mock, mock_get_connection: Mock
     ) -> None:
         """Test resolving related IDs when an exception occurs."""
-        mock_cache.load_id_map.return_value = None
+        mock_load_id_map.return_value = None
 
         mock_connection = Mock()
         mock_model = Mock()
+        mock_get_connection.return_value = mock_connection
         mock_connection.get_model.return_value = mock_model
         mock_model.search_read.side_effect = Exception("Connection error")
-        mock_conf_lib.get_connection_from_config.return_value = mock_connection
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as f:
-            f.write(
-                "[Connection]\nhostname=localhost\ndatabase=test_db\nlogin=admin\npassword=secret\nport=8069\n"
-            )
-            config_file = f.name
-
+        
         result = _resolve_related_ids(
-            config=config_file,
+            config="dummy.conf",  # Use dummy config since it's mocked
             related_model="res.partner",
             external_ids=pl.Series(["test"]),
         )

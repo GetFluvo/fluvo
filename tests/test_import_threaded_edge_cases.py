@@ -108,7 +108,7 @@ def test_run_threaded_pass_abort_logic() -> None:
     mock_future = MagicMock()
     mock_future.result.return_value = {"success": False}
 
-    mock_futures = [mock_future] * 510  # More than 500 to trigger abort
+    mock_futures = [mock_future] * 1001  # More than 1000 to trigger abort
 
     with patch("concurrent.futures.as_completed") as mock_as_completed:
         mock_as_completed.return_value = mock_futures
@@ -118,7 +118,7 @@ def test_run_threaded_pass_abort_logic() -> None:
             pass
 
         result, aborted = _run_threaded_pass(
-            mock_rpc_thread, dummy_target, [(i, None) for i in range(510)], {}
+            mock_rpc_thread, dummy_target, [(i, None) for i in range(1001)], {}
         )
 
         # Should abort after too many consecutive failures

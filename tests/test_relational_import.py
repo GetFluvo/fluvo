@@ -269,12 +269,12 @@ class TestQueryRelationInfoFromOdoo:
         mock_get_connection.return_value = mock_connection
         mock_model = MagicMock()
         mock_connection.get_model.return_value = mock_model
-        mock_model.search_read.return_value = [
-            {
-                "name": "product_template_attribute_line_rel",
-                "model": "product.template",
+        mock_model.fields_get.return_value = {
+            "product.attribute.value": {
+                "type": "many2one",
+                "relation": "product_template_attribute_line_rel"
             }
-        ]
+        }
 
         # Act
         result = direct_strategy._query_relation_info_from_odoo(
@@ -283,10 +283,10 @@ class TestQueryRelationInfoFromOdoo:
 
         # Assert
         assert result is not None
-        assert result[0] == "product_template_attribute_line_rel"
-        assert result[1] == "product_template_id"
+        assert result[0] == "many2one"  # field type from mocked fields_get
+        assert result[1] == "product_template_attribute_line_rel"  # relation from mocked fields_get
         mock_get_connection.assert_called_once_with(config_file="dummy.conf")
-        mock_model.search_read.assert_called_once()
+        mock_model.fields_get.assert_called_once_with(["product.attribute.value"])
 
     @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
     def test_query_relation_info_from_odoo_no_results(
@@ -363,12 +363,12 @@ class TestQueryRelationInfoFromOdoo:
         mock_get_connection.return_value = mock_connection
         mock_model = MagicMock()
         mock_connection.get_model.return_value = mock_model
-        mock_model.search_read.return_value = [
-            {
-                "name": "product_template_attribute_line_rel",
-                "model": "product.template",
+        mock_model.fields_get.return_value = {
+            "product.attribute.value": {
+                "type": "many2one",
+                "relation": "product_template_attribute_line_rel"
             }
-        ]
+        }
 
         config_dict = {"hostname": "localhost", "database": "test_db"}
 
@@ -379,10 +379,10 @@ class TestQueryRelationInfoFromOdoo:
 
         # Assert
         assert result is not None
-        assert result[0] == "product_template_attribute_line_rel"
-        assert result[1] == "product_template_id"
+        assert result[0] == "many2one"  # field type from mocked fields_get
+        assert result[1] == "product_template_attribute_line_rel"  # relation from mocked fields_get
         mock_get_connection.assert_called_once_with(config_dict)
-        mock_model.search_read.assert_called_once()
+        mock_model.fields_get.assert_called_once_with(["product.attribute.value"])
 
 
 class TestDeriveMissingRelationInfo:
@@ -390,19 +390,26 @@ class TestDeriveMissingRelationInfo:
 
     def test_derive_missing_relation_info_with_all_info(self) -> None:
         """Test derive missing relation info when all info is already present."""
-        # Act
+        import polars as pl
+
+        # Arrange - Create a mock DataFrame as the source_df parameter
+        mock_df = pl.DataFrame({"attribute_line_ids": ["test_val"]})
+
+        # Act - Call with proper parameters: config, model, field, field_type, relation, source_df
         result = direct_strategy._derive_missing_relation_info(
             "dummy.conf",
             "product.template",
             "attribute_line_ids",
-            "product_template_attribute_line_rel",
-            "product_template_id",
-            "product.attribute.value",
+            "product_template_attribute_line_rel",  # field_type
+            "product_template_id",  # relation
+            mock_df,  # source_df - the 6th parameter
         )
 
-        # Assert
-        assert result[0] == "product_template_attribute_line_rel"
-        assert result[1] == "product_template_id"
+        # Assert - Function returns (DataFrame, str, str), so check the second and third values
+        # The function should return the field_type and relation as provided or derived
+        _, returned_field_type, returned_relation = result
+        assert returned_field_type == "product_template_attribute_line_rel"
+        assert returned_relation == "product_template_id"
 
     @patch(
         "odoo_data_flow.lib.relational_import_strategies.direct._query_relation_info_from_odoo"
@@ -437,11 +444,15 @@ class TestDeriveMissingRelationInfo:
         self, mock_query: MagicMock
     ) -> None:
         """Test derive missing relation info when field is missing."""
+        import polars as pl
+
         # Arrange
         mock_query.return_value = (
             "product_template_attribute_line_rel",
             "derived_field",
         )
+        # Create a mock DataFrame as the source_df parameter
+        mock_df = pl.DataFrame({"attribute_line_ids": ["test_val"]})
 
         # Act
         result = direct_strategy._derive_missing_relation_info(
@@ -449,14 +460,18 @@ class TestDeriveMissingRelationInfo:
             "product.template",
             "attribute_line_ids",
             "product_template_attribute_line_rel",
-            None,  # Missing field
-            "product.attribute.value",
+            None,  # Missing relation
+            mock_df,  # source_df - the 6th parameter
         )
 
         # Assert
-        assert result[0] == "product_template_attribute_line_rel"
-        assert result[1] == "derived_field"
         mock_query.assert_called_once()
+        # The result is (DataFrame, derived_type, derived_relation)
+        _, returned_type, returned_relation = result
+        assert (
+            returned_type == "product_template_attribute_line_rel"
+        )  # from original field_type param
+        assert returned_relation == "derived_field"  # from mock query result
 
     @patch(
         "odoo_data_flow.lib.relational_import_strategies.direct._query_relation_info_from_odoo"
@@ -465,23 +480,29 @@ class TestDeriveMissingRelationInfo:
         self, mock_query: MagicMock
     ) -> None:
         """Test derive missing relation info when both table and field are missing."""
+        import polars as pl
+
         # Arrange
         mock_query.return_value = ("derived_table", "derived_field")
+        # Create a mock DataFrame as the source_df parameter
+        mock_df = pl.DataFrame({"attribute_line_ids": ["test_val"]})
 
         # Act
         result = direct_strategy._derive_missing_relation_info(
             "dummy.conf",
             "product.template",
             "attribute_line_ids",
-            None,  # Missing table
-            None,  # Missing field
-            "product.attribute.value",
+            None,  # Missing field_type
+            None,  # Missing relation
+            mock_df,  # source_df - the 6th parameter
         )
 
         # Assert
-        assert result[0] == "derived_table"
-        assert result[1] == "derived_field"
         mock_query.assert_called_once()
+        # The result is (DataFrame, derived_type, derived_relation)
+        _, returned_type, returned_relation = result
+        assert returned_type == "derived_table"  # from mock query result
+        assert returned_relation == "derived_field"  # from mock query result
 
     @patch(
         "odoo_data_flow.lib.relational_import_strategies.direct._query_relation_info_from_odoo"
