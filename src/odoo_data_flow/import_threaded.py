@@ -23,6 +23,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
+from .constants import DEFAULT_TRACKING_CONTEXT
 from .lib import conf_lib
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch, to_xmlid
@@ -1163,6 +1164,7 @@ def _handle_create_error(
     create_error: Exception,
     line: list[Any],
     error_summary: str,
+    header_length: Optional[int] = None,
 ) -> tuple[str, list[Any], str]:
     """Handle errors during record creation.
 
@@ -1171,6 +1173,7 @@ def _handle_create_error(
         create_error: The exception that occurred
         line: The data line being processed
         error_summary: Current error summary
+        header_length: Number of columns expected in the header (optional)
 
     Returns:
         Tuple of (error_message, failed_line, error_summary)
@@ -1224,8 +1227,19 @@ def _handle_create_error(
 
     # Apply comprehensive error message sanitization to ensure CSV safety
     sanitized_error = _sanitize_error_message(error_message)
-    failed_line = [*line, sanitized_error]
-    return sanitized_error, failed_line, error_summary
+
+    # Create properly padded failed line with consistent column count
+    if header_length is not None:
+        # Use the standardized function to ensure proper column count when header length is provided
+        padded_failed_line = _create_padded_failed_line(
+            line, header_length, sanitized_error
+        )
+    else:
+        # Maintain backward compatibility for existing test calls
+        # Add error message to the end of the line (legacy format)
+        padded_failed_line = [*line, sanitized_error]
+
+    return sanitized_error, padded_failed_line, error_summary
 
 
 def _handle_tuple_index_error(
@@ -1408,20 +1422,34 @@ def _create_batch_individually(
                     # Make sure context is clean too to avoid any formatting issues
                     clean_context = {}
                     if context:
-                        # Only include context values that are basic types to avoid RPC serialization issues
+                        # Only include context values that are basic types or specific keys to avoid RPC serialization issues
                         for k, v in context.items():
-                            if isinstance(v, (str, int, float, bool, type(None))):
+                            if (
+                                k
+                                in (
+                                    "tracking_disable",
+                                    "mail_create_nolog",
+                                    "mail_notrack",
+                                    "import_file",
+                                )
+                                or isinstance(v, (str, int, float, bool))
+                            ):
                                 clean_context[k] = v
                             else:
                                 # Convert complex types to strings to prevent RPC issues
                                 clean_context[k] = str(v)
+                    # Ensure tracking off
+                    if "tracking_disable" not in clean_context:
+                        clean_context["tracking_disable"] = True
+
+                    log.info(f"DEBUG: _create_batch_individually context: {clean_context}")
 
                     # Call create with extremely clean data to avoid server-side argument unpacking errors
                     # Use the safest possible call format to prevent server-side tuple index errors
                     # The error in odoo/api.py:525 suggests issues with argument unpacking format
                     if clean_context:
-                        new_record = model.with_context(**clean_context).create(
-                            vals_for_create
+                        new_record = model.create(
+                            vals_for_create, context=clean_context
                         )
                     else:
                         new_record = model.create(vals_for_create)
@@ -1620,7 +1648,11 @@ def _create_batch_individually(
                     f"{source_id}: {create_error}"
                 )
                 sanitized_error = _sanitize_error_message(error_message)
-                failed_lines.append([*line, sanitized_error])
+                # Create properly padded failed line with consistent column count
+                padded_failed_line = _create_padded_failed_line(
+                    line, header_len, sanitized_error
+                )
+                failed_lines.append(padded_failed_line)
                 continue
 
             # Special handling for database serialization errors in create operations
@@ -1640,7 +1672,7 @@ def _create_batch_individually(
                 continue
 
             error_message, new_failed_line, error_summary = _handle_create_error(
-                i, create_error, line, error_summary
+                i, create_error, line, error_summary, header_len
             )
             failed_lines.append(new_failed_line)
     return {
@@ -1714,10 +1746,11 @@ def _execute_load_batch(
     """
     model, context, progress = (
         thread_state["model"],
-        thread_state.get("context", {"tracking_disable": True}),
+        thread_state.get("context", DEFAULT_TRACKING_CONTEXT),
         thread_state["progress"],
     )
     uid_index = thread_state["unique_id_field_index"]
+    log.info(f"DEBUG: _execute_load_batch context: {context}")
     ignore_list = thread_state.get("ignore_list", [])
 
     if thread_state.get("force_create"):
@@ -1771,10 +1804,10 @@ def _execute_load_batch(
                     padded_row = list(row) + [""] * (len(batch_header) - len(row))
                     error_msg = f"All fields in row were ignored by {ignore_list}"
                     sanitized_error = _sanitize_error_message(error_msg)
-                    failed_line = [
-                        *padded_row,
-                        f"Load failed: {sanitized_error}",
-                    ]
+                    # Use the standardized function to ensure proper column count
+                    failed_line = _create_padded_failed_line(
+                        row, len(batch_header), f"Load failed: {sanitized_error}"
+                    )
                     aggregated_failed_lines.append(failed_line)
                 # Move to next chunk
                 lines_to_process = lines_to_process[chunk_size:]
@@ -1903,7 +1936,49 @@ def _execute_load_batch(
                     f"No header or data to load for batch {batch_number}, skipping."
                 )
                 continue
-            res = model.load(load_header, load_lines, context=context)
+
+            # Final validation: Double-check that all rows have the correct length
+            # This is critical for preventing server-side tuple index errors
+            for idx, line in enumerate(load_lines):
+                if len(line) != len(load_header):
+                    raise IndexError(
+                        f"Row {idx} has {len(line)} values but header has {len(load_header)} fields. "
+                        f"This will cause a 'tuple index out of range' error in Odoo's server API. "
+                        f"Data: {line[:10]}{'...' if len(line) > 10 else ''}. "
+                        f"Header: {load_header[:10]}{'...' if len(load_header) > 10 else ''}"
+                    )
+
+            # Additional validation: Check for potentially problematic data values
+            # that could cause RPC serialization issues leading to the tuple index error
+            for row_idx, row in enumerate(load_lines):
+                for col_idx, value in enumerate(row):
+                    # Check for None values which could cause issues in certain contexts
+                    if value is None:
+                        # Convert to empty string to prevent RPC serialization issues
+                        load_lines[row_idx][col_idx] = ""
+                    # Check for problematic types that might cause serialization issues
+                    elif isinstance(value, (list, tuple)) and len(value) == 0:
+                        # Empty lists/tuples might cause server-side errors
+                        load_lines[row_idx][col_idx] = ""
+                    elif not isinstance(value, (str, int, float, bool)):
+                        # Convert other types to string to prevent RPC issues
+                        load_lines[row_idx][col_idx] = str(value) if value is not None else ""
+
+            try:
+                res = model.load(load_header, load_lines, context=context)
+            except IndexError as e:
+                # Catch the specific tuple index error that occurs server-side
+                # This can happen when RPC arguments are malformed due to data issues
+                if "tuple index out of range" in str(e):
+                    log.error(
+                        f"Server-side tuple index error caught for batch {batch_number}: {e}. "
+                        f"This typically occurs when data values cause RPC serialization issues."
+                    )
+                    # Process each record individually to avoid server-side tuple index errors
+                    raise
+                else:
+                    # Some other IndexError
+                    raise
 
             if res.get("messages"):
                 res["messages"][0].get("message", "Batch load failed.")
@@ -1953,24 +2028,7 @@ def _execute_load_batch(
                         f"Some records may have failed validation."
                     )
 
-            # Instead of raising an exception, capture failures for the fail file
-            # But still create what records we can
-            if res.get("messages"):
-                # Extract error information and add to failed_lines to be written
-                # to fail file
-                error_msg = res["messages"][0].get("message", "Batch load failed.")
-                log.error(f"Capturing load failure for fail file: {error_msg}")
-                # Add all current chunk records to failed lines since there are
-                # error messages
-                for line in current_chunk:
-                    # Create properly padded failed line with consistent column count
-                    sanitized_error = _sanitize_error_message(
-                        f"Load failed: {error_msg}"
-                    )
-                    padded_failed_line = _create_padded_failed_line(
-                        line, len(batch_header), sanitized_error
-                    )
-                    aggregated_failed_lines.append(padded_failed_line)
+
 
             # Create id_map and track failed records separately
             id_map = {}
@@ -2036,11 +2094,43 @@ def _execute_load_batch(
                     f"for chunk of {len(current_chunk)} records, "
                     f"{len(created_ids)} of which were successfully created"
                 )
-                # Only add records to failed lines that weren't successfully created
-                # This prevents successfully imported records from being incorrectly marked as failed
+                # Add records to failed lines if they have server errors (even if they got IDs) or weren't successfully created
+                # This ensures records that got placeholder/null IDs but had server errors are properly captured
                 for i, line in enumerate(current_chunk):
-                    # Only mark as failed if this record was not in the successfully created list
+                    should_mark_as_failed = False
+
+                    # Mark as failed if record wasn't successfully created
                     if i >= len(created_ids) or created_ids[i] is None:
+                        should_mark_as_failed = True
+                    else:
+                        # Check if this record might have been involved in the server error
+                        # For errors like "No matching record found for external id",
+                        # we should check if this record contains the problematic external ID
+                        message_details = res.get("messages", [])
+                        if message_details:
+                            error_msg = str(
+                                message_details[0].get(
+                                    "message", "Unknown error from Odoo server"
+                                )
+                            )
+                            # If error message contains external ID info, check if this record references it
+                            if "external id" in error_msg.lower() or "not found" in error_msg.lower():
+                                # Check if current line has problematic external ID references in any field
+                                line_str = " ".join(str(x) for x in line if x is not None).lower()
+                                # Check if any field contains external ID patterns that might be related to the error
+                                if any(field.endswith("/id") for field in batch_header):
+                                    # This record has external ID fields, which could be affected by external ID errors
+                                    should_mark_as_failed = True
+                                # Or check if the error message mentions a specific external ID that might be related
+                                # Just be more cautious and assume records with external ID fields are potentially affected
+                                elif "product_template." in line_str or "res_partner." in line_str:
+                                    should_mark_as_failed = True
+                                # If it's a general external ID error affecting the batch, all records might be impacted
+                                else:
+                                    # Default to being more inclusive about failures to avoid missing records
+                                    should_mark_as_failed = True
+
+                    if should_mark_as_failed:
                         message_details = res.get("messages", [])
                         error_msg = (
                             str(
@@ -2052,14 +2142,15 @@ def _execute_load_batch(
                             else "Unknown error"
                         )
                         sanitized_error = _sanitize_error_message(error_msg)
-                        failed_line = [
-                            *list(line),
-                            f"Load failed: {sanitized_error}",
-                        ]
+                        # Create properly padded failed line with consistent column count using the standard function
+                        # This ensures all failed lines have the same column structure as the header
+                        padded_failed_line = _create_padded_failed_line(
+                            line, len(batch_header), f"Load failed: {sanitized_error}"
+                        )
                         if (
-                            failed_line not in aggregated_failed_lines
+                            padded_failed_line not in aggregated_failed_lines
                         ):  # Avoid duplicates
-                            aggregated_failed_lines.append(failed_line)
+                            aggregated_failed_lines.append(padded_failed_line)
             elif len(aggregated_failed_lines_batch) > 0:
                 # Add the specific records that failed to the aggregated failed lines
                 log.info(
@@ -2118,12 +2209,19 @@ def _execute_load_batch(
             error_str = str(e).lower()
 
             # SPECIAL CASE: Client-side timeouts for local processing
-            # These should be IGNORED entirely to allow long server processing
+            # Instead of ignoring, add to failed lines so they can be retried later
             if _is_client_timeout_error(e):
-                log.debug(
-                    "Ignoring client-side timeout to allow server processing "
-                    "to continue"
+                log.warning(
+                    f"Client-side timeout error for chunk of {len(current_chunk)} records. "
+                    f"Adding records to fail file for retry: {e}"
                 )
+                error_msg = f"Client-side timeout: {e}"
+                sanitized_error = _sanitize_error_message(error_msg)
+                for line in current_chunk:
+                    padded_failed_line = _create_padded_failed_line(
+                        line, len(batch_header), sanitized_error
+                    )
+                    aggregated_failed_lines.append(padded_failed_line)
                 lines_to_process = lines_to_process[chunk_size:]
                 continue
 
@@ -2458,18 +2556,21 @@ def _run_threaded_pass(
                 rpc_thread.progress.update(rpc_thread.task_id, advance=1)
 
             except Exception as e:
-                log.error(f"A worker thread failed unexpectedly: {e}", exc_info=True)
+                # This handles exceptions that occur during the processing of the result,
+                # not exceptions from the future itself. If this happens, it's likely
+                # a programming error, so we should still try to process remaining futures
+                # but flag that there was an issue
+                log.error(f"Error processing worker thread result: {e}", exc_info=True)
                 rpc_thread.abort_flag = True
                 rpc_thread.progress.console.print(
-                    f"[bold red]Worker Failed: {e}[/bold red]"
+                    f"[bold red]Error processing thread result: {e}[/bold red]"
                 )
                 rpc_thread.progress.update(
                     rpc_thread.task_id,
-                    description="[bold red]FAIL:[/bold red] "
-                    "Worker failed unexpectedly.",
+                    description="[bold red]Error processing results[/bold red]",
                     refresh=True,
                 )
-                raise
+                # Continue to process any remaining completed futures
             if rpc_thread.abort_flag:
                 break
     except KeyboardInterrupt:
@@ -2560,9 +2661,22 @@ def _orchestrate_pass_1(
         ignore_list = [ignore]
     else:
         ignore_list = ignore
-    pass_1_ignore_list = [
-        _f for _f in deferred_fields if _is_self_referencing_field(model_obj, _f)
-    ] + ignore_list
+    # Add ALL deferred fields to the ignore list for Pass 1, not just self-referencing ones
+    # This allows main records to be imported successfully in Pass 1 without external ID dependencies
+    # The deferred fields will be processed safely in Pass 2 when all records should exist in the database
+    # Note: The filtering logic uses header.split("/")[0] to compare field names,
+    # so we need to add the base field names like 'optional_product_ids' for fields like 'optional_product_ids/id'
+    deferred_fields_list = deferred_fields or []
+
+    # Extract base field names for filtering (remove '/id' suffix if present)
+    # The filtering logic compares header_field.split('/')[0] with items in ignore_set
+    deferred_fields_base = []
+    for field in deferred_fields_list:
+        base_name = field.split("/")[0]  # This extracts 'optional_product_ids' from 'optional_product_ids/id'
+        if base_name not in deferred_fields_base:  # Avoid duplicates
+            deferred_fields_base.append(base_name)
+
+    pass_1_ignore_list = deferred_fields_base + ignore_list
 
     # Validate that the unique ID field exists in the header
     # This is critical for the import process to function correctly
@@ -2775,11 +2889,16 @@ def import_data(
         tuple[bool, int]: True if the entire import process completed without any
         critical, process-halting errors, False otherwise.
     """
-    context, deferred, ignore = (
-        context or {"tracking_disable": True},
-        deferred_fields or [],
-        ignore or [],
-    )
+    deferred = deferred_fields or []
+    ignore = ignore or []
+    
+    # Merge provided context with default tracking context
+    # This ensures that even if a custom context is passed, we still get the defaults
+    # unless they are explicitly overridden in the passed context.
+    final_context = DEFAULT_TRACKING_CONTEXT.copy()
+    if context:
+        final_context.update(context)
+    
     header, all_data = _read_data_file(file_csv, separator, encoding, skip)
     record_count = len(all_data)
 
@@ -2836,7 +2955,7 @@ def import_data(
                 unique_id_field,
                 deferred,
                 ignore,
-                context,
+                final_context,
                 fail_writer,
                 fail_handle,
                 max_connection,
@@ -2865,7 +2984,7 @@ def import_data(
                     unique_id_field,
                     id_map,
                     deferred,
-                    context,
+                    final_context,
                     fail_writer,
                     fail_handle,
                     max_connection,

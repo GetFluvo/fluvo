@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Debug script to check deferral logic for supplierinfo."""
 
-import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from odoo_data_flow.lib.preflight import _should_skip_deferral
 
