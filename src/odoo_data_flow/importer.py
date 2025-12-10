@@ -21,6 +21,7 @@ from rich.panel import Panel
 from rich.progress import Progress
 
 from . import import_threaded
+from .constants import DEFAULT_TRACKING_CONTEXT
 from .enums import PreflightMode
 from .lib import cache, preflight, relational_import, sort
 from .lib.internal.ui import _show_error_panel
@@ -530,6 +531,7 @@ def run_import(
                             progress,
                             task_id,
                             filename,
+                            parsed_context,
                         )
                         if import_details:
                             log.info(
@@ -566,6 +568,7 @@ def run_import(
                             progress,
                             task_id,
                             filename,
+                            parsed_context,
                         )
                         if not result:
                             log.warning(
@@ -589,6 +592,7 @@ def run_import(
                             progress,
                             task_id,
                             filename,
+                            parsed_context,
                         )
                         if not result:
                             log.warning(
@@ -668,7 +672,7 @@ def run_import_for_migration(
             model=model,
             unique_id_field="id",  # Migration import assumes 'id'
             file_csv=tmp_path,
-            context={"tracking_disable": True},
+            context=DEFAULT_TRACKING_CONTEXT,
             max_connection=int(worker),
             batch_size=int(batch_size),
         )
