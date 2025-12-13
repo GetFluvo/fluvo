@@ -219,14 +219,18 @@ class RPCThreadExport(RpcThread):
                                 new_record[field] = (
                                     value[1]
                                     if len(value) >= 2
-                                    else str(value[0]) if value else None
+                                    else str(value[0])
+                                    if value
+                                    else None
                                 )
                         else:
                             # For regular many-to-one relationships
                             new_record[field] = (
                                 value[1]
                                 if len(value) >= 2
-                                else str(value[0]) if value else None
+                                else str(value[0])
+                                if value
+                                else None
                             )
                     else:
                         # Value is not a list/tuple, just assign it
@@ -533,7 +537,7 @@ def _initialize_export(
             log_msg = (
                 "Failed to decode JSON response from Odoo server during fields_get() call. "
                 "This usually indicates an authentication failure, server error, or the server "
-                f"returned an HTML error page instead of JSON. Error: {e}"
+                f"returned an HTML error page instead of JSON.\nError: {e}"
             )
             log.error(log_msg)
             return None, None, None
@@ -593,10 +597,11 @@ def _clean_and_transform_batch(
             # Handle complex types including List[Null] that cannot be directly cast to String
             # Use map_elements with a safe string conversion that handles all data types
             transform_exprs.append(
-                pl.col(col_name).map_elements(
-                    lambda x: str(x) if x is not None else "",
-                    return_dtype=pl.String
-                ).alias(col_name)
+                pl.col(col_name)
+                .map_elements(
+                    lambda x: str(x) if x is not None else "", return_dtype=pl.String
+                )
+                .alias(col_name)
             )
     if transform_exprs:
         df = df.with_columns(transform_exprs)

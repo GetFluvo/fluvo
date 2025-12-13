@@ -293,7 +293,10 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
 )
 @click.option(
     "--context",
-    default="{'tracking_disable': True, 'mail_create_nolog': True, 'mail_notrack': True, 'import_file': True}",
+    default=(
+        "{'tracking_disable': True, 'mail_create_nolog': True, "
+        "'mail_notrack': True, 'import_file': True}"
+    ),
     help="Odoo context as a JSON string e.g., '{\"key\": true}'.",
 )
 @click.option(
@@ -322,8 +325,10 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:
 
     deferred_fields_param = kwargs.get("deferred_fields")
     if deferred_fields_param is not None:
-        kwargs["deferred_fields"] = [col.strip() for col in deferred_fields_param.split(",") if col.strip()]
-    
+        kwargs["deferred_fields"] = [
+            col.strip() for col in deferred_fields_param.split(",") if col.strip()
+        ]
+
     # Enhancement: Automatically set unique-id-field to "id" when deferred_fields
     # are specified but no unique-id-field is provided
     if kwargs.get("deferred_fields") and not kwargs.get("unique_id_field"):
@@ -361,7 +366,10 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:
 @click.option("-s", "--sep", "separator", default=";", help="CSV separator character.")
 @click.option(
     "--context",
-    default="{'tracking_disable': True, 'mail_create_nolog': True, 'mail_notrack': True, 'import_file': True}",
+    default=(
+        "{'tracking_disable': True, 'mail_create_nolog': True, "
+        "'mail_notrack': True, 'import_file': True}"
+    ),
     help="Odoo context as a dictionary string.",
 )
 @click.option("--encoding", default="utf-8", help="Encoding of the data file.")
@@ -421,7 +429,10 @@ def write_cmd(connection_file: str, **kwargs: Any) -> None:
 @click.option("-s", "--sep", "separator", default=";", help="CSV separator character.")
 @click.option(
     "--context",
-    default="{'tracking_disable': True, 'mail_create_nolog': True, 'mail_notrack': True, 'import_file': True}",
+    default=(
+        "{'tracking_disable': True, 'mail_create_nolog': True, "
+        "'mail_notrack': True, 'import_file': True}"
+    ),
     help="Odoo context as a dictionary string.",
 )
 @click.option("--encoding", default="utf-8", help="Encoding of the data file.")

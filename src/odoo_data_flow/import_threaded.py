@@ -105,7 +105,8 @@ def _is_database_connection_error(error: Exception) -> bool:
         error: The exception to check
 
     Returns:
-        True if this is a database connection error that should be handled by scaling back
+        True if this is a database connection error that should be
+        handled by scaling back
     """
     error_str = str(error).lower()
     return (
@@ -116,7 +117,8 @@ def _is_database_connection_error(error: Exception) -> bool:
 
 
 def _is_tuple_index_error(error: Exception) -> bool:
-    """Check if the error is a tuple index out of range error that indicates data type issues.
+    """Check if the error is a tuple index out of range error that indicates
+    data type issues.
 
     Args:
         error: The exception to check
@@ -1284,7 +1286,9 @@ def _create_batch_individually(
     context: dict[str, Any],
     ignore_list: list[str],
     progress: Any = None,  # Optional progress object for user-facing messages
-    prior_error: Optional[str] = None,  # Optional error message from the failed load attempt
+    prior_error: Optional[
+        str
+    ] = None,  # Optional error message from the failed load attempt
 ) -> dict[str, Any]:
     """Fallback to create records one-by-one to get detailed errors."""
     id_map: dict[str, int] = {}
@@ -1430,16 +1434,12 @@ def _create_batch_individually(
                     if context:
                         # Only include context values that are basic types or specific keys to avoid RPC serialization issues
                         for k, v in context.items():
-                            if (
-                                k
-                                in (
-                                    "tracking_disable",
-                                    "mail_create_nolog",
-                                    "mail_notrack",
-                                    "import_file",
-                                )
-                                or isinstance(v, (str, int, float, bool))
-                            ):
+                            if k in (
+                                "tracking_disable",
+                                "mail_create_nolog",
+                                "mail_notrack",
+                                "import_file",
+                            ) or isinstance(v, (str, int, float, bool)):
                                 clean_context[k] = v
                             else:
                                 # Convert complex types to strings to prevent RPC issues
@@ -1448,7 +1448,9 @@ def _create_batch_individually(
                     if "tracking_disable" not in clean_context:
                         clean_context["tracking_disable"] = True
 
-                    log.info(f"DEBUG: _create_batch_individually context: {clean_context}")
+                    log.info(
+                        f"DEBUG: _create_batch_individually context: {clean_context}"
+                    )
 
                     # Call create with extremely clean data to avoid server-side argument unpacking errors
                     # Use the safest possible call format to prevent server-side tuple index errors
@@ -1983,7 +1985,9 @@ def _execute_load_batch(
                         load_lines[row_idx][col_idx] = ""
                     elif not isinstance(value, (str, int, float, bool)):
                         # Convert other types to string to prevent RPC issues
-                        load_lines[row_idx][col_idx] = str(value) if value is not None else ""
+                        load_lines[row_idx][col_idx] = (
+                            str(value) if value is not None else ""
+                        )
 
             try:
                 res = model.load(load_header, load_lines, context=context)
@@ -2048,8 +2052,6 @@ def _execute_load_batch(
                         f"records were created. "
                         f"Some records may have failed validation."
                     )
-
-
 
             # Create id_map and track failed records separately
             id_map = {}
@@ -2135,16 +2137,24 @@ def _execute_load_batch(
                                 )
                             )
                             # If error message contains external ID info, check if this record references it
-                            if "external id" in error_msg.lower() or "not found" in error_msg.lower():
+                            if (
+                                "external id" in error_msg.lower()
+                                or "not found" in error_msg.lower()
+                            ):
                                 # Check if current line has problematic external ID references in any field
-                                line_str = " ".join(str(x) for x in line if x is not None).lower()
+                                line_str = " ".join(
+                                    str(x) for x in line if x is not None
+                                ).lower()
                                 # Check if any field contains external ID patterns that might be related to the error
                                 if any(field.endswith("/id") for field in batch_header):
                                     # This record has external ID fields, which could be affected by external ID errors
                                     should_mark_as_failed = True
                                 # Or check if the error message mentions a specific external ID that might be related
                                 # Just be more cautious and assume records with external ID fields are potentially affected
-                                elif "product_template." in line_str or "res_partner." in line_str:
+                                elif (
+                                    "product_template." in line_str
+                                    or "res_partner." in line_str
+                                ):
                                     should_mark_as_failed = True
                                 # If it's a general external ID error affecting the batch, all records might be impacted
                                 else:
@@ -2693,7 +2703,9 @@ def _orchestrate_pass_1(
     # The filtering logic compares header_field.split('/')[0] with items in ignore_set
     deferred_fields_base = []
     for field in deferred_fields_list:
-        base_name = field.split("/")[0]  # This extracts 'optional_product_ids' from 'optional_product_ids/id'
+        base_name = field.split("/")[
+            0
+        ]  # This extracts 'optional_product_ids' from 'optional_product_ids/id'
         if base_name not in deferred_fields_base:  # Avoid duplicates
             deferred_fields_base.append(base_name)
 
@@ -2912,14 +2924,14 @@ def import_data(
     """
     deferred = deferred_fields or []
     ignore = ignore or []
-    
+
     # Merge provided context with default tracking context
     # This ensures that even if a custom context is passed, we still get the defaults
     # unless they are explicitly overridden in the passed context.
     final_context = DEFAULT_TRACKING_CONTEXT.copy()
     if context:
         final_context.update(context)
-    
+
     header, all_data = _read_data_file(file_csv, separator, encoding, skip)
     record_count = len(all_data)
 
