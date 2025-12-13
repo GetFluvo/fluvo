@@ -1165,6 +1165,7 @@ def _handle_create_error(
     line: list[Any],
     error_summary: str,
     header_length: Optional[int] = None,
+    override_error_message: Optional[str] = None,
 ) -> tuple[str, list[Any], str]:
     """Handle errors during record creation.
 
@@ -1174,11 +1175,15 @@ def _handle_create_error(
         line: The data line being processed
         error_summary: Current error summary
         header_length: Number of columns expected in the header (optional)
+        override_error_message: Optional error message to use instead of exception string
 
     Returns:
         Tuple of (error_message, failed_line, error_summary)
     """
-    error_str = str(create_error)
+    if override_error_message:
+        error_str = override_error_message
+    else:
+        error_str = str(create_error)
     error_str_lower = error_str.lower()
 
     # Handle constraint violation errors (e.g., XML ID space constraint)
@@ -1279,6 +1284,7 @@ def _create_batch_individually(
     context: dict[str, Any],
     ignore_list: list[str],
     progress: Any = None,  # Optional progress object for user-facing messages
+    prior_error: Optional[str] = None,  # Optional error message from the failed load attempt
 ) -> dict[str, Any]:
     """Fallback to create records one-by-one to get detailed errors."""
     id_map: dict[str, int] = {}
@@ -1490,6 +1496,15 @@ def _create_batch_individually(
                 continue
             id_map[sanitized_source_id] = new_record.id
         except IndexError as e:
+            # If we have a prior error (e.g. from load), prioritize it over the generic IndexError/Traceback
+            if prior_error:
+                sanitized_error = _sanitize_error_message(prior_error)
+                padded_failed_line = _create_padded_failed_line(
+                    line, header_len, sanitized_error
+                )
+                failed_lines.append(padded_failed_line)
+                continue
+
             error_str = str(e)
             error_str_lower = error_str.lower()
 
@@ -1672,7 +1687,12 @@ def _create_batch_individually(
                 continue
 
             error_message, new_failed_line, error_summary = _handle_create_error(
-                i, create_error, line, error_summary, header_len
+                i,
+                create_error,
+                line,
+                error_summary,
+                header_len,
+                override_error_message=prior_error,
             )
             failed_lines.append(new_failed_line)
     return {
@@ -1710,6 +1730,7 @@ def _handle_fallback_create(
         context,
         ignore_list,
         progress,  # Pass progress for user-facing messages
+        prior_error=error_message,
     )
     # Safely update the aggregated map by filtering for valid integer IDs
     id_map = fallback_result.get("id_map", {})
