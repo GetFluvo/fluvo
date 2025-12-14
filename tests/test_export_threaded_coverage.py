@@ -71,11 +71,13 @@ def test_format_batch_results():
     """Test RPCThreadExport._format_batch_results method."""
     from odoo_data_flow.export_threaded import RPCThreadExport
 
-    # Create mock connection and RPCThreadExport instance with required args
+    # Create mock connection and RPCThreadExport instance with correct args
     mock_conn = MagicMock()
+    mock_model = MagicMock()
     header = ["id", "name", "value"]
     fields_info = {"id": {"type": "integer"}, "name": {"type": "char"}, "value": {"type": "float"}}
-    rpc_thread = RPCThreadExport(mock_conn, 0, header, fields_info)
+
+    rpc_thread = RPCThreadExport(1, mock_conn, mock_model, header, fields_info)
 
     # Test with sample raw data
     raw_data = [
@@ -94,9 +96,10 @@ def test_enrich_with_xml_ids():
 
     # Create mock connection and RPCThreadExport with required args
     mock_conn = MagicMock()
+    mock_model = MagicMock()
     header = ["id", "name", "value"]
     fields_info = {"id": {"type": "integer"}, "name": {"type": "char"}, "value": {"type": "float"}}
-    rpc_thread = RPCThreadExport(mock_conn, 0, header, fields_info)
+    rpc_thread = RPCThreadExport(1, mock_conn, mock_model, header, fields_info)
 
     # Test with sample data - this method works in-place on the raw_data
     raw_data = [
@@ -149,12 +152,12 @@ def test_execute_batch():
 
     # Create mock connection and RPCThreadExport with required args
     mock_conn = MagicMock()
+    mock_model = MagicMock()
     header = ["id", "name"]
     fields_info = {"id": {"type": "integer"}, "name": {"type": "char"}}
-    rpc_thread = RPCThreadExport(mock_conn, 0, header, fields_info)
+    rpc_thread = RPCThreadExport(1, mock_conn, mock_model, header, fields_info)
 
     # Mock the model and its read method
-    mock_model = MagicMock()
     mock_conn.get_model.return_value = mock_model
     mock_model.read.return_value = [{"id": 1, "name": "Test"}]
 
@@ -173,9 +176,10 @@ def test_rpc_thread_export():
 
     # Create mock connection and RPCThreadExport with required args
     mock_conn = MagicMock()
+    mock_model = MagicMock()
     header = ["id", "name"]
     fields_info = {"id": {"type": "integer"}, "name": {"type": "char"}}
-    rpc_thread = RPCThreadExport(mock_conn, 0, header, fields_info)
+    rpc_thread = RPCThreadExport(1, mock_conn, mock_model, header, fields_info)
 
     # Test basic functionality without actual connection
     # The class should initialize without errors
@@ -188,9 +192,10 @@ def test_format_batch_results_with_special_cases():
 
     # Create mock connection and RPCThreadExport with required args
     mock_conn = MagicMock()
+    mock_model = MagicMock()
     header = ["id", "name", "value"]
     fields_info = {"id": {"type": "integer"}, "name": {"type": "char"}, "value": {"type": "float"}}
-    rpc_thread = RPCThreadExport(mock_conn, 0, header, fields_info)
+    rpc_thread = RPCThreadExport(1, mock_conn, mock_model, header, fields_info)
 
     # Test with empty data
     result = rpc_thread._format_batch_results([])
