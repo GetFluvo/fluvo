@@ -52,7 +52,7 @@ class TestResolveRelatedIds:
         mock_get_connection.return_value = mock_connection
         mock_connection.get_model.return_value = mock_model
         mock_model.search_read.return_value = []
-        
+
         result = _resolve_related_ids(
             config="dummy.conf",  # Use dummy config since it's mocked
             related_model="res.partner",
@@ -75,7 +75,7 @@ class TestResolveRelatedIds:
         mock_get_connection.return_value = mock_connection
         mock_connection.get_model.return_value = mock_model
         mock_model.search_read.side_effect = Exception("Connection error")
-        
+
         result = _resolve_related_ids(
             config="dummy.conf",  # Use dummy config since it's mocked
             related_model="res.partner",

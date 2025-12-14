@@ -127,11 +127,13 @@ def test_get_model_fields_safe():
 
 def test_resolve_related_ids():
     """Test the _resolve_related_ids function from direct strategy."""
-    from odoo_data_flow.lib.relational_import_strategies.direct import _resolve_related_ids
+    from odoo_data_flow.lib.relational_import_strategies.direct import (
+        _resolve_related_ids,
+    )
 
     # Test with mock configuration
     mock_config = {"server": "localhost", "database": "test_db", "username": "admin", "password": "admin"}
-    result = _resolve_related_ids(mock_config, "res.partner", pl.Series(["base.partner_1", "base.partner_2"]))
+    _resolve_related_ids(mock_config, "res.partner", pl.Series(["base.partner_1", "base.partner_2"]))
     # This will likely return None due to connection issues in test, but it will cover the function
     # We're testing that the function can be called without errors
 
@@ -195,7 +197,9 @@ def test_get_model_fields_safe():
 
 def test_write_tuple_get_actual_field_name():
     """Test the _get_actual_field_name function."""
-    from odoo_data_flow.lib.relational_import_strategies.write_tuple import _get_actual_field_name
+    from odoo_data_flow.lib.relational_import_strategies.write_tuple import (
+        _get_actual_field_name,
+    )
 
     # Test with both base field and /id variant
     df_with_both = pl.DataFrame({

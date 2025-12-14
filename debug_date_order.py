@@ -2,6 +2,7 @@
 """Debug script to check what data Odoo returns for sale.order date_order field."""
 
 import sys
+
 sys.path.insert(0, '/home/bosd/git/odoo-data-flow/src')
 
 from odoo_data_flow.lib import conf_lib

@@ -121,7 +121,7 @@ def test_derive_relation_info_self_referencing(
     """Test _derive_relation_info with self-referencing detection."""
     # Mock the query to return expected values
     mock_query_relation.return_value = ("many2many", "product.template")
-    
+
     # Mock the connection
     mock_connection = MagicMock()
     mock_get_connection.return_value = mock_connection
@@ -129,7 +129,7 @@ def test_derive_relation_info_self_referencing(
     mock_connection.get_model.return_value = mock_model
     mock_model.fields_get.return_value = {
         "optional_product_ids": {
-            "type": "many2many", 
+            "type": "many2many",
             "relation": "product.template"
         }
     }
@@ -157,7 +157,7 @@ def test_derive_relation_info_regular(
     """Test _derive_relation_info with regular models."""
     # Mock the query to return expected values
     mock_query_relation.return_value = ("many2one", "res.partner.category")
-    
+
     # Mock the connection
     mock_connection = MagicMock()
     mock_get_connection.return_value = mock_connection
@@ -165,7 +165,7 @@ def test_derive_relation_info_regular(
     mock_connection.get_model.return_value = mock_model
     mock_model.fields_get.return_value = {
         "category_id": {
-            "type": "many2one", 
+            "type": "many2one",
             "relation": "res.partner.category"
         }
     }
