@@ -28,6 +28,34 @@ from .lib.internal.ui import _show_error_panel
 from .logging_config import log
 
 
+def _get_environment_from_connection(config: Union[str, dict[str, Any]]) -> str:
+    """Extract environment name from connection file path or config.
+    
+    Args:
+        config: Either a path to connection file or connection config dict
+        
+    Returns:
+        Environment name extracted from connection (e.g., 'local', 'prod', 'test')
+        
+    Note:
+        This is a simplified version of the function in import_threaded.py
+        to avoid circular imports.
+    """
+    if isinstance(config, dict):
+        # If config is already a dict, try to get environment from it
+        return config.get('environment', 'unknown')
+    
+    # Handle connection file path
+    filename = os.path.basename(str(config))
+    if '_connection.conf' in filename:
+        return filename.replace('_connection.conf', '')
+    elif '.conf' in filename:
+        # Handle cases like "connection.conf" -> "connection"
+        return filename.replace('.conf', '')
+    
+    return 'unknown'
+
+
 def _map_encoding_to_polars(encoding: str) -> str:
     """Map common encoding names to polars-supported encoding values.
 
@@ -88,13 +116,14 @@ def _infer_model_from_filename(filename: str) -> Optional[str]:
     return None
 
 
-def _get_fail_filename(model: str, is_fail_run: bool) -> str:
-    """Generates a standardized filename for failed records.
+def _get_fail_filename(model: str, is_fail_run: bool, environment: str = "unknown") -> str:
+    """Generates a standardized filename for failed records with environment support.
 
     Args:
         model (str): The Odoo model name being imported.
         is_fail_run (bool): If True, indicates a recovery run, and a
             timestamp will be added to the filename.
+        environment (str): The environment name (e.g., 'local', 'prod', 'test').
 
     Returns:
         str: The generated filename for the fail file.
@@ -102,8 +131,8 @@ def _get_fail_filename(model: str, is_fail_run: bool) -> str:
     model_filename = model.replace(".", "_")
     if is_fail_run:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return f"{model_filename}_{timestamp}_failed.csv"
-    return f"{model_filename}_fail.csv"
+        return f"fail_files/{environment}/{model_filename}_{timestamp}_failed.csv"
+    return f"fail_files/{environment}/{model_filename}_fail.csv"
 
 
 def _run_preflight_checks(
@@ -182,7 +211,9 @@ def run_import(
 
     file_to_process = filename
     if fail:
-        fail_path = Path(filename).parent / _get_fail_filename(model, False)
+        # Get environment for fail mode to find the correct fail file
+        environment = _get_environment_from_connection(config)
+        fail_path = Path(filename).parent / _get_fail_filename(model, False, environment)
         line_count = _count_lines(str(fail_path))
         if line_count <= 1:
             Console().print(
@@ -239,7 +270,15 @@ def run_import(
 
     final_deferred = deferred_fields or import_plan.get("deferred_fields", [])
     final_uid_field = unique_id_field or import_plan.get("unique_id_field") or "id"
-    fail_output_file = str(Path(filename).parent / _get_fail_filename(model, fail))
+    
+    # Extract environment from connection for environment-specific fail files
+    environment = _get_environment_from_connection(config)
+    fail_filename = _get_fail_filename(model, fail, environment)
+    fail_output_file = str(Path(filename).parent / fail_filename)
+    
+    # Create the fail_files directory if it doesn't exist
+    fail_dir = os.path.join(str(Path(filename).parent), "fail_files", environment)
+    os.makedirs(fail_dir, exist_ok=True)
 
     if fail:
         log.info("Single-record batching enabled for this import strategy.")

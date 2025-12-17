@@ -7,6 +7,7 @@ data into an Odoo instance.
 import ast
 import concurrent.futures
 import csv
+import os
 import sys
 import time
 from collections.abc import Generator, Iterable
@@ -173,6 +174,119 @@ def _sanitize_error_message(error_msg: Union[str, None]) -> str:
 
     error_msg = str(error_msg)
 
+    # Replace newlines with a safe alternative
+    error_msg = error_msg.replace("\n", " | ").replace("\r", " | ")
+
+    # Replace tabs with spaces
+    error_msg = error_msg.replace("\t", " ")
+
+    error_msg = error_msg.replace('"""', '"""')
+
+    return error_msg
+def _extract_clean_error_message(error: Exception) -> str:
+    """Extracts a clean error message from an exception object.
+
+    Args:
+        error: The exception object
+
+    Returns:
+        A clean error message string
+    """
+    error_msg = str(error)
+    
+    # Try to extract meaningful error message from Odoo's error format
+    # Odoo errors often come in formats like:
+    # - odoo.exceptions.ValidationError: ('Error message', 'Details')
+    # - {"data": {"message": "Actual error message"}}
+    # - Regular string errors
+    # - Direct Odoo server messages like "The values for the fields... already exist"
+    
+    # First, check if this is already a clean Odoo server message
+    # These messages typically contain specific patterns that indicate they're
+    # direct from Odoo and don't need further processing
+    odoo_server_message_patterns = [
+        "The values for the fields",
+        "already exist",
+        "No matching record found",
+        "The field",
+        "is required",
+        "does not exist",
+        "cannot be empty",
+        "must be unique",
+        "invalid value for field",
+        "constraint violation",
+        "external id",
+    ]
+    
+    if any(pattern in error_msg for pattern in odoo_server_message_patterns):
+        # This appears to be a direct Odoo server message, preserve it as-is
+        # after basic sanitization for CSV safety
+        error_msg = _sanitize_error_message(error_msg)
+        return error_msg
+    
+    try:
+        # Try to parse as JSON/dict format first
+        import ast
+        error_dict = ast.literal_eval(error_msg)
+        if isinstance(error_dict, dict):
+            if error_dict.get("data") and error_dict["data"].get("message"):
+                error_msg = str(error_dict["data"]["message"])
+            elif error_dict.get("message"):
+                error_msg = str(error_dict["message"])
+        elif isinstance(error_dict, (list, tuple)) and len(error_dict) > 0:
+            # Handle tuple/list format like ('Error message', 'Details')
+            # Extract just the first element which contains the main error message
+            error_msg = str(error_dict[0])
+    except (ValueError, SyntaxError):
+        # Not a parseable format, try to extract from common Odoo patterns
+        # Handle patterns like: odoo.exceptions.ValidationError: ('message', 'details')
+        if ": ('" in error_msg or ": (\"" in error_msg:
+            # Extract the content between the first set of quotes after the colon
+            import re
+            # Handle both: 'text' and: ('text', patterns
+            match = re.search(r":\s*\(['\"]([^'\"]+)['\"]", error_msg)
+            if match:
+                error_msg = match.group(1)
+            else:
+                # Try without parenthesis for other formats
+                match = re.search(r":\s*['\"]([^'\"]+)['\"]", error_msg)
+                if match:
+                    error_msg = match.group(1)
+        else:
+            # Try to extract tuple content if it exists
+            # Look for patterns like ('message', 'details')
+            import re
+            tuple_match = re.search(r"\('([^']+)'", error_msg)
+            if tuple_match:
+                error_msg = tuple_match.group(1)
+            else:
+                # Try double quotes version
+                tuple_match = re.search(r'"\(([^"]+)",\s*"([^"]+)"\)', error_msg)
+                if tuple_match:
+                    error_msg = tuple_match.group(1)
+    
+    # Clean up common Odoo error message patterns
+    # Remove exception type prefixes like "odoo.exceptions.ValidationError: "
+    error_msg = error_msg.replace("odoo.exceptions.ValidationError: ", "")
+    error_msg = error_msg.replace("odoo.exceptions.UserError: ", "")
+    error_msg = error_msg.replace("odoo.exceptions.AccessError: ", "")
+    error_msg = error_msg.replace("odoo.exceptions.MissingError: ", "")
+    error_msg = error_msg.replace("odoo.exceptions.Except_Odoo: ", "")
+    
+    # Remove common wrapper text - handle both single and double quotes
+    error_msg = error_msg.replace("('", "").replace("',)", "")
+    error_msg = error_msg.replace('("', '').replace('",)', '')
+    error_msg = error_msg.replace("('", "").replace("')", "")
+    error_msg = error_msg.replace('("', '').replace('")', '')
+    
+    # Remove trailing tuple/formatting characters
+    if error_msg.endswith(",'"):
+        error_msg = error_msg[:-2]
+    if error_msg.endswith(",\""):
+        error_msg = error_msg[:-2]
+    if error_msg.endswith(",)"):
+        error_msg = error_msg[:-2]
+    
     # Replace newlines with a safe alternative to prevent CSV parsing issues
     error_msg = error_msg.replace("\n", " | ").replace("\r", " | ")
 
@@ -474,13 +588,119 @@ def _filter_ignored_columns(
     return new_header, new_data
 
 
+def _get_environment_from_connection(connection: Union[str, dict[str, Any]]) -> str:
+    """Extract environment name from connection file path or config.
+    
+    Args:
+        connection: Either a path to connection file or connection config dict
+        
+    Returns:
+        Environment name extracted from connection (e.g., 'local', 'prod', 'test')
+        
+    Examples:
+        >>> _get_environment_from_connection("conf/local_connection.conf")
+        'local'
+        >>> _get_environment_from_connection("conf/prod_connection.conf")
+        'prod'
+    """
+    if isinstance(connection, dict):
+        # If connection is already a dict, try to get environment from it
+        return connection.get('environment', 'unknown')
+    
+    # Handle connection file path
+    filename = os.path.basename(str(connection))
+    if '_connection.conf' in filename:
+        return filename.replace('_connection.conf', '')
+    elif '.conf' in filename:
+        # Handle cases like "connection.conf" -> "connection"
+        return filename.replace('.conf', '')
+    
+    return 'unknown'
+
+
+def _get_fail_file_path(
+    original_file: str, 
+    environment: str, 
+    fail_type: str = "fail",
+    preserve_timestamp: bool = True
+) -> str:
+    """Generate environment-specific fail file path with optional timestamp preservation.
+    
+    Args:
+        original_file: Path to the original CSV file being imported
+        environment: Environment name (e.g., 'local', 'prod', 'test')
+        fail_type: Type of fail file ('fail' or 'failed')
+        preserve_timestamp: Whether to preserve original file timestamp in failed files
+        
+    Returns:
+        Full path to the environment-specific fail file
+        
+    Examples:
+        >>> _get_fail_file_path("data/res_partner.csv", "local", "fail")
+        'fail_files/local/res_partner_fail.csv'
+        >>> _get_fail_file_path("data/res_partner_bank_8.csv", "prod", "failed")
+        'fail_files/prod/res_partner_bank_8_failed.csv'
+    """
+    # Create fail_files directory if it doesn't exist
+    fail_dir = os.path.join("fail_files", environment)
+    os.makedirs(fail_dir, exist_ok=True)
+    
+    # Preserve original filename (remove .csv extension if present)
+    filename = os.path.basename(original_file)
+    if filename.endswith('.csv'):
+        filename = filename[:-4]  # Remove .csv extension
+    
+    if fail_type == "fail":
+        return os.path.join(fail_dir, f"{filename}_fail.csv")
+    elif fail_type == "failed":
+        # Remove .csv extension for failed files too
+        if filename.endswith('.csv'):
+            filename = filename[:-4]
+        fail_file = os.path.join(fail_dir, f"{filename}_failed.csv")
+        
+        # Preserve timestamp if requested and file exists
+        if preserve_timestamp and os.path.exists(original_file):
+            original_stat = os.stat(original_file)
+            try:
+                # Create the file to set its timestamp
+                with open(fail_file, 'w') as f:
+                    pass
+                os.utime(fail_file, (original_stat.st_atime, original_stat.st_mtime))
+            except OSError as e:
+                log.warning(f"Could not preserve timestamp for {fail_file}: {e}")
+        
+        return fail_file
+    else:
+        return os.path.join(fail_dir, f"{filename}_{fail_type}.csv")
+
+
 def _setup_fail_file(
-    fail_file: Optional[str], header: list[str], separator: str, encoding: str
+    fail_file: Optional[str], 
+    header: list[str], 
+    separator: str, 
+    encoding: str,
+    merge_existing: bool = False
 ) -> tuple[Optional[Any], Optional[TextIO]]:
-    """Opens the fail file and returns the writer and file handle."""
+    """Opens the fail file and returns the writer and file handle.
+    
+    Args:
+        fail_file: Path to the fail file
+        header: Original data header
+        separator: CSV separator
+        encoding: File encoding
+        merge_existing: If True, reads existing fail file and merges with new errors
+        
+    Returns:
+        Tuple of (fail_writer, fail_handle)
+    """
     if not fail_file:
         return None, None
     try:
+        # Check if file exists and we should merge existing errors
+        existing_errors = {}
+        if merge_existing and os.path.exists(fail_file):
+            existing_errors = _read_existing_fail_file(fail_file, encoding, separator)
+        
         fail_handle = open(fail_file, "w", newline="", encoding=encoding)
         fail_writer = csv.writer(
             fail_handle, delimiter=separator, quoting=csv.QUOTE_ALL
@@ -488,7 +708,15 @@ def _setup_fail_file(
         header_to_write = list(header)
         if "_ERROR_REASON" not in header_to_write:
             header_to_write.append("_ERROR_REASON")
+        if "_LOAD_ERROR_REASON" not in header_to_write:
+            header_to_write.append("_LOAD_ERROR_REASON")
         fail_writer.writerow(header_to_write)
+        
+        # Write existing errors back to the file
+        if existing_errors:
+            for error_line in existing_errors.values():
+                fail_writer.writerow(error_line)
+        
         return fail_writer, fail_handle
     except OSError as e:
         log.error(f"Could not open fail file for writing: {fail_file}. Error: {e}")
@@ -496,43 +724,127 @@ def _setup_fail_file(
 
 
 def _pad_line_to_header_length(line: list[Any], header_length: int) -> list[Any]:
-    """Pad a line to match the header length by adding empty strings.
+    """Pad or truncate a line to match the header length.
 
     This ensures all lines have consistent column counts for CSV output.
+    Lines shorter than header_length are padded with empty strings.
+    Lines longer than header_length are truncated to match header_length.
 
     Args:
-        line: The data line to pad
+        line: The data line to pad/truncate
         header_length: The expected number of columns
 
     Returns:
-        A new list with the line padded to match header_length
+        A new list with the line padded/truncated to match header_length
     """
-    if len(line) >= header_length:
-        return list(line)
-    else:
+    if len(line) > header_length:
+        # Truncate to header_length
+        return list(line[:header_length])
+    elif len(line) < header_length:
+        # Pad with empty strings
         return list(line) + [""] * (header_length - len(line))
+    else:
+        # Exact match, return as-is
+        return list(line)
+
+
+def _read_existing_fail_file(
+    fail_file: str, encoding: str, separator: str
+) -> dict[str, list[str]]:
+    """Read an existing fail file and return a dictionary of failed records.
+    
+    Args:
+        fail_file: Path to the existing fail file
+        encoding: File encoding
+        separator: CSV separator
+        
+    Returns:
+        Dictionary mapping record IDs to full failed lines (including error message)
+    """
+    existing_errors = {}
+    try:
+        with open(fail_file, 'r', encoding=encoding, newline='') as f:
+            reader = csv.reader(f, delimiter=separator)
+            header = next(reader)  # Skip header
+            
+            # Find the index of the ID column and ERROR_REASON column
+            id_index = 0  # Default to first column
+            error_index = len(header) - 1  # Default to last column
+            
+            # Try to find 'id' column (case insensitive)
+            for i, col_name in enumerate(header):
+                if col_name.lower() in ['id', 'xml_id', 'external_id']:
+                    id_index = i
+                    break
+            
+            # Try to find ERROR_REASON column
+            for i, col_name in enumerate(header):
+                if 'error' in col_name.lower():
+                    error_index = i
+                    break
+            
+            # Read existing failed records
+            for row in reader:
+                if len(row) > id_index:
+                    record_id = row[id_index]
+                    existing_errors[record_id] = row
+        
+        log.info(f"Read {len(existing_errors)} existing failed records from {fail_file}")
+    except Exception as e:
+        log.warning(f"Could not read existing fail file {fail_file}: {e}")
+    
+    return existing_errors
 
 
 def _create_padded_failed_line(
-    line: list[Any], header_length: int, error_message: str
+    line: list[Any], header_length: int, error_message: str, load_error: str = ""
 ) -> list[Any]:
     """Create a properly padded failed line with error message.
 
     Ensures the failed line has consistent column count by padding to header length
-    and appending the error message as the final column.
+    and appending the error messages as the final columns.
 
     Args:
         line: The original data line that failed
         header_length: The expected number of columns in the original header
         error_message: The error message to append
+        load_error: Optional load error message to append
 
     Returns:
-        A properly padded line with the error message as the final column
+        A properly padded line with the error messages as the final columns
     """
-    # Sanitize the error message to prevent CSV formatting issues
+    # Debug: Log the load error if available
+    if load_error:
+        log.debug(f"Creating fail line with load error: {load_error[:100]}...")
+    else:
+        log.debug("Creating fail line without load error")
+    
+    # Sanitize the error messages to prevent CSV formatting issues
     sanitized_error = _sanitize_error_message(error_message)
+    
+    # FINAL FIX: Directly extract load error from error_message if it contains the full error object
+    if not load_error and isinstance(error_message, str) and 'message' in error_message:
+        try:
+            import re
+            # First try to get the nested message in data section
+            match = re.search(r"'data'\s*:\s*\{[^}]*'message'\s*:\s*'([^']+)'", error_message)
+            if not match:
+                # Fallback to any message
+                match = re.search(r"'message'\s*:\s*'([^']+)'", error_message)
+            if match:
+                load_error = match.group(1)
+                log.debug(f"Directly extracted load error from error_message: {load_error[:100]}...")
+        except Exception as ex:
+            log.error(f"Failed to extract load error from error_message: {ex}")
+    
+    sanitized_load_error = _sanitize_error_message(load_error) if load_error else ""
+    
+    # Debug: Check if load error was properly sanitized
+    if load_error and not sanitized_load_error:
+        log.warning(f"Load error was lost during sanitization. Original: {load_error[:100]}...")
+    
     padded_line = _pad_line_to_header_length(line, header_length)
-    return [*padded_line, sanitized_error]
+    return [*padded_line, sanitized_error, sanitized_load_error]
 
 
 def _prepare_pass_2_data(
@@ -1322,6 +1634,13 @@ def _create_batch_individually(
 
             if existing_record:
                 id_map[sanitized_source_id] = existing_record.id
+                # Add error message to failed_lines to indicate record already exists
+                error_message = f"Record already exists with ID {existing_record.id}"
+                sanitized_error = _sanitize_error_message(error_message)
+                padded_failed_line = _create_padded_failed_line(
+                    line, header_len, sanitized_error
+                )
+                failed_lines.append(padded_failed_line)
                 continue
 
             # 2. PREPARE FOR CREATE - Check if this record contains known problematic external ID references
@@ -1465,7 +1784,7 @@ def _create_batch_individually(
                     if _is_tuple_index_error(ie):
                         # This is the specific server-side error from odoo/api.py
                         # The RPC argument format is being misinterpreted by the server
-                        error_message = f"Server API error creating record {source_id}: {ie}. This indicates the RPC call structure is incompatible with this server version or the record has unresolvable references."
+                        error_message = f"Server API error creating record {source_id}: {_extract_clean_error_message(ie)}. This indicates the RPC call structure is incompatible with this server version or the record has unresolvable references."
                         sanitized_error = _sanitize_error_message(error_message)
                         # Create properly padded failed line with consistent column count
                         padded_failed_line = _create_padded_failed_line(
@@ -1478,11 +1797,19 @@ def _create_batch_individually(
                         raise
                 except Exception as e:
                     # Handle any other errors from create operation
-                    error_message = f"Error creating record {source_id}: {str(e).replace(chr(10), ' | ').replace(chr(13), ' | ')}"
+                    # Extract the clean error message using our improved function
+                    clean_error_message = _extract_clean_error_message(e)
+                    
+                    # Include prior error if available (from failed load attempt)
+                    if prior_error:
+                        error_message = f"Load failed: {prior_error} | Create failed: {clean_error_message}"
+                    else:
+                        error_message = f"Error creating record {source_id}: {clean_error_message}"
+                    
                     sanitized_error = _sanitize_error_message(error_message)
                     # Create properly padded failed line with consistent column count
                     padded_failed_line = _create_padded_failed_line(
-                        line, header_len, sanitized_error
+                        line, header_len, sanitized_error, prior_error
                     )
                     failed_lines.append(padded_failed_line)
                     continue  # Skip this record and continue processing others
@@ -1576,7 +1903,97 @@ def _create_batch_individually(
                 # Handle as external ID related error or other IndexError
                 if is_external_id_related:
                     # This is the problematic external ID error that was being misclassified
-                    error_message = f"External ID resolution error for record {source_id}: {e}. Original error typically caused by missing external ID references."
+                    # Try to extract the actual error message from the error object
+                    actual_error_message = "tuple index out of range"  # Default fallback
+                    
+                    try:
+                        # Handle both object attributes and dictionary structures
+                        error_data = None
+                        
+                        # First try as object with attributes
+                        if hasattr(e, 'data'):
+                            error_data = e.data
+                        # Then try as dictionary
+                        elif isinstance(e, dict) and 'data' in e:
+                            error_data = e['data']
+                        
+                        # Extract message from error_data
+                        if error_data:
+                            if hasattr(error_data, 'message'):
+                                actual_error_message = error_data.message
+                            elif isinstance(error_data, dict) and 'message' in error_data:
+                                actual_error_message = error_data['message']
+                            elif hasattr(error_data, 'arguments') and len(error_data.arguments) > 0:
+                                actual_error_message = error_data.arguments[0]
+                            elif isinstance(error_data, dict) and 'arguments' in error_data and len(error_data['arguments']) > 0:
+                                actual_error_message = error_data['arguments'][0]
+                        
+                        # Fallback to args if data not available
+                        if actual_error_message == "tuple index out of range" and hasattr(e, 'args') and len(e.args) > 0:
+                            actual_error_message = e.args[0]
+                        elif actual_error_message == "tuple index out of range" and isinstance(e, dict) and 'args' in e and len(e['args']) > 0:
+                            actual_error_message = e['args'][0]
+                        
+                        # Final fallback: extract from string representation
+                        if actual_error_message == "tuple index out of range":
+                            error_str = str(e)
+                            # Try to find the actual message in the string
+                            if 'message' in error_str:
+                                # Look for the pattern: 'message': 'actual_message'
+                                import re
+                                # Look for the pattern in the data section specifically first
+                                match = re.search(r"'data'\s*:\s*\{[^}]*'message'\s*:\s*'([^']+)'", error_str)
+                                if match:
+                                    actual_error_message = match.group(1)
+                                else:
+                                    # Fallback to any message
+                                    match = re.search(r"'message'\s*:\s*'([^']+)'", error_str)
+                                    if match:
+                                        actual_error_message = match.group(1)
+                            elif ':' in error_str:
+                                actual_error_message = error_str.split(':')[-1].strip()
+                    except Exception as ex:
+                        print(f"Exception during error extraction: {ex}")
+                        # If extraction fails, try to extract from string representation
+                        error_str = str(e)
+                        if 'message' in error_str:
+                            import re
+                            # Look for the pattern in the data section specifically first
+                            match = re.search(r"'data'\s*:\s*\{[^}]*'message'\s*:\s*'([^']+)'", error_str)
+                            if match:
+                                actual_error_message = match.group(1)
+                            else:
+                                # Fallback to any message
+                                match = re.search(r"'message'\s*:\s*'([^']+)'", error_str)
+                                if match:
+                                    actual_error_message = match.group(1)
+                        elif ':' in error_str:
+                            actual_error_message = error_str.split(':')[-1].strip()
+                    
+                    # Include prior error if available (from failed load attempt)
+                    if prior_error:
+                        error_message = f"Load failed: {prior_error} | External ID resolution error for record {source_id}: {actual_error_message}. Original error typically caused by missing external ID references."
+                    else:
+                        error_message = f"External ID resolution error for record {source_id}: {actual_error_message}. Original error typically caused by missing external ID references."
+                    
+                    # Debug: Ensure we're not using the full error object
+                    if isinstance(error_message, dict) or str(error_message).startswith('{'):
+                        # Fallback extraction if somehow the error object wasn't processed
+                        try:
+                            if isinstance(e, dict) and 'data' in e and 'message' in e['data']:
+                                actual_fallback = e['data']['message']
+                            elif hasattr(e, 'data') and hasattr(e.data, 'message'):
+                                actual_fallback = e.data.message
+                            else:
+                                actual_fallback = str(e).split(':')[-1].strip()
+                            
+                            if prior_error:
+                                error_message = f"Load failed: {prior_error} | External ID resolution error for record {source_id}: {actual_fallback}. Original error typically caused by missing external ID references."
+                            else:
+                                error_message = f"External ID resolution error for record {source_id}: {actual_fallback}. Original error typically caused by missing external ID references."
+                        except Exception:
+                            # Last resort fallback
+                            error_message = f"External ID resolution error for record {source_id}: tuple index out of range. Original error typically caused by missing external ID references."
                     sanitized_error = _sanitize_error_message(error_message)
                     # Create properly padded failed line with consistent column count
                     padded_failed_line = _create_padded_failed_line(
@@ -1614,11 +2031,51 @@ def _create_batch_individually(
 
             # Handle external ID resolution errors first (takes priority)
             if is_external_id_error:
-                error_message = f"External ID resolution error for record {source_id}: {create_error}"
+                # Try to extract the actual error message from the error object
+                actual_error_message = "tuple index out of range"  # Default fallback
+                
+                try:
+                    # Check if the error object has a data.message field
+                    if hasattr(create_error, 'data') and hasattr(create_error.data, 'message'):
+                        actual_error_message = create_error.data.message
+                    elif hasattr(create_error, 'data') and hasattr(create_error.data, 'arguments') and len(create_error.data.arguments) > 0:
+                        actual_error_message = create_error.data.arguments[0]
+                    elif hasattr(create_error, 'args') and len(create_error.args) > 0:
+                        actual_error_message = create_error.args[0]
+                    else:
+                        # Try to extract from string representation
+                        error_str = str(create_error)
+                        if ':' in error_str:
+                            actual_error_message = error_str.split(':')[-1].strip()
+                except Exception:
+                    # If extraction fails, use the string representation as fallback
+                    actual_error_message = str(create_error).split(':')[-1].strip() if ':' in str(create_error) else str(create_error)
+                
+                # Include prior error if available (from failed load attempt)
+                if prior_error:
+                    error_message = f"Load failed: {prior_error} | External ID resolution error for record {source_id}: {actual_error_message}"
+                else:
+                    error_message = f"External ID resolution error for record {source_id}: {actual_error_message}"
+                
+                # Debug: Ensure we're not using the full error object
+                if isinstance(error_message, dict) or str(error_message).startswith('{'):
+                    # Fallback extraction if somehow the error object wasn't processed
+                    try:
+                        if isinstance(create_error, dict) and 'data' in create_error and 'message' in create_error['data']:
+                            actual_fallback = create_error['data']['message']
+                        elif hasattr(create_error, 'data') and hasattr(create_error.data, 'message'):
+                            actual_fallback = create_error.data.message
+                        else:
+                            actual_fallback = str(create_error).split(':')[-1].strip()
+                        
+                        error_message = f"External ID resolution error for record {source_id}: {actual_fallback}"
+                    except Exception:
+                        # Last resort fallback
+                        error_message = f"External ID resolution error for record {source_id}: tuple index out of range"
                 sanitized_error = _sanitize_error_message(error_message)
                 # Create properly padded failed line with consistent column count
                 padded_failed_line = _create_padded_failed_line(
-                    line, len(batch_header), sanitized_error
+                    line, len(batch_header), sanitized_error, prior_error
                 )
                 failed_lines.append(padded_failed_line)
                 continue
@@ -1638,7 +2095,27 @@ def _create_batch_individually(
                 continue
             elif is_external_id_related:
                 # Handle as external ID error instead of tuple index error
-                error_message = f"External ID resolution error for record {source_id}: {create_error}. Original error typically caused by missing external ID references."
+                # Try to extract the actual error message from the error object
+                actual_error_message = "tuple index out of range"  # Default fallback
+                
+                try:
+                    # Check if the error object has a data.message field
+                    if hasattr(create_error, 'data') and hasattr(create_error.data, 'message'):
+                        actual_error_message = create_error.data.message
+                    elif hasattr(create_error, 'data') and hasattr(create_error.data, 'arguments') and len(create_error.data.arguments) > 0:
+                        actual_error_message = create_error.data.arguments[0]
+                    elif hasattr(create_error, 'args') and len(create_error.args) > 0:
+                        actual_error_message = create_error.args[0]
+                    else:
+                        # Try to extract from string representation
+                        error_str = str(create_error)
+                        if ':' in error_str:
+                            actual_error_message = error_str.split(':')[-1].strip()
+                except Exception:
+                    # If extraction fails, use the string representation as fallback
+                    actual_error_message = str(create_error).split(':')[-1].strip() if ':' in str(create_error) else str(create_error)
+                
+                error_message = f"External ID resolution error for record {source_id}: {actual_error_message}. Original error typically caused by missing external ID references."
                 sanitized_error = _sanitize_error_message(error_message)
                 # Create properly padded failed line with consistent column count
                 padded_failed_line = _create_padded_failed_line(
@@ -1731,8 +2208,8 @@ def _handle_fallback_create(
         uid_index,
         context,
         ignore_list,
-        progress,  # Pass progress for user-facing messages
-        prior_error=error_message,
+        progress,
+        error_message,  # Pass the original load error message
     )
     # Safely update the aggregated map by filtering for valid integer IDs
     id_map = fallback_result.get("id_map", {})
@@ -2017,6 +2494,16 @@ def _execute_load_batch(
                     if msg_type == "error":
                         # Only raise for actual errors, not warnings
                         log.error(f"Load operation returned fatal error: {msg_text}")
+                        
+                        # SIMPLEST SOLUTION: Pass the error message directly to fail file generation
+                        # Store it in a way that's easy to retrieve
+                        import sys
+                        if not hasattr(sys.modules[__name__], 'direct_load_errors'):
+                            sys.modules[__name__].direct_load_errors = {}
+                        
+                        # Just store the message as-is - no processing, no extraction
+                        sys.modules[__name__].direct_load_errors[batch_number] = msg_text
+                        
                         raise ValueError(msg_text)
                     elif msg_type in ["warning", "info"]:
                         log.warning(f"Load operation returned {msg_type}: {msg_text}")
@@ -2238,6 +2725,25 @@ def _execute_load_batch(
 
         except Exception as e:
             error_str = str(e).lower()
+            
+            # Extract load error from SIMPLE storage
+            load_error = ""
+            import sys
+            if hasattr(sys.modules[__name__], 'direct_load_errors'):
+                current_batch_load_errors = sys.modules[__name__].direct_load_errors
+                if batch_number in current_batch_load_errors:
+                    load_error = current_batch_load_errors[batch_number]
+                    # Clean up to avoid memory leak
+                    del current_batch_load_errors[batch_number]
+                    log.debug(f"Extracted load error from SIMPLE storage: {load_error[:100]}...")
+                else:
+                    log.debug(f"No load error found in SIMPLE storage for batch {batch_number}")
+            else:
+                log.debug("No SIMPLE module-level load error storage found")
+
+            # Debug: If we still don't have a load error, log the exception details
+            if not load_error:
+                log.debug(f"No load error found. Exception details: {str(e)[:200]}...")
 
             # SPECIAL CASE: Client-side timeouts for local processing
             # Instead of ignoring, add to failed lines so they can be retried later
@@ -2246,7 +2752,7 @@ def _execute_load_batch(
                     f"Client-side timeout error for chunk of {len(current_chunk)} records. "
                     f"Adding records to fail file for retry: {e}"
                 )
-                error_msg = f"Client-side timeout: {e}"
+                error_msg = f"Client-side timeout: {_extract_clean_error_message(e)}"
                 sanitized_error = _sanitize_error_message(error_msg)
                 for line in current_chunk:
                     padded_failed_line = _create_padded_failed_line(
@@ -2279,6 +2785,8 @@ def _execute_load_batch(
                         f"causing the tuple index error. Falling back to individual "
                         f"record processing which handles external IDs differently."
                     )
+                # Extract load error if available (from ValueError with load_error attribute)
+                load_error = getattr(e, 'load_error', '')
                 # Use progress console for user-facing messages to avoid flooding logs
                 # Only if progress object is available
                 _handle_fallback_create(
@@ -2292,7 +2800,7 @@ def _execute_load_batch(
                     aggregated_id_map,
                     aggregated_failed_lines,
                     batch_number,
-                    error_message="type conversion error or invalid external ID reference",
+                    error_message="type conversion error or invalid external ID reference" if not load_error else load_error,
                 )
                 lines_to_process = lines_to_process[chunk_size:]
                 continue
@@ -2325,7 +2833,7 @@ def _execute_load_batch(
             if is_constraint_violation:
                 # Constraint violations are data problems, add all records to
                 # failed lines
-                clean_error = str(e).strip().replace("\\n", " ")
+                clean_error = _extract_clean_error_message(e).strip().replace("\\n", " ")
                 log.error(
                     f"Constraint violation in batch {batch_number}: {clean_error}"
                 )
@@ -2374,7 +2882,7 @@ def _execute_load_batch(
                         )
                         # Fall back to individual create processing
                         # instead of continuing to retry
-                        clean_error = str(e).strip().replace("\\n", " ")
+                        clean_error = _extract_clean_error_message(e).strip().replace("\\n", " ")
                         progress.console.print(
                             f"[yellow]WARN:[/] Batch {batch_number} failed `load` "
                             f"('{clean_error}'). "
@@ -2399,7 +2907,7 @@ def _execute_load_batch(
                         continue
                 continue
 
-            clean_error = str(e).strip().replace("\\n", " ")
+            clean_error = _extract_clean_error_message(e).strip().replace("\\n", " ")
             progress.console.print(
                 f"[yellow]WARN:[/] Batch {batch_number} failed `load` "
                 f"('{clean_error}'). "
@@ -2481,7 +2989,7 @@ def _execute_write_batch(
             "success": True,
         }
     except Exception as e:
-        error_message = str(e).replace("\n", " | ")
+        error_message = _extract_clean_error_message(e).replace("\n", " | ")
         # If the batch fails, all IDs in it are considered failed.
         failed_writes = [(db_id, vals, error_message) for db_id in ids]
         return {
@@ -2846,14 +3354,51 @@ def _orchestrate_pass_2(
         reverse_id_map = {v: k for k, v in id_map.items()}
         source_data_map = {row[unique_id_field_index]: row for row in all_data}
         failed_lines = []
+        header_length = len(header)  # Expected number of columns
+        
+        # Read existing Phase 1 errors to merge with Phase 2 errors
+        existing_phase1_errors = _read_existing_fail_file(fail_file, encoding, separator)
+        
         for db_id, _, error_message in failed_writes:
             source_id = reverse_id_map.get(db_id)
             if source_id and source_id in source_data_map:
                 original_row = list(source_data_map[source_id])
-                # Sanitize error message to prevent CSV formatting issues
-                sanitized_error = _sanitize_error_message(error_message)
-                original_row.append(sanitized_error)
-                failed_lines.append(original_row)
+                
+                # Check if this record already has a Phase 1 error
+                if str(source_id) in existing_phase1_errors:
+                    # Merge Phase 1 and Phase 2 errors
+                    existing_line = existing_phase1_errors[str(source_id)]
+                    phase1_error = existing_line[-1] if len(existing_line) > header_length else ""
+                    
+                    # Combine errors with clear separation
+                    if phase1_error and error_message:
+                        combined_error = f"Phase 1: {phase1_error} | Phase 2: {error_message}"
+                    elif phase1_error:
+                        combined_error = f"Phase 1: {phase1_error}"
+                    elif error_message:
+                        combined_error = f"Phase 2: {error_message}"
+                    else:
+                        combined_error = "Unknown error"
+                    
+                    # Create new failed line with combined error
+                    padded_failed_line = _create_padded_failed_line(
+                        original_row, header_length, combined_error
+                    )
+                    failed_lines.append(padded_failed_line)
+                    
+                    log.debug(f"Merged errors for record {source_id}: {combined_error}")
+                else:
+                    # No existing Phase 1 error, just use Phase 2 error
+                    if error_message:
+                        error_with_phase = f"Phase 2: {error_message}"
+                    else:
+                        error_with_phase = "Phase 2: Unknown error"
+                    
+                    padded_failed_line = _create_padded_failed_line(
+                        original_row, header_length, error_with_phase
+                    )
+                    failed_lines.append(padded_failed_line)
+        
         if failed_lines:
             fail_writer.writerows(failed_lines)
 
@@ -2961,6 +3506,13 @@ def import_data(
         )
         _show_error_panel(title, friendly_message)
         return False, {}
+    
+    # Generate environment-specific fail file paths if not provided
+    if not fail_file:
+        environment = _get_environment_from_connection(config)
+        fail_file = _get_fail_file_path(file_csv, environment, "fail")
+        log.info(f"Using auto-generated fail file: {fail_file}")
+    
     fail_writer, fail_handle = _setup_fail_file(fail_file, header, separator, encoding)
     console = Console()
     progress = Progress(
