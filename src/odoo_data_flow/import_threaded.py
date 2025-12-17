@@ -1567,8 +1567,18 @@ def _handle_tuple_index_error(
     line: list[Any],
     failed_lines: list[list[Any]],
     header_length: int,
+    load_error: str = "",
 ) -> None:
-    """Handles tuple index out of range errors by logging and recording failure."""
+    """Handles tuple index out of range errors by logging and recording failure.
+    
+    Args:
+        progress: Optional progress object for console output
+        source_id: The source ID of the record
+        line: The data line that failed
+        failed_lines: List to append failed lines to
+        header_length: Expected number of columns in header
+        load_error: Optional load error message from the original load() call
+    """
     if progress is not None:
         progress.console.print(
             f"[yellow]WARN:[/] Tuple index error for record '{source_id}'. "
@@ -1584,8 +1594,9 @@ def _handle_tuple_index_error(
     # Apply comprehensive error message sanitization to ensure CSV safety
     sanitized_error = _sanitize_error_message(error_message)
     # Create properly padded failed line with consistent column count
+    # Pass load_error for the _LOAD_ERROR_REASON column
     padded_failed_line = _create_padded_failed_line(
-        line, header_length, sanitized_error
+        line, header_length, sanitized_error, load_error
     )
     failed_lines.append(padded_failed_line)
 
@@ -1638,7 +1649,7 @@ def _create_batch_individually(
                 error_message = f"Record already exists with ID {existing_record.id}"
                 sanitized_error = _sanitize_error_message(error_message)
                 padded_failed_line = _create_padded_failed_line(
-                    line, header_len, sanitized_error
+                    line, header_len, sanitized_error, prior_error or ""
                 )
                 failed_lines.append(padded_failed_line)
                 continue
@@ -1788,7 +1799,7 @@ def _create_batch_individually(
                         sanitized_error = _sanitize_error_message(error_message)
                         # Create properly padded failed line with consistent column count
                         padded_failed_line = _create_padded_failed_line(
-                            line, header_len, sanitized_error
+                            line, header_len, sanitized_error, prior_error or ""
                         )
                         failed_lines.append(padded_failed_line)
                         continue  # Skip this record and continue processing others
@@ -1819,7 +1830,7 @@ def _create_batch_individually(
                 sanitized_error = _sanitize_error_message(error_message)
                 # Create properly padded failed line with consistent column count
                 padded_failed_line = _create_padded_failed_line(
-                    line, header_len, sanitized_error
+                    line, header_len, sanitized_error, prior_error or ""
                 )
                 failed_lines.append(padded_failed_line)
                 continue
@@ -1829,7 +1840,7 @@ def _create_batch_individually(
             if prior_error:
                 sanitized_error = _sanitize_error_message(prior_error)
                 padded_failed_line = _create_padded_failed_line(
-                    line, header_len, sanitized_error
+                    line, header_len, sanitized_error, prior_error
                 )
                 failed_lines.append(padded_failed_line)
                 continue
@@ -1896,7 +1907,7 @@ def _create_batch_individually(
             if is_pure_tuple_error:
                 # Only treat as tuple index error if it's definitely not external ID related
                 _handle_tuple_index_error(
-                    progress, source_id, line, failed_lines, len(batch_header)
+                    progress, source_id, line, failed_lines, len(batch_header), prior_error or ""
                 )
                 continue
             else:
@@ -1997,7 +2008,7 @@ def _create_batch_individually(
                     sanitized_error = _sanitize_error_message(error_message)
                     # Create properly padded failed line with consistent column count
                     padded_failed_line = _create_padded_failed_line(
-                        line, len(batch_header), sanitized_error
+                        line, len(batch_header), sanitized_error, prior_error or ""
                     )
                     failed_lines.append(padded_failed_line)
                     continue
@@ -2009,7 +2020,7 @@ def _create_batch_individually(
                     sanitized_error = _sanitize_error_message(error_message)
                     # Create properly padded failed line with consistent column count
                     padded_failed_line = _create_padded_failed_line(
-                        line, len(batch_header), sanitized_error
+                        line, len(batch_header), sanitized_error, prior_error or ""
                     )
                     failed_lines.append(padded_failed_line)
                     if "Fell back to create" in error_summary:
@@ -2090,7 +2101,7 @@ def _create_batch_individually(
             # Handle tuple index errors that are NOT related to external IDs
             if _is_tuple_index_error(create_error) and not is_external_id_related:
                 _handle_tuple_index_error(
-                    progress, source_id, line, failed_lines, len(batch_header)
+                    progress, source_id, line, failed_lines, len(batch_header), prior_error or ""
                 )
                 continue
             elif is_external_id_related:
@@ -2119,7 +2130,7 @@ def _create_batch_individually(
                 sanitized_error = _sanitize_error_message(error_message)
                 # Create properly padded failed line with consistent column count
                 padded_failed_line = _create_padded_failed_line(
-                    line, len(batch_header), sanitized_error
+                    line, len(batch_header), sanitized_error, prior_error or ""
                 )
                 failed_lines.append(padded_failed_line)
                 continue
@@ -2144,7 +2155,7 @@ def _create_batch_individually(
                 sanitized_error = _sanitize_error_message(error_message)
                 # Create properly padded failed line with consistent column count
                 padded_failed_line = _create_padded_failed_line(
-                    line, header_len, sanitized_error
+                    line, header_len, sanitized_error, prior_error or ""
                 )
                 failed_lines.append(padded_failed_line)
                 continue
@@ -2491,9 +2502,50 @@ def _execute_load_batch(
                 for message in res["messages"]:
                     msg_type = message.get("type", "unknown")
                     msg_text = message.get("message", "")
+                    
+                    # The load response message dict may contain additional fields with 
+                    # the actual human-readable error message. Check all possible fields.
+                    # Odoo load response typically has: type, message, record, rows, field, etc.
+                    detailed_error = msg_text  # Start with the basic message
+                    
+                    # Check for additional details in the message dict
+                    # These fields often contain the actual human-readable error
+                    for detail_field in ['record', 'rows', 'field', 'value', 'moreinfo']:
+                        if message.get(detail_field):
+                            detail_value = message.get(detail_field)
+                            if isinstance(detail_value, str) and detail_value:
+                                # If the detail contains human-readable patterns, prefer it
+                                if any(pattern in detail_value for pattern in [
+                                    'already exist', 'required', 'invalid', 'constraint',
+                                    'values for the fields', 'duplicate', 'not found'
+                                ]):
+                                    detailed_error = detail_value
+                                    break
+                            elif isinstance(detail_value, (list, tuple)) and detail_value:
+                                # Sometimes it's a list, join it
+                                detailed_error = ' '.join(str(v) for v in detail_value if v)
+                                break
+                    
+                    # If msg_text is generic ("Odoo Server Error"), try to find better message
+                    if msg_text in ['Odoo Server Error', 'Server Error', '']:
+                        # Try to extract from the whole message dict
+                        msg_str = str(message)
+                        # Look for human-readable patterns in the stringified dict
+                        import re
+                        patterns_to_try = [
+                            r"The values for the fields[^'\"]+",
+                            r"already exist[^'\"]+",
+                            r"'message':\s*['\"]([^'\"]+)['\"]",
+                        ]
+                        for pattern in patterns_to_try:
+                            match = re.search(pattern, msg_str, re.IGNORECASE)
+                            if match:
+                                detailed_error = match.group(0) if match.lastindex == 0 else match.group(1)
+                                break
+                    
                     if msg_type == "error":
                         # Only raise for actual errors, not warnings
-                        log.error(f"Load operation returned fatal error: {msg_text}")
+                        log.error(f"Load operation returned fatal error: {detailed_error}")
                         
                         # SIMPLEST SOLUTION: Pass the error message directly to fail file generation
                         # Store it in a way that's easy to retrieve
@@ -2501,14 +2553,14 @@ def _execute_load_batch(
                         if not hasattr(sys.modules[__name__], 'direct_load_errors'):
                             sys.modules[__name__].direct_load_errors = {}
                         
-                        # Just store the message as-is - no processing, no extraction
-                        sys.modules[__name__].direct_load_errors[batch_number] = msg_text
+                        # Store the detailed error message, falling back to msg_text if needed
+                        sys.modules[__name__].direct_load_errors[batch_number] = detailed_error if detailed_error else msg_text
                         
-                        raise ValueError(msg_text)
+                        raise ValueError(detailed_error if detailed_error else msg_text)
                     elif msg_type in ["warning", "info"]:
-                        log.warning(f"Load operation returned {msg_type}: {msg_text}")
+                        log.warning(f"Load operation returned {msg_type}: {detailed_error}")
                     else:
-                        log.info(f"Load operation returned {msg_type}: {msg_text}")
+                        log.info(f"Load operation returned {msg_type}: {detailed_error}")
 
             created_ids = res.get("ids", [])
             log.debug(
@@ -2785,8 +2837,8 @@ def _execute_load_batch(
                         f"causing the tuple index error. Falling back to individual "
                         f"record processing which handles external IDs differently."
                     )
-                # Extract load error if available (from ValueError with load_error attribute)
-                load_error = getattr(e, 'load_error', '')
+                # Use the load_error already extracted from direct_load_errors storage
+                # (extracted at line 2730-2738 before this handler)
                 # Use progress console for user-facing messages to avoid flooding logs
                 # Only if progress object is available
                 _handle_fallback_create(
@@ -2800,7 +2852,7 @@ def _execute_load_batch(
                     aggregated_id_map,
                     aggregated_failed_lines,
                     batch_number,
-                    error_message="type conversion error or invalid external ID reference" if not load_error else load_error,
+                    error_message=load_error if load_error else "type conversion error or invalid external ID reference",
                 )
                 lines_to_process = lines_to_process[chunk_size:]
                 continue
@@ -2841,8 +2893,9 @@ def _execute_load_batch(
 
                 for line in current_chunk:
                     # Create properly padded failed line with consistent column count
+                    # Pass load_error for the _LOAD_ERROR_REASON column
                     padded_failed_line = _create_padded_failed_line(
-                        line, len(batch_header), error_msg
+                        line, len(batch_header), error_msg, load_error
                     )
                     aggregated_failed_lines.append(padded_failed_line)
 
@@ -2900,7 +2953,7 @@ def _execute_load_batch(
                             aggregated_id_map,
                             aggregated_failed_lines,
                             batch_number,
-                            error_message=clean_error,
+                            error_message=load_error if load_error else clean_error,
                         )
                         lines_to_process = lines_to_process[chunk_size:]
                         serialization_retry_count = 0  # Reset counter for next batch
@@ -2924,7 +2977,7 @@ def _execute_load_batch(
                 aggregated_id_map,
                 aggregated_failed_lines,
                 batch_number,
-                error_message=clean_error,
+                error_message=load_error if load_error else clean_error,
             )
             lines_to_process = lines_to_process[chunk_size:]
 

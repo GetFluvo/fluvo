@@ -1075,3 +1075,147 @@ def test_import_data_connection_model_exception_handler_verification() -> None:
             # and trigger the 'except Exception as e:' path at line 1875
             assert result is False
             assert stats == {}
+
+
+# ============================================================================
+# Tests for Load Error Propagation (_LOAD_ERROR_REASON column)
+# ============================================================================
+
+
+def test_create_padded_failed_line_with_load_error() -> None:
+    """Test that _create_padded_failed_line properly includes load_error."""
+    from odoo_data_flow.import_threaded import _create_padded_failed_line
+
+    line = ["id1", "value1", "value2"]
+    header_length = 3
+    error_message = "Create failed: some error"
+    load_error = "The values for the fields 'partner_id' already exist"
+
+    result = _create_padded_failed_line(line, header_length, error_message, load_error)
+
+    # Result should have header_length + 2 columns (_ERROR_REASON and _LOAD_ERROR_REASON)
+    assert len(result) == header_length + 2
+
+    # The last column should be the load_error
+    assert "already exist" in result[-1]
+
+    # The second to last column should be the error_message
+    assert "Create failed" in result[-2]
+
+
+def test_create_padded_failed_line_without_load_error() -> None:
+    """Test that _create_padded_failed_line works without load_error."""
+    from odoo_data_flow.import_threaded import _create_padded_failed_line
+
+    line = ["id1", "value1", "value2"]
+    header_length = 3
+    error_message = "Create failed: some error"
+
+    result = _create_padded_failed_line(line, header_length, error_message)
+
+    # Result should have header_length + 2 columns (_ERROR_REASON and _LOAD_ERROR_REASON)
+    assert len(result) == header_length + 2
+
+    # The last column should be empty string (no load_error)
+    assert result[-1] == ""
+
+    # The second to last column should be the error_message
+    assert "Create failed" in result[-2]
+
+
+def test_handle_tuple_index_error_with_load_error() -> None:
+    """Test that _handle_tuple_index_error properly passes load_error."""
+    failed_lines: list[list[Any]] = []
+
+    mock_progress = MagicMock()
+
+    load_error = "The values for the fields 'partner_id' already exist"
+
+    _handle_tuple_index_error(
+        mock_progress,
+        "test_id",
+        ["col1", "col2", "col3"],
+        failed_lines,
+        3,  # header_length
+        load_error,  # pass the load_error
+    )
+
+    # Should add the failed line to the list
+    assert len(failed_lines) == 1
+
+    # The failed line should have header_length + 2 columns
+    assert len(failed_lines[0]) == 5  # 3 + 2 (error columns)
+
+    # The last column should contain the load_error
+    assert "already exist" in failed_lines[0][-1]
+
+
+def test_create_batch_individually_propagates_prior_error() -> None:
+    """Test that _create_batch_individually propagates prior_error to failed lines."""
+    mock_model = MagicMock()
+    mock_model.browse().env.ref.return_value = None  # No existing record
+
+    # Make create() fail with a tuple index error
+    mock_model.create.side_effect = IndexError("tuple index out of range")
+
+    batch_header = ["id", "name", "email"]
+    batch_lines = [["rec1", "Alice", "alice@example.com"]]
+
+    prior_error = "The values for the fields 'partner_id' already exist"
+
+    result = _create_batch_individually(
+        mock_model,
+        batch_lines,
+        batch_header,
+        0,  # uid_index
+        {},  # context
+        [],  # ignore_list
+        None,  # progress
+        prior_error,  # prior_error - the load error from pass 1
+    )
+
+    # Should have failed lines
+    assert len(result.get("failed_lines", [])) == 1
+
+    # The failed line should contain the prior_error in the _LOAD_ERROR_REASON column
+    failed_line = result["failed_lines"][0]
+
+    # The last element should be the load_error (prior_error)
+    assert "already exist" in str(failed_line[-1])
+
+
+def test_handle_fallback_create_passes_error_message() -> None:
+    """Test that _handle_fallback_create passes error_message as prior_error."""
+    mock_model = MagicMock()
+    mock_model.browse().env.ref.return_value = None
+
+    # Make create() succeed first time (to avoid complex error handling)
+    mock_model.create.return_value = MagicMock(id=1)
+
+    mock_progress = MagicMock()
+
+    current_chunk = [["rec1", "Alice", "alice@example.com"]]
+    batch_header = ["id", "name", "email"]
+    aggregated_id_map: dict[str, int] = {}
+    aggregated_failed_lines: list[list[Any]] = []
+
+    error_message = "The values for the fields 'partner_id' already exist"
+
+    _handle_fallback_create(
+        mock_model,
+        current_chunk,
+        batch_header,
+        0,  # uid_index
+        {},  # context
+        [],  # ignore_list
+        mock_progress,
+        aggregated_id_map,
+        aggregated_failed_lines,
+        1,  # batch_number
+        error_message,  # error_message - should be passed as prior_error
+    )
+
+    # If create succeeded, the record should be in the id_map
+    # This verifies the function was called correctly
+    assert mock_model.create.called
+

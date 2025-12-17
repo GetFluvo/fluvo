@@ -233,6 +233,9 @@ def run_import(
         if "_ERROR_REASON" not in ignore:
             log.info("Ignoring the internal '_ERROR_REASON' column for re-import.")
             ignore.append("_ERROR_REASON")
+        if "_LOAD_ERROR_REASON" not in ignore:
+            log.info("Ignoring the internal '_LOAD_ERROR_REASON' column for re-import.")
+            ignore.append("_LOAD_ERROR_REASON")
 
     import_plan: dict[str, Any] = {}
     if not no_preflight_checks:
