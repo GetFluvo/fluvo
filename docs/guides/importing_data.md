@@ -43,6 +43,45 @@ Currently, the following checks are performed by default:
 * `--skip`: The number of initial lines to skip in the source file before reading the header.
 * `--sep`: The character separating columns. Defaults to a semicolon (`;`).
 
+## Environment-Specific Fail Files
+
+`odoo-data-flow` now automatically organizes fail files by environment to prevent conflicts when importing the same data into multiple environments (e.g., local, test, prod).
+
+### How It Works
+
+When an import encounters errors, failed records are automatically written to environment-specific directories:
+
+```
+fail_files/
+├── local/
+│   ├── res_partner_fail.csv
+│   ├── res_partner_title_fail.csv
+├── test/
+│   ├── res_partner_fail.csv
+│   ├── res_partner_title_fail.csv
+├── prod/
+│   ├── res_partner_fail.csv
+│   ├── res_partner_title_fail.csv
+```
+
+### Benefits
+
+1. **Environment Isolation**: Each environment has its own fail files, preventing overwrites
+2. **Multicompany Support**: Filenames preserve company identifiers (e.g., `res_partner_bank_8_fail.csv`)
+3. **Automatic Directory Creation**: The `fail_files/{environment}/` structure is created automatically
+4. **Timestamp Preservation**: Failed files (`_failed.csv`) preserve the original file timestamp
+
+### Environment Detection
+
+The environment name is automatically extracted from your connection file:
+- `conf/local_connection.conf` → `local`
+- `conf/prod_connection.conf` → `prod`
+- `conf/test_connection.conf` → `test`
+
+### Fail Mode
+
+When running in fail mode (`--fail`), the tool automatically looks for fail files in the correct environment directory based on your connection configuration.
+
 ## Automatic Field Verification
 
 To prevent common errors, `odoo-data-flow` automatically verifies that every column in your CSV header exists as a field on the target Odoo model. This is a core part of the pre-flight checks that run by default before any data is imported.
