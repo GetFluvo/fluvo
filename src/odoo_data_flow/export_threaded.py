@@ -61,6 +61,15 @@ class RPCThreadExport(RpcThread):
     Odoo server runs out of memory processing a large request.
     """
 
+    connection: Any
+    model: Any
+    header: list[str]
+    fields_info: dict[str, dict[str, Any]]
+    context: dict[str, Any]
+    technical_names: bool
+    is_hybrid: bool
+    has_failures: bool
+
     def __init__(
         self,
         max_connection: int,
