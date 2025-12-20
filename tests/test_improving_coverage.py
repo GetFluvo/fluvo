@@ -1,14 +1,17 @@
 """Focused tests to improve coverage of specific areas."""
 
-from unittest.mock import MagicMock
-from odoo_data_flow.lib.internal.tools import batch, to_xmlid
-from odoo_data_flow.lib.conf_lib import get_connection_from_config
-import polars as pl
-import tempfile
 import os
+import tempfile
+
+import polars as pl
+
+from odoo_data_flow.lib.conf_lib import (
+    get_connection_from_config,
+)
+from odoo_data_flow.lib.internal.tools import batch, to_xmlid
 
 
-def test_batch_utility_function():
+def test_batch_utility_function() -> None:
     """Test the batch utility function."""
     # Test with various parameters
     data = [1, 2, 3, 4, 5, 6, 7]
@@ -17,17 +20,18 @@ def test_batch_utility_function():
     assert result[0] == [1, 2, 3]
     assert result[1] == [4, 5, 6]
     assert result[2] == [7]
-    
-    # Test with empty data  
+
+    # Test with empty data
     empty_result = list(batch([], 3))
     assert empty_result == []
 
 
-def test_cache_edge_cases():
+def test_cache_edge_cases() -> None:
     """Test edge cases for cache functionality."""
-    from odoo_data_flow.lib.cache import save_relation_info, load_relation_info, save_id_map, load_id_map
-    import tempfile
-    import os
+    from odoo_data_flow.lib.cache import (
+        load_id_map,
+        save_id_map,
+    )
 
     # Create a temporary cache file
     with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
@@ -42,19 +46,23 @@ def test_cache_edge_cases():
         loaded_df = load_id_map(cache_file, "res.partner")
 
         # Function should work without errors
-        assert loaded_df is not None or loaded_df is None  # May return None if not found
+        assert (
+            loaded_df is not None or loaded_df is None
+        )  # May return None if not found
     finally:
         # Clean up
         if os.path.exists(cache_file):
             os.remove(cache_file)
 
 
-def test_preflight_edge_cases():
+def test_preflight_edge_cases() -> None:
     """Test preflight utilities."""
     from odoo_data_flow.lib.preflight import _has_xml_id_pattern
 
     # Test with XML ID patterns
-    df_with_pattern = pl.DataFrame({"test_field/id": ["base.user_admin", "custom.module_name"]})
+    df_with_pattern = pl.DataFrame(
+        {"test_field/id": ["base.user_admin", "custom.module_name"]}
+    )
     result = _has_xml_id_pattern(df_with_pattern, "test_field/id")
     assert result is True
 
@@ -64,10 +72,8 @@ def test_preflight_edge_cases():
     assert result2 is False
 
 
-def test_internal_tools_edge_cases():
+def test_internal_tools_edge_cases() -> None:
     """Test internal tools functions."""
-    from odoo_data_flow.lib.internal.tools import to_xmlid
-
     # Test to_xmlid function with various inputs
     result = to_xmlid("base.user_admin")
     assert result == "base.user_admin"
@@ -79,7 +85,7 @@ def test_internal_tools_edge_cases():
     assert " " not in result3  # should sanitize spaces somehow
 
 
-def test_conf_lib_edge_cases():
+def test_conf_lib_edge_cases() -> None:
     """Test configuration library functions."""
     # These functions would normally read from config files
     # For testing, we'll just ensure they can be imported and don't immediately crash
@@ -87,19 +93,12 @@ def test_conf_lib_edge_cases():
     try:
         # This should fail gracefully with invalid config
         get_connection_from_config("nonexistent.conf")
-    except:
+    except Exception:
         # Expected to fail with nonexistent file, but this tests the code path
-        pass
-
-    try:
-        # This should also fail gracefully
-        get_context_from_config("nonexistent.conf")
-    except:
-        # Expected to fail with nonexistent file
-        pass
+        pass  # pragma: no cover
 
 
-def test_rpc_thread_edge_cases():
+def test_rpc_thread_edge_cases() -> None:
     """Test RPC thread functions."""
     from odoo_data_flow.lib.internal.rpc_thread import RpcThread
 
@@ -110,7 +109,7 @@ def test_rpc_thread_edge_cases():
     assert rpc_thread is not None
 
 
-def test_writer_edge_cases():
+def test_writer_edge_cases() -> None:
     """Test writer functions."""
     from odoo_data_flow.writer import run_write
 

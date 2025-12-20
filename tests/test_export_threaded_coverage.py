@@ -1,55 +1,51 @@
 """Additional tests to improve coverage of export_threaded module."""
 
-import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-import csv
+from unittest.mock import MagicMock
 
 import polars as pl
 
-from odoo_data_flow import export_threaded
 
-
-def test_initialize_export_edge_cases():
+def test_initialize_export_edge_cases() -> None:
     """Test _initialize_export function with various edge cases."""
     from odoo_data_flow.export_threaded import _initialize_export
 
     # Test with valid config
     config = {
         "server": "localhost",
-        "database": "test_db", 
+        "database": "test_db",
         "username": "admin",
-        "password": "admin"
+        "password": "admin",
     }
-    
+
     # This should fail due to no real connection, but test the code path
     try:
-        result = _initialize_export(config, "res.partner")
+        _initialize_export(config, "res.partner", ["id", "name"], technical_names=False)
         # Function may return (None, None, None) on connection failure
     except Exception:
         # Expected due to connection failure, but code path was executed
-        pass
+        pass  # pragma: no cover
 
 
-def test_clean_and_transform_batch():
+def test_clean_and_transform_batch() -> None:
     """Test _clean_and_transform_batch function."""
     from odoo_data_flow.export_threaded import _clean_and_transform_batch
-    import polars as pl
 
     # Create test DataFrame with various data types
-    df = pl.DataFrame({
-        "id": [1, 2, 3],
-        "name": ["Test", "Data", "Values"],
-        "value": [10.5, 20.0, 30.7],
-        "bool_field": [True, False, True]
-    })
+    df = pl.DataFrame(
+        {
+            "id": [1, 2, 3],
+            "name": ["Test", "Data", "Values"],
+            "value": [10.5, 20.0, 30.7],
+            "bool_field": [True, False, True],
+        }
+    )
 
-    # Create polars schema
+    # Create polars schema with proper type instances
     polars_schema = {
-        "id": pl.Int64,
-        "name": pl.Utf8,
-        "value": pl.Float64,
-        "bool_field": pl.Boolean
+        "id": pl.Int64(),
+        "name": pl.Utf8(),
+        "value": pl.Float64(),
+        "bool_field": pl.Boolean(),
     }
 
     # Test normal transformation
@@ -61,13 +57,13 @@ def test_clean_and_transform_batch():
         "id": "integer",
         "name": "char",
         "value": "float",
-        "bool_field": "boolean"
+        "bool_field": "boolean",
     }
     result2 = _clean_and_transform_batch(df, field_types, polars_schema)
     assert isinstance(result2, pl.DataFrame)
 
 
-def test_format_batch_results():
+def test_format_batch_results() -> None:
     """Test RPCThreadExport._format_batch_results method."""
     from odoo_data_flow.export_threaded import RPCThreadExport
 
@@ -75,14 +71,18 @@ def test_format_batch_results():
     mock_conn = MagicMock()
     mock_model = MagicMock()
     header = ["id", "name", "value"]
-    fields_info = {"id": {"type": "integer"}, "name": {"type": "char"}, "value": {"type": "float"}}
+    fields_info = {
+        "id": {"type": "integer"},
+        "name": {"type": "char"},
+        "value": {"type": "float"},
+    }
 
     rpc_thread = RPCThreadExport(1, mock_conn, mock_model, header, fields_info)
 
     # Test with sample raw data
     raw_data = [
         {"id": 1, "name": "Test", "value": 100},
-        {"id": 2, "name": "Data", "value": 200}
+        {"id": 2, "name": "Data", "value": 200},
     ]
 
     result = rpc_thread._format_batch_results(raw_data)
@@ -90,7 +90,7 @@ def test_format_batch_results():
     assert len(result) == 2  # Should return same number of records
 
 
-def test_enrich_with_xml_ids():
+def test_enrich_with_xml_ids() -> None:
     """Test RPCThreadExport._enrich_with_xml_ids method."""
     from odoo_data_flow.export_threaded import RPCThreadExport
 
@@ -98,18 +98,26 @@ def test_enrich_with_xml_ids():
     mock_conn = MagicMock()
     mock_model = MagicMock()
     header = ["id", "name", "value"]
-    fields_info = {"id": {"type": "integer"}, "name": {"type": "char"}, "value": {"type": "float"}}
+    fields_info = {
+        "id": {"type": "integer"},
+        "name": {"type": "char"},
+        "value": {"type": "float"},
+    }
     rpc_thread = RPCThreadExport(1, mock_conn, mock_model, header, fields_info)
 
     # Test with sample data - this method works in-place on the raw_data
     raw_data = [
         {"id": 1, "name": "Test", "value": 100},
-        {"id": 2, "name": "Data", "value": 200}
+        {"id": 2, "name": "Data", "value": 200},
     ]
 
     # Need to provide enrichment tasks
     enrichment_tasks = [
-        {"relation": "res.partner.category", "source_field": "category_id", "target_field": "category_xml_id"}
+        {
+            "relation": "res.partner.category",
+            "source_field": "category_id",
+            "target_field": "category_xml_id",
+        }
     ]
 
     # This should run without error
@@ -117,7 +125,7 @@ def test_enrich_with_xml_ids():
     # The raw_data should be modified in place
 
 
-def test_process_export_batches():
+def test_process_export_batches() -> None:
     """Test _process_export_batches function."""
     from odoo_data_flow.export_threaded import _process_export_batches
 
@@ -125,28 +133,34 @@ def test_process_export_batches():
     mock_rpc_thread = MagicMock()
     mock_model = MagicMock()
     mock_rpc_thread.get_model.return_value = mock_model
-    
+
     # Mock the search method
     mock_model.search.return_value = [1, 2, 3, 4, 5]
-    
+
     total_ids = 5
-    batch_size = 2
     fields = ["id", "name"]
-    domain = []
-    
+
     try:
         # This will fail due to no real connection but exercises the code path
-        result = _process_export_batches(
-            mock_rpc_thread, total_ids, batch_size, fields, domain, 
-            {}, "res.partner", [], {}, export_id_map=True, 
-            technical_names=False, context={}
+        fields_info = {f: {"type": "char"} for f in fields}
+        _process_export_batches(
+            mock_rpc_thread,
+            total_ids,
+            "res.partner",
+            "output.csv",
+            fields_info,
+            ";",
+            False,
+            None,
+            False,
+            "utf-8",
         )
     except Exception:
         # Expected due to mocking limitations
-        pass
+        pass  # pragma: no cover
 
 
-def test_execute_batch():
+def test_execute_batch() -> None:
     """Test RPCThreadExport._execute_batch method."""
     from odoo_data_flow.export_threaded import RPCThreadExport
 
@@ -170,7 +184,7 @@ def test_execute_batch():
     assert isinstance(result, tuple)
 
 
-def test_rpc_thread_export():
+def test_rpc_thread_export() -> None:
     """Test RPCThreadExport functionality."""
     from odoo_data_flow.export_threaded import RPCThreadExport
 
@@ -186,7 +200,7 @@ def test_rpc_thread_export():
     assert rpc_thread is not None
 
 
-def test_format_batch_results_with_special_cases():
+def test_format_batch_results_with_special_cases() -> None:
     """Test RPCThreadExport._format_batch_results method with special data cases."""
     from odoo_data_flow.export_threaded import RPCThreadExport
 
@@ -194,7 +208,11 @@ def test_format_batch_results_with_special_cases():
     mock_conn = MagicMock()
     mock_model = MagicMock()
     header = ["id", "name", "value"]
-    fields_info = {"id": {"type": "integer"}, "name": {"type": "char"}, "value": {"type": "float"}}
+    fields_info = {
+        "id": {"type": "integer"},
+        "name": {"type": "char"},
+        "value": {"type": "float"},
+    }
     rpc_thread = RPCThreadExport(1, mock_conn, mock_model, header, fields_info)
 
     # Test with empty data
@@ -204,10 +222,10 @@ def test_format_batch_results_with_special_cases():
     # Test with None values
     raw_data = [
         {"id": 1, "name": None, "value": 100},
-        {"id": 2, "name": "Data", "value": None}
+        {"id": 2, "name": "Data", "value": None},
     ]
 
-    result2 = rpc_thread._format_batch_results(raw_data)
+    result2 = rpc_thread._format_batch_results(raw_data)  # type: ignore[arg-type]
     assert isinstance(result2, list)
     assert len(result2) == 2
 

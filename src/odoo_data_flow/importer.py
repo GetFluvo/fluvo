@@ -30,30 +30,31 @@ from .logging_config import log
 
 def _get_environment_from_connection(config: Union[str, dict[str, Any]]) -> str:
     """Extract environment name from connection file path or config.
-    
+
     Args:
         config: Either a path to connection file or connection config dict
-        
+
     Returns:
         Environment name extracted from connection (e.g., 'local', 'prod', 'test')
-        
+
     Note:
         This is a simplified version of the function in import_threaded.py
         to avoid circular imports.
     """
     if isinstance(config, dict):
         # If config is already a dict, try to get environment from it
-        return config.get('environment', 'unknown')
-    
+        env = config.get("environment", "unknown")
+        return str(env)
+
     # Handle connection file path
     filename = os.path.basename(str(config))
-    if '_connection.conf' in filename:
-        return filename.replace('_connection.conf', '')
-    elif '.conf' in filename:
+    if "_connection.conf" in filename:
+        return filename.replace("_connection.conf", "")
+    elif ".conf" in filename:
         # Handle cases like "connection.conf" -> "connection"
-        return filename.replace('.conf', '')
-    
-    return 'unknown'
+        return filename.replace(".conf", "")
+
+    return "unknown"
 
 
 def _map_encoding_to_polars(encoding: str) -> str:
@@ -116,7 +117,9 @@ def _infer_model_from_filename(filename: str) -> Optional[str]:
     return None
 
 
-def _get_fail_filename(model: str, is_fail_run: bool, environment: str = "unknown") -> str:
+def _get_fail_filename(
+    model: str, is_fail_run: bool, environment: str = "unknown"
+) -> str:
     """Generates a standardized filename for failed records with environment support.
 
     Args:
@@ -213,7 +216,9 @@ def run_import(
     if fail:
         # Get environment for fail mode to find the correct fail file
         environment = _get_environment_from_connection(config)
-        fail_path = Path(filename).parent / _get_fail_filename(model, False, environment)
+        fail_path = Path(filename).parent / _get_fail_filename(
+            model, False, environment
+        )
         line_count = _count_lines(str(fail_path))
         if line_count <= 1:
             Console().print(
@@ -273,12 +278,12 @@ def run_import(
 
     final_deferred = deferred_fields or import_plan.get("deferred_fields", [])
     final_uid_field = unique_id_field or import_plan.get("unique_id_field") or "id"
-    
+
     # Extract environment from connection for environment-specific fail files
     environment = _get_environment_from_connection(config)
     fail_filename = _get_fail_filename(model, fail, environment)
     fail_output_file = str(Path(filename).parent / fail_filename)
-    
+
     # Create the fail_files directory if it doesn't exist
     fail_dir = os.path.join(str(Path(filename).parent), "fail_files", environment)
     os.makedirs(fail_dir, exist_ok=True)

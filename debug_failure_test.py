@@ -104,7 +104,9 @@ def debug_fallback_with_dirty_csv():
 
         mock_model.create.side_effect = mock_create
 
-        with patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config") as mock_get_conn:
+        with patch(
+            "odoo_data_flow.import_threaded.conf_lib.get_connection_from_config"
+        ) as mock_get_conn:
             mock_get_conn.return_value.get_model.return_value = mock_model
 
             # 2. ACT

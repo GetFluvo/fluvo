@@ -36,7 +36,7 @@ def test_import_data_force_create_path() -> None:
                     }
 
                     # Call with force_create=True to cover that path
-                    success, stats = import_data(
+                    success, _stats = import_data(
                         config={
                             "hostname": "localhost",
                             "database": "test",

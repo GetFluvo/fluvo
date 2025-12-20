@@ -110,7 +110,7 @@ def activate_virtualenv_in_precommit_hooks(session: Session) -> None:
                 break
 
 
-@nox.session(name="pre-commit", python=python_versions[0])  # type: ignore[misc]
+@nox.session(name="pre-commit", python=python_versions[0])  # type: ignore[untyped-decorator]
 def precommit(session: Session) -> None:
     """Lint using pre-commit."""
     args = session.posargs or [
@@ -135,7 +135,7 @@ def precommit(session: Session) -> None:
         activate_virtualenv_in_precommit_hooks(session)
 
 
-@nox.session(python=python_versions)  # type: ignore[misc]
+@nox.session(python=python_versions)  # type: ignore[untyped-decorator]
 def mypy(session: Session) -> None:
     """Type-check using mypy."""
     args = session.posargs or ["src", "tests", "docs/conf.py"]
@@ -160,7 +160,7 @@ def mypy(session: Session) -> None:
         session.run("mypy", f"--python-executable={sys.executable}", "noxfile.py")
 
 
-@nox.session(python=python_versions)  # type: ignore[misc]
+@nox.session(python=python_versions)  # type: ignore[untyped-decorator]
 def tests(session: Session) -> None:
     """Run the test suite."""
     session.run("python", "-c", CLEAN_COMMAND)
@@ -180,7 +180,7 @@ def tests(session: Session) -> None:
     session.run("pytest", *session.posargs)
 
 
-@nox.session(python=python_versions[0])  # type: ignore[misc]
+@nox.session(python=python_versions[0])  # type: ignore[untyped-decorator]
 def tests_compiled(session: Session) -> None:
     """Run tests against the compiled C extension code."""
     session.run("python", "-c", CLEAN_COMMAND)
@@ -192,7 +192,7 @@ def tests_compiled(session: Session) -> None:
     session.run("pytest", *session.posargs)
 
 
-@nox.session(python=python_versions[0])  # type: ignore[misc]
+@nox.session(python=python_versions[0])  # type: ignore[untyped-decorator]
 def coverage(session: Session) -> None:
     """Produce the coverage report."""
     args = session.posargs or ["report"]
@@ -217,7 +217,7 @@ def coverage(session: Session) -> None:
     session.run("coverage", *args)
 
 
-@nox.session(name="typeguard", python=python_versions[0])  # type: ignore[misc]
+@nox.session(name="typeguard", python=python_versions[0])  # type: ignore[untyped-decorator]
 def typeguard_tests(session: Session) -> None:
     """Run tests with typeguard."""
     session.run(
@@ -236,7 +236,7 @@ def typeguard_tests(session: Session) -> None:
     session.run("pytest", "--typeguard-packages", package, *session.posargs)
 
 
-@nox.session(python=python_versions)  # type: ignore[misc]
+@nox.session(python=python_versions)  # type: ignore[untyped-decorator]
 def xdoctest(session: Session) -> None:
     """Run examples with xdoctest."""
     if session.posargs:
@@ -260,7 +260,7 @@ def xdoctest(session: Session) -> None:
     session.run("python", "-m", "xdoctest", package, *args)
 
 
-@nox.session(name="docs-build", python=python_versions[1])  # type: ignore[misc]
+@nox.session(name="docs-build", python=python_versions[1])  # type: ignore[untyped-decorator]
 def docs_build(session: Session) -> None:
     """Build the documentation."""
     args = session.posargs or ["docs", "docs/_build"]
@@ -294,7 +294,7 @@ def docs_build(session: Session) -> None:
     session.run("sphinx-build", *args)
 
 
-@nox.session(python=python_versions[0])  # type: ignore[misc]
+@nox.session(python=python_versions[0])  # type: ignore[untyped-decorator]
 def docs(session: Session) -> None:
     """Build and serve the documentation with live reloading on file changes."""
     args = session.posargs or ["--open-browser", "docs", "docs/_build"]

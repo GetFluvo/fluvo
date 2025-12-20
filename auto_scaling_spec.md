@@ -30,7 +30,7 @@ scaling_factor = 0.5     # Reduce batch size by 50% on failure
    - Increment `consecutive_successes`
    - If `consecutive_successes >= scale_up_threshold` and `current_batch_size < initial_batch_size`:
      - Try to scale up: `current_batch_size = min(current_batch_size * 1.5, initial_batch_size)`
-4. **Error Types to Detect**: 
+4. **Error Types to Detect**:
    - Network timeout errors
    - "IndexError: tuple index out of range" (server-side timeout)
    - HTTP timeout errors
@@ -60,19 +60,19 @@ Add to the existing command line interface:
 function process_with_auto_scaling(file_data, model, batch_size, options):
     if not options.auto_scaling:
         return standard_import(file_data, model, batch_size, options)
-    
+
     initial_batch_size = batch_size
     current_batch_size = batch_size
     consecutive_successes = 0
     failed_batches = {}  # Track which specific batches failed
-    
+
     for batch in create_batches(file_data, current_batch_size):
         success = attempt_batch(batch, model, current_batch_size, options)
-        
+
         if success:
             consecutive_successes += 1
             # Attempt scale up after sustained success
-            if (consecutive_successes >= scale_up_threshold 
+            if (consecutive_successes >= scale_up_threshold
                 and current_batch_size < initial_batch_size):
                 new_batch_size = min(int(current_batch_size * 1.5), initial_batch_size)
                 log(f"Scaling up batch size from {current_batch_size} to {new_batch_size}")
@@ -84,14 +84,14 @@ function process_with_auto_scaling(file_data, model, batch_size, options):
             if new_batch_size != current_batch_size:
                 log(f"Scaling down batch size from {current_batch_size} to {new_batch_size} due to failure")
                 current_batch_size = new_batch_size
-            
+
             # Handle the failed batch (retry with new size or add to failed_batches)
             failed_batches[batch.id] = {
                 'data': batch,
                 'original_size': current_batch_size,
                 'attempts': 1
             }
-    
+
     return failed_batches
 ```
 

@@ -74,11 +74,11 @@ def test_infer_model_from_filename_edge_cases() -> None:
 def test_get_fail_filename_normal_mode() -> None:
     """Test _get_fail_filename in normal mode."""
     filename = _get_fail_filename("res.partner", is_fail_run=False)
-    assert filename == "res_partner_fail.csv"
+    assert filename == "fail_files/unknown/res_partner_fail.csv"
 
     # Test with different model
     filename = _get_fail_filename("account.move.line", is_fail_run=False)
-    assert filename == "account_move_line_fail.csv"
+    assert filename == "fail_files/unknown/account_move_line_fail.csv"
 
 
 def test_run_preflight_checks_false_case() -> None:

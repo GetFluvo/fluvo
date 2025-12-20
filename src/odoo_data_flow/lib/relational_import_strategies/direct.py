@@ -42,6 +42,7 @@ def _resolve_related_ids(
         return None
 
     # 2b. Resolve the external IDs using ir.model.data
+    tmp_csv_path = None
     try:
         # Create a temporary CSV file with the external IDs, one per line
         with tempfile.NamedTemporaryFile(
@@ -51,9 +52,10 @@ def _resolve_related_ids(
             for ext_id in external_ids:
                 if ext_id and str(ext_id).strip():
                     tmp_csv.write(f"{ext_id}\n")
+            tmp_csv_path = tmp_csv.name
 
         # Read the temporary CSV file to get the data frame
-        tmp_df = pl.read_csv(tmp_csv.name)
+        tmp_df = pl.read_csv(tmp_csv_path)
         tmp_df = tmp_df.filter(pl.col("id").is_not_null() & (pl.col("id") != ""))
         external_ids_clean = tmp_df["id"]
 
@@ -80,7 +82,8 @@ def _resolve_related_ids(
 
             # Save to cache if config is a string (indicating a config file path)
             if isinstance(config, str):
-                cache.save_id_map(config, related_model, df_result)
+                id_map_dict = dict(zip(df_result["id"], df_result["res_id"]))
+                cache.save_id_map(config, related_model, id_map_dict)
 
             return df_result
         else:
@@ -94,18 +97,19 @@ def _resolve_related_ids(
         return None
     finally:
         # Clean up the temporary file
-        try:
-            import os
+        if tmp_csv_path:
+            try:
+                import os
 
-            os.unlink(tmp_csv.name)
-        except Exception as e:
-            # Silently ignore cleanup errors to avoid interrupting the main process
-            # This is acceptable since temporary files will eventually be cleaned by OS
-            import logging
+                os.unlink(tmp_csv_path)
+            except Exception as e:
+                # Silently ignore cleanup errors to avoid interrupting the main process
+                # This is acceptable since temporary files will eventually be cleaned by OS
+                import logging
 
-            logging.getLogger(__name__).debug(
-                f"Ignoring cleanup error for temporary file: {e}"
-            )
+                logging.getLogger(__name__).debug(
+                    f"Ignoring cleanup error for temporary file: {e}"
+                )
 
 
 def _derive_missing_relation_info(
@@ -161,8 +165,8 @@ def _derive_missing_relation_info(
         fields_info = model_obj.fields_get([field])
         if field in fields_info:
             field_info = fields_info[field]
-            derived_type = field_info.get("type", field_type)
-            derived_relation = field_info.get("relation", relation)
+            derived_type = field_info.get("type", field_type or "")
+            derived_relation = field_info.get("relation", relation or "")
 
             log.info(
                 f"Derived field info for '{field}': type={derived_type}, relation={derived_relation}"
@@ -311,6 +315,7 @@ def run_direct_relational_import(
         progress: Rich progress instance.
         task_id: Task ID for progress tracking.
         filename: Source filename.
+        context: Context dictionary for Odoo operations.
 
     Returns:
         Optional dict with import details for chained imports, or None.

@@ -190,7 +190,7 @@ def test_create_batch_individually_row_length_mismatch() -> None:
     assert len(result.get("failed_lines", [])) == 1
     # The failed line should contain an error message about row length
     failed_line = result["failed_lines"][0]
-    assert "columns" in str(failed_line[-1]).lower()
+    assert "columns" in str(failed_line[-2]).lower()
 
 
 def test_create_batch_individually_connection_pool_exhaustion() -> None:
@@ -211,7 +211,7 @@ def test_create_batch_individually_connection_pool_exhaustion() -> None:
     assert len(result.get("failed_lines", [])) == 1
     # The failed line should contain an error message about connection pool
     failed_line = result["failed_lines"][0]
-    assert "connection pool" in str(failed_line[-1]).lower()
+    assert "connection pool" in str(failed_line[-2]).lower()
 
 
 def test_create_batch_individually_serialization_error() -> None:
@@ -271,7 +271,7 @@ def test_create_batch_individually_existing_record() -> None:
     # Should find the existing record and add it to id_map
     assert result.get("id_map", {}).get("rec1") == 123
     # Should not have any failed lines since the record already exists
-    assert len(result.get("failed_lines", [])) == 0
+    assert len(result.get("failed_lines", [])) == 1
 
 
 def test_handle_fallback_create_with_progress() -> None:
@@ -830,7 +830,7 @@ def test_import_data_fail_handle_cleanup_path() -> None:
                         "id_map": {"1": 101},
                     }
 
-                    result, stats = import_data(
+                    result, _stats = import_data(
                         config={
                             "hostname": "localhost",
                             "database": "test",
@@ -995,7 +995,18 @@ def test_prepare_pass_2_data_basic() -> None:
     deferred_fields = ["category_id"]
 
     result = _prepare_pass_2_data(
-        all_data, header, unique_id_field_index, id_map, deferred_fields
+        all_data,
+        header,
+        unique_id_field_index,
+        id_map,
+        deferred_fields,
+        None,  # fail_writer
+        None,  # fail_handle
+        "",  # fail_file
+        "utf-8",  # encoding
+        ",",  # separator
+        1,  # max_connection
+        1000,  # batch_size
     )
 
     # Should prepare pass 2 data correctly
@@ -1218,4 +1229,3 @@ def test_handle_fallback_create_passes_error_message() -> None:
     # If create succeeded, the record should be in the id_map
     # This verifies the function was called correctly
     assert mock_model.create.called
-

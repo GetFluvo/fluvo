@@ -203,10 +203,12 @@ def test_importer_csv_reading_fallbacks() -> None:
                         pl.DataFrame(
                             [["id", "name"]],
                             schema={"column_1": pl.Utf8, "column_2": pl.Utf8},
-                            orient="row"
+                            orient="row",
                         )
                         # Simpler approach - just mock the method to return the expected DataFrame
-                        mock_df = pl.DataFrame({"id": ["1"], "name": ["Alice"]}, orient="row")
+                        mock_df = pl.DataFrame(
+                            {"id": ["1"], "name": ["Alice"]}, orient="row"
+                        )
                         mock_read_csv.return_value = mock_df
 
                         run_import(

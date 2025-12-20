@@ -117,7 +117,7 @@ def test_run_threaded_pass_abort_logic() -> None:
         def dummy_target(*args: Any) -> None:
             pass
 
-        result, aborted = _run_threaded_pass(
+        _result, aborted = _run_threaded_pass(
             mock_rpc_thread, dummy_target, [(i, None) for i in range(1001)], {}
         )
 
@@ -188,6 +188,9 @@ def test_orchestrate_pass_2_no_valid_relations() -> None:
             context,
             None,
             None,
+            "test_fail.csv",
+            "utf-8",
+            ";",
             1,
             10,
         )
@@ -216,7 +219,7 @@ def test_orchestrate_pass_2_batching_logic() -> None:
             "odoo_data_flow.import_threaded._run_threaded_pass"
         ) as mock_run_threaded:
             mock_run_threaded.return_value = ({}, False)  # Empty results, not aborted
-            success, updates = _orchestrate_pass_2(
+            success, _updates = _orchestrate_pass_2(
                 mock_progress_instance,
                 mock_model,
                 "res.partner",
@@ -228,6 +231,9 @@ def test_orchestrate_pass_2_batching_logic() -> None:
                 context,
                 None,
                 None,
+                "test_fail.csv",
+                "utf-8",
+                ";",
                 1,
                 10,
             )

@@ -224,7 +224,11 @@ def test_run_import_fail_mode(
     """Test the fail mode logic."""
     source_file = tmp_path / "source.csv"
     source_file.touch()
-    fail_file = tmp_path / "res_partner_fail.csv"
+
+    # Create fail file in the correct subdirectory
+    fail_dir = tmp_path / "fail_files" / "dummy"
+    fail_dir.mkdir(parents=True, exist_ok=True)
+    fail_file = fail_dir / "res_partner_fail.csv"
     fail_file.write_text("id,name\n1,test")
     mock_import_data.return_value = (True, {"total_records": 1})
 
@@ -347,7 +351,11 @@ def test_run_import_fail_mode_with_strategies(
     """Test that relational strategies are skipped in fail mode."""
     source_file = tmp_path / "source.csv"
     source_file.touch()
-    fail_file = tmp_path / "res_partner_fail.csv"
+
+    # Create fail file in the correct subdirectory (environment based)
+    fail_dir = tmp_path / "fail_files" / "dummy"
+    fail_dir.mkdir(parents=True, exist_ok=True)
+    fail_file = fail_dir / "res_partner_fail.csv"
     fail_file.write_text("id,name\n1,test")
 
     def preflight_side_effect(*_args: Any, **kwargs: Any) -> bool:
@@ -393,7 +401,11 @@ def test_run_import_fail_mode_no_records(
     """Test fail mode when the fail file has no records to retry."""
     source_file = tmp_path / "source.csv"
     source_file.touch()
-    fail_file = tmp_path / "res_partner_fail.csv"
+
+    # Create fail file in the correct subdirectory
+    fail_dir = tmp_path / "fail_files" / "dummy"
+    fail_dir.mkdir(parents=True, exist_ok=True)
+    fail_file = fail_dir / "res_partner_fail.csv"
     fail_file.write_text("id,name\n")  # Only a header
 
     run_import(

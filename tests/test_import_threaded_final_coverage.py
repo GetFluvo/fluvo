@@ -146,7 +146,7 @@ def test_create_batch_individually_tuple_index_out_of_range() -> None:
     assert (
         len(result["failed_lines"]) == 2
     )  # Both records should fail since we're mocking create to raise IndexError
-    error_msg = str(result["failed_lines"][0][-1]).lower()
+    error_msg = str(result["failed_lines"][0][-2]).lower()
     assert "tuple index" in error_msg or "range" in error_msg
 
 

@@ -1,4 +1,5 @@
 """Test to verify polars casting behavior with date strings."""
+
 import polars as pl
 
 # Simulate what we get from Odoo
@@ -26,8 +27,8 @@ except Exception as e:
 
 # The correct way: parse the string first
 print("=== Correct approach: parse datetime string first ===")
-df_correct = df.with_columns([
-    pl.col("date_order").str.to_datetime("%Y-%m-%d %H:%M:%S")
-])
+df_correct = df.with_columns(
+    [pl.col("date_order").str.to_datetime("%Y-%m-%d %H:%M:%S")]
+)
 print(df_correct)
 print(f"\nSchema: {df_correct.schema}")

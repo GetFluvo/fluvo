@@ -2,7 +2,7 @@
 
 import csv
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from unittest.mock import MagicMock, patch
 
 from odoo_data_flow import import_threaded
@@ -42,7 +42,7 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
     mock_model.load.side_effect = Exception("Generic batch error")
     mock_model.browse.return_value.env.ref.return_value = None
 
-    def create_side_effect(vals: dict[str, Any], context=None) -> Any:
+    def create_side_effect(vals: dict[str, Any], context: Optional[Any] = None) -> Any:
         if vals["id"] == "rec_02":
             raise Exception("Validation Error")
         else:
@@ -137,10 +137,13 @@ def test_create_fallback_handles_malformed_rows(tmp_path: Path) -> None:
     failed_row = fail_content[1]
     assert failed_row[0] == "rec_bad"
     # The error might now be caught earlier in the process as a generic error
-    assert any(expected in failed_row[-1] for expected in [
-        "Row has 2 columns, but header has 3",
-        "type conversion error or invalid external ID reference"
-    ])
+    assert any(
+        expected in failed_row[-1]
+        for expected in [
+            "Row has 2 columns, but header has 3",
+            "type conversion error or invalid external ID reference",
+        ]
+    )
 
 
 @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
@@ -171,7 +174,7 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
     )
 
     # Mock the create method to return a simple mock record
-    def mock_create(vals: dict[str, Any], context=None) -> Any:
+    def mock_create(vals: dict[str, Any], context: Optional[Any] = None) -> Any:
         record = MagicMock()
         record.id = 1
         return record
@@ -203,15 +206,21 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
     # Check the error message for the row with bad columns
     assert failed_rows[1][0] == "bad_cols"
     # The error might now be caught earlier in the process as a generic error
-    assert any(expected in failed_rows[1][-1] for expected in [
-        "Row has 1 columns, but header has 3",
-        "type conversion error or invalid external ID reference"
-    ])
+    assert any(
+        expected in failed_rows[1][-1]
+        for expected in [
+            "Row has 1 columns, but header has 3",
+            "type conversion error or invalid external ID reference",
+        ]
+    )
     # Check the error message for the empty row
-    assert any(expected in failed_rows[2][-1] for expected in [
-        "Row has 0 columns, but header has 3",
-        "type conversion error or invalid external ID reference"
-    ])
+    assert any(
+        expected in failed_rows[2][-1]
+        for expected in [
+            "Row has 0 columns, but header has 3",
+            "type conversion error or invalid external ID reference",
+        ]
+    )
 
 
 @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")

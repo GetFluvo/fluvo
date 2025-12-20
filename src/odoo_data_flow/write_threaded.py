@@ -23,7 +23,7 @@ from rich.progress import (
 
 # Import the error message sanitization function from import_threaded
 # Import the error message sanitization function from import_threaded (avoid circular import issues)
-from .import_threaded import _sanitize_error_message, _extract_clean_error_message
+from .import_threaded import _extract_clean_error_message, _sanitize_error_message
 from .lib import conf_lib
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch  # FIX: Add missing import

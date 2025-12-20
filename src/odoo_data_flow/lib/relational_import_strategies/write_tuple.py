@@ -201,6 +201,7 @@ def _execute_write_tuple_updates(
         link_df: DataFrame with link data.
         id_map: Map of source IDs to database IDs.
         batch_size: Size of processing batches.
+        context: Context dictionary for Odoo operations.
 
     Returns:
         Tuple of (successful_updates, failed_records).
@@ -313,6 +314,7 @@ def run_write_tuple_import(
         progress: Rich progress instance.
         task_id: Task ID for progress tracking.
         filename: Source filename.
+        context: Context dictionary for Odoo operations.
 
     Returns:
         True if successful, False otherwise.

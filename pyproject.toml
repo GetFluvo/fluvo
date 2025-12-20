@@ -135,11 +135,11 @@ follow_imports = "skip"
 
 [[tool.mypy.overrides]]
 module = "odoo_data_flow.__main__"
-disable_error_code = ["misc"]
+disable_error_code = ["misc", "untyped-decorator"]
 
 [[tool.mypy.overrides]]
 module = "tests.*"
-disable_error_code = ["misc"]
+disable_error_code = ["misc", "untyped-decorator"]
 follow_imports = "normal"
 
 
@@ -219,9 +219,10 @@ exclude = [
 
 
 [tool.ruff.lint.per-file-ignores]
-"*/test_*.py" = ["S101"]
-"noxfile.py" = ["S101"]
-"**/conftest.py" = ["S101"]
+"*/test_*.py" = ["S101", "S110"]
+"noxfile.py" = ["S101", "S110"]
+"**/conftest.py" = ["S101", "S110"]
+"tests/**/*" = ["S110"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

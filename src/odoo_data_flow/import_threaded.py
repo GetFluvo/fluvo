@@ -2062,10 +2062,7 @@ def _create_batch_individually(
                             actual_error_message = error_str.split(":")[-1].strip()
 
                     # Include prior error if available (from failed load attempt)
-                    if prior_error:
-                        error_msg = f"Load failed: {prior_error} | External ID resolution error for record {source_id}: {actual_error_message}. Original error typically caused by missing external ID references."
-                    else:
-                        error_msg = f"External ID resolution error for record {source_id}: {actual_error_message}. Original error typically caused by missing external ID references."
+                    error_msg = f"External ID resolution error for record {source_id}: {actual_error_message}. Original error typically caused by missing external ID references."
 
                     # Use the error_msg variable for further processing
                     error_message = error_msg

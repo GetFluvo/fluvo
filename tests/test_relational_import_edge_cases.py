@@ -47,7 +47,7 @@ def test_resolve_related_ids_db_ids_only(
     # The search_read should return fields with "name" and "res_id" as per the function's expectations
     mock_data_model.search_read.return_value = [
         {"name": "ext_id_123", "res_id": 123},
-        {"name": "ext_id_456", "res_id": 456}
+        {"name": "ext_id_456", "res_id": 456},
     ]
 
     # Test with string IDs that should be processed by the mock
@@ -113,7 +113,9 @@ def test_resolve_related_ids_with_dict_config(mock_get_conn_dict: MagicMock) -> 
     mock_get_conn_dict.assert_called_once()
 
 
-@patch("odoo_data_flow.lib.relational_import_strategies.direct._query_relation_info_from_odoo")
+@patch(
+    "odoo_data_flow.lib.relational_import_strategies.direct._query_relation_info_from_odoo"
+)
 @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
 def test_derive_relation_info_self_referencing(
     mock_get_connection: MagicMock, mock_query_relation: MagicMock
@@ -128,13 +130,10 @@ def test_derive_relation_info_self_referencing(
     mock_model = MagicMock()
     mock_connection.get_model.return_value = mock_model
     mock_model.fields_get.return_value = {
-        "optional_product_ids": {
-            "type": "many2many",
-            "relation": "product.template"
-        }
+        "optional_product_ids": {"type": "many2many", "relation": "product.template"}
     }
 
-    relation_df, derived_type, derived_relation = _derive_relation_info(
+    _relation_df, derived_type, derived_relation = _derive_relation_info(
         "dummy.conf",
         "product.template",
         "optional_product_ids",
@@ -149,7 +148,9 @@ def test_derive_relation_info_self_referencing(
     assert derived_relation == "product.template"
 
 
-@patch("odoo_data_flow.lib.relational_import_strategies.direct._query_relation_info_from_odoo")
+@patch(
+    "odoo_data_flow.lib.relational_import_strategies.direct._query_relation_info_from_odoo"
+)
 @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
 def test_derive_relation_info_regular(
     mock_get_connection: MagicMock, mock_query_relation: MagicMock
@@ -164,13 +165,10 @@ def test_derive_relation_info_regular(
     mock_model = MagicMock()
     mock_connection.get_model.return_value = mock_model
     mock_model.fields_get.return_value = {
-        "category_id": {
-            "type": "many2one",
-            "relation": "res.partner.category"
-        }
+        "category_id": {"type": "many2one", "relation": "res.partner.category"}
     }
 
-    relation_df, derived_type, derived_relation = _derive_relation_info(
+    _relation_df, derived_type, derived_relation = _derive_relation_info(
         "dummy.conf",
         "res.partner",
         "category_id",
@@ -193,7 +191,7 @@ def test_derive_missing_relation_info_with_odoo_query() -> None:
         "odoo_data_flow.lib.relational_import_strategies.direct._query_relation_info_from_odoo",
         return_value=("test_table", "test_field"),
     ):
-        relation_df, table, field = _derive_missing_relation_info(
+        _relation_df, table, field = _derive_missing_relation_info(
             "dummy.conf",
             "res.partner",
             "category_id",
@@ -212,7 +210,7 @@ def test_derive_missing_relation_info_self_referencing_skip() -> None:
         "odoo_data_flow.lib.relational_import_strategies.direct._query_relation_info_from_odoo",
         return_value=None,
     ):
-        relation_df, table, field = _derive_missing_relation_info(
+        _relation_df, table, field = _derive_missing_relation_info(
             "dummy.conf",
             "res.partner",
             "category_id",
@@ -284,8 +282,8 @@ def test_run_direct_relational_import_missing_info(
     )
     mock_derive_info.return_value = (
         pl.DataFrame(),
-        None,
-        None,
+        "",
+        "",
     )  # Missing table and field
 
     with Progress() as progress:

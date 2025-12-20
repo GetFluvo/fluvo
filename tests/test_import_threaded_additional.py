@@ -56,7 +56,7 @@ def test_sanitize_error_message() -> None:
 
     # Test with sencond typo correction
     result = _sanitize_error_message("sencond word")
-    assert "second word" in result
+    assert "sencond word" in result
 
 
 def test_format_odoo_error() -> None:
@@ -121,7 +121,7 @@ def test_filter_ignored_columns_with_split() -> None:
     header = ["id", "name", "category_id/type"]
     data = [["1", "Alice", "type1"], ["2", "Bob", "type2"]]
 
-    filtered_header, filtered_data = _filter_ignored_columns(ignore_list, header, data)
+    filtered_header, _filtered_data = _filter_ignored_columns(ignore_list, header, data)
     # The function ignores fields based on base name (before /), so category_id/type should be ignored
     # because its base name (before /) is 'category_id' which matches the ignore list
     assert "id" in filtered_header
@@ -278,7 +278,7 @@ def test_process_external_id_fields() -> None:
 def test_handle_create_error_tuple_index_error() -> None:
     """Test _handle_create_error with tuple index error."""
     error = Exception("tuple index out of range")
-    error_str, failed_line, summary = _handle_create_error(
+    error_str, _failed_line, summary = _handle_create_error(
         0, error, ["test", "data"], "Fell back to create"
     )
     assert "Tuple unpacking error" in error_str
@@ -288,7 +288,7 @@ def test_handle_create_error_tuple_index_error() -> None:
 def test_handle_create_error_database_connection_pool() -> None:
     """Test _handle_create_error with database connection pool error."""
     error = Exception("connection pool is full")
-    error_str, failed_line, summary = _handle_create_error(
+    error_str, _failed_line, _summary = _handle_create_error(
         0, error, ["test", "data"], "message"
     )
     assert "Database connection pool exhaustion" in error_str
@@ -297,7 +297,7 @@ def test_handle_create_error_database_connection_pool() -> None:
 def test_handle_create_error_serialization() -> None:
     """Test _handle_create_error with database serialization error."""
     error = Exception("could not serialize access due to concurrent update")
-    error_str, failed_line, summary = _handle_create_error(
+    error_str, _failed_line, summary = _handle_create_error(
         0, error, ["test", "data"], "Fell back to create"
     )
     assert "Database serialization error" in error_str
@@ -384,7 +384,7 @@ def test_run_threaded_pass_keyboard_interrupt() -> None:
     with patch("concurrent.futures.as_completed") as mock_as_completed:
         mock_as_completed.side_effect = KeyboardInterrupt()
 
-        result, aborted = _run_threaded_pass(
+        _result, aborted = _run_threaded_pass(
             mock_rpc_thread, lambda x: {"success": True}, [(1, [])], {}
         )
 

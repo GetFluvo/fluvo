@@ -14,7 +14,9 @@ from odoo_data_flow.lib.relational_import_strategies.direct import (
 class TestResolveRelatedIds:
     """Test _resolve_related_ids function."""
 
-    @patch("odoo_data_flow.lib.relational_import_strategies.direct.conf_lib.get_connection_from_config")
+    @patch(
+        "odoo_data_flow.lib.relational_import_strategies.direct.conf_lib.get_connection_from_config"
+    )
     @patch("odoo_data_flow.lib.cache.load_id_map")
     def test_resolve_related_ids_success(
         self, mock_load_id_map: Mock, mock_get_connection: Mock
@@ -28,9 +30,7 @@ class TestResolveRelatedIds:
         mock_model = Mock()
         mock_get_connection.return_value = mock_connection
         mock_connection.get_model.return_value = mock_model
-        mock_model.search_read.return_value = [
-            {"name": "test_id", "res_id": 1}
-        ]
+        mock_model.search_read.return_value = [{"name": "test_id", "res_id": 1}]
 
         result = _resolve_related_ids(
             config="dummy.conf",  # Use dummy config since it's mocked
@@ -39,7 +39,9 @@ class TestResolveRelatedIds:
         )
         assert result is not None
 
-    @patch("odoo_data_flow.lib.relational_import_strategies.direct.conf_lib.get_connection_from_config")
+    @patch(
+        "odoo_data_flow.lib.relational_import_strategies.direct.conf_lib.get_connection_from_config"
+    )
     @patch("odoo_data_flow.lib.cache.load_id_map")
     def test_resolve_related_ids_empty_result(
         self, mock_load_id_map: Mock, mock_get_connection: Mock
@@ -62,7 +64,9 @@ class TestResolveRelatedIds:
         assert result is not None  # Empty DataFrame, not None
         assert result.height == 0  # Empty result
 
-    @patch("odoo_data_flow.lib.relational_import_strategies.direct.conf_lib.get_connection_from_config")
+    @patch(
+        "odoo_data_flow.lib.relational_import_strategies.direct.conf_lib.get_connection_from_config"
+    )
     @patch("odoo_data_flow.lib.cache.load_id_map")
     def test_resolve_related_ids_exception(
         self, mock_load_id_map: Mock, mock_get_connection: Mock

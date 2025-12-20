@@ -272,7 +272,7 @@ class TestQueryRelationInfoFromOdoo:
         mock_model.fields_get.return_value = {
             "product.attribute.value": {
                 "type": "many2one",
-                "relation": "product_template_attribute_line_rel"
+                "relation": "product_template_attribute_line_rel",
             }
         }
 
@@ -284,7 +284,9 @@ class TestQueryRelationInfoFromOdoo:
         # Assert
         assert result is not None
         assert result[0] == "many2one"  # field type from mocked fields_get
-        assert result[1] == "product_template_attribute_line_rel"  # relation from mocked fields_get
+        assert (
+            result[1] == "product_template_attribute_line_rel"
+        )  # relation from mocked fields_get
         mock_get_connection.assert_called_once_with(config_file="dummy.conf")
         mock_model.fields_get.assert_called_once_with(["product.attribute.value"])
 
@@ -366,7 +368,7 @@ class TestQueryRelationInfoFromOdoo:
         mock_model.fields_get.return_value = {
             "product.attribute.value": {
                 "type": "many2one",
-                "relation": "product_template_attribute_line_rel"
+                "relation": "product_template_attribute_line_rel",
             }
         }
 
@@ -380,7 +382,9 @@ class TestQueryRelationInfoFromOdoo:
         # Assert
         assert result is not None
         assert result[0] == "many2one"  # field type from mocked fields_get
-        assert result[1] == "product_template_attribute_line_rel"  # relation from mocked fields_get
+        assert (
+            result[1] == "product_template_attribute_line_rel"
+        )  # relation from mocked fields_get
         mock_get_connection.assert_called_once_with(config_dict)
         mock_model.fields_get.assert_called_once_with(["product.attribute.value"])
 
@@ -521,7 +525,7 @@ class TestDeriveMissingRelationInfo:
             "attribute_line_ids",
             None,  # Missing table
             None,  # Missing field
-            "product.attribute.value",
+            pl.DataFrame(),
         )
 
         # Assert
