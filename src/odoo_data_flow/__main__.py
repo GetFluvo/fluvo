@@ -297,6 +297,14 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
     help="Odoo context as a JSON string e.g., '{\"key\": true}'.",
 )
 @click.option(
+    "--company-id",
+    default=None,
+    type=int,
+    help="Company ID for multicompany imports. Sets allowed_company_ids context "
+    "to enable cross-company field references. Use when importing records that "
+    "reference users/data from different companies.",
+)
+@click.option(
     "--o2m",
     is_flag=True,
     default=False,
@@ -311,6 +319,18 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:
     except (ValueError, SyntaxError) as e:
         log.error(f"Invalid --context dictionary provided: {e}")
         return
+
+    # Handle multicompany context
+    company_id = kwargs.pop("company_id", None)
+    if company_id is not None:
+        context = kwargs.get("context", {})
+        # Set allowed_company_ids to enable cross-company access
+        # This allows importing records that reference users/data from other companies
+        context["allowed_company_ids"] = [company_id]
+        # Also set force_company for compatibility with older Odoo versions
+        context["force_company"] = company_id
+        kwargs["context"] = context
+        log.info(f"Multicompany mode enabled for company ID: {company_id}")
 
     groupby = kwargs.get("groupby")
     if groupby is not None:

@@ -53,6 +53,62 @@ def _format_odoo_error(error: Any) -> str:
     return str(error).strip().replace("\n", " ")
 
 
+def _extract_per_row_errors(messages: list[dict[str, Any]]) -> dict[int, str]:
+    """Extract per-row error messages from Odoo's load response.
+
+    Odoo's load method sometimes includes row-specific error information
+    in the messages. This function parses those messages to extract
+    error information keyed by row number.
+
+    Common patterns:
+    - "Row 5: Validation error..."
+    - "Line 3: Missing required field..."
+    - Error messages with 'record' and row number in them
+
+    Args:
+        messages: List of message dictionaries from Odoo's load response.
+                  Each dict typically has 'type', 'message', and sometimes 'rows'.
+
+    Returns:
+        A dictionary mapping row indices (0-based) to error messages.
+    """
+    import re
+
+    per_row_errors: dict[int, str] = {}
+
+    for msg in messages:
+        message_text = msg.get("message", "")
+        rows = msg.get("rows", {})
+
+        # Check if Odoo provided row information directly
+        if isinstance(rows, dict) and rows.get("from") is not None:
+            row_from: int = rows.get("from", 0) or 0
+            row_to: int = rows.get("to", row_from) or row_from
+            for row_idx in range(row_from, row_to + 1):
+                per_row_errors[row_idx] = message_text
+
+        # Try to extract row numbers from the message text
+        # Pattern: "Row X:" or "Line X:" at the beginning of the message
+        row_match = re.match(
+            r"^(?:Row|Line)\s+(\d+)\s*[:\-]?\s*(.*)", message_text, re.IGNORECASE
+        )
+        if row_match:
+            row_num = int(row_match.group(1))
+            error_text = row_match.group(2) or message_text
+            # Convert 1-based row numbers to 0-based index
+            per_row_errors[row_num - 1] = error_text
+
+        # Pattern: "at row X" or "in row X" somewhere in the message
+        row_in_match = re.search(
+            r"(?:at|in|for)\s+row\s+(\d+)", message_text, re.IGNORECASE
+        )
+        if row_in_match:
+            row_num = int(row_in_match.group(1))
+            per_row_errors[row_num - 1] = message_text
+
+    return per_row_errors
+
+
 def _read_data_file(
     file_path: str, separator: str, encoding: str, skip: int
 ) -> tuple[list[str], list[list[Any]]]:
@@ -167,24 +223,87 @@ def _setup_fail_file(
         return None, None
 
 
-def _prepare_pass_2_data(
+def _prepare_pass_2_data(  # noqa: C901
     all_data: list[list[Any]],
     header: list[str],
     unique_id_field_index: int,
     id_map: dict[str, int],
     deferred_fields: list[str],
+    model_obj: Any = None,
 ) -> list[tuple[int, dict[str, Any]]]:
-    """Prepares the list of write operations for Pass 2."""
-    pass_2_data_to_write = []
+    """Prepares the list of write operations for Pass 2.
 
-    # FIX: Pre-calculate a map of deferred field names (e.g., 'parent_id')
-    # to their actual index in the header.
-    deferred_field_indices = {}
-    deferred_fields_set = set(deferred_fields)
+    This function handles both self-referencing fields (like parent_id which
+    references the same model) and non-self-referencing fields (like responsible_id
+    which references a different model like res.users).
+
+    For self-referencing fields, it looks up the related database ID in id_map.
+    For non-self-referencing fields, it resolves the external ID to a database ID
+    using Odoo's ir.model.data lookup.
+    """
+    pass_2_data_to_write: list[tuple[int, dict[str, Any]]] = []
+
+    # Normalize deferred fields to handle both formats:
+    # 'responsible_id' and 'responsible_id/id'
+    # Track if field was originally specified with /id suffix
+    deferred_fields_normalized = {}
+    for df in deferred_fields:
+        if df.endswith("/id"):
+            base_name = df[:-3]  # Remove '/id' suffix
+            deferred_fields_normalized[base_name] = True  # Marks as external ID field
+        else:
+            deferred_fields_normalized[df] = False
+
+    # Pre-calculate a map of deferred field names to their actual index in the header
+    # Also track if the column is an external ID column (ends with /id)
+    deferred_field_indices: dict[str, tuple[int, bool]] = {}
     for i, column_name in enumerate(header):
         field_base_name = column_name.split("/")[0]
-        if field_base_name in deferred_fields_set:
-            deferred_field_indices[field_base_name] = i
+        if field_base_name in deferred_fields_normalized:
+            # Store (index, is_external_id_column)
+            is_ext_id_col = column_name.endswith("/id")
+            deferred_field_indices[field_base_name] = (i, is_ext_id_col)
+
+    if not deferred_field_indices:
+        log.warning(
+            f"No deferred fields found in header. "
+            f"Deferred fields requested: {deferred_fields}, "
+            f"Available columns: {header[:20]}..."  # Show first 20 for debugging
+        )
+        return pass_2_data_to_write
+
+    log.debug(f"Deferred field indices: {deferred_field_indices}")
+
+    # Get ir.model.data proxy for XML-ID resolution (non-self-referencing)
+    ir_model_data_proxy = None
+    if model_obj is not None:
+        try:
+            # Try to get the connection from the model object
+            conn = None
+            for attr in ["connection", "client", "_connection", "_client"]:
+                try:
+                    val = getattr(model_obj, attr, None)
+                    if val and not callable(val):
+                        conn = val
+                        break
+                    elif val and callable(val) and hasattr(val, "get_model"):
+                        conn = val
+                        break
+                except Exception:  # noqa: S112
+                    continue
+
+            if conn:
+                for method_name in ["model", "get_model"]:
+                    if hasattr(conn, method_name):
+                        try:
+                            method = getattr(conn, method_name)
+                            ir_model_data_proxy = method("ir.model.data")
+                            if ir_model_data_proxy:
+                                break
+                        except Exception:  # noqa: S112
+                            continue
+        except Exception as e:
+            log.debug(f"Could not get ir.model.data proxy: {e}")
 
     for row in all_data:
         source_id = row[unique_id_field_index]
@@ -194,18 +313,111 @@ def _prepare_pass_2_data(
 
         update_vals = {}
         # Use the pre-calculated map to find the values to write.
-        for field_name, field_index in deferred_field_indices.items():
+        for field_name, (field_index, is_ext_id_col) in deferred_field_indices.items():
             if field_index < len(row):
-                related_source_id = row[field_index]
-                if related_source_id:  # Ensure there is a value to look up
-                    related_db_id = id_map.get(related_source_id)
+                field_value = row[field_index]
+                if field_value:  # Ensure there is a value
+                    # First, always try id_map lookup (for self-referencing fields)
+                    related_db_id = id_map.get(field_value)
+
                     if related_db_id:
+                        # Value found in id_map - use the database ID
                         update_vals[field_name] = related_db_id
+                    elif is_ext_id_col:
+                        # External ID column (e.g., responsible_id/id)
+                        # Try XML-ID resolution for non-self-referencing fields
+                        if ir_model_data_proxy:
+                            resolved_id = _resolve_external_id_for_pass2(
+                                ir_model_data_proxy, field_value
+                            )
+                            if resolved_id:
+                                update_vals[field_name] = resolved_id
+                            else:
+                                log.debug(
+                                    f"Could not resolve '{field_value}' for "
+                                    f"'{field_name}' (source_id={source_id})"
+                                )
+                        else:
+                            log.debug(
+                                f"No ir.model.data proxy for '{field_name}' "
+                                f"(source_id={source_id})"
+                            )
+                    else:
+                        # Non-relational deferred field (e.g., image_1920)
+                        # Not in id_map and not an external ID column
+                        # Use value directly - likely base64 binary data
+                        update_vals[field_name] = field_value
+                        val_len = len(str(field_value))
+                        log.debug(
+                            f"Direct value for '{field_name}' "
+                            f"(source={source_id}, len={val_len})"
+                        )
 
         if update_vals:
             pass_2_data_to_write.append((db_id, update_vals))
 
-    return pass_2_data_to_write  # This fixed it
+    log.info(f"Prepared {len(pass_2_data_to_write)} records for Pass 2 updates")
+    return pass_2_data_to_write
+
+
+def _resolve_external_id_for_pass2(
+    ir_model_data_proxy: Any,
+    xml_id: str,
+) -> Optional[int]:
+    """Resolve an XML ID to a database ID for Pass 2 updates.
+
+    This is used for non-self-referencing deferred fields like responsible_id
+    which references res.users, not the model being imported.
+
+    Args:
+        ir_model_data_proxy: The ir.model.data model proxy
+        xml_id: The external ID to resolve (e.g., 'RES_USERS.281')
+
+    Returns:
+        The database ID if found, None otherwise
+    """
+    if not xml_id or not isinstance(xml_id, str) or "." not in xml_id:
+        return None
+
+    try:
+        module, name = xml_id.split(".", 1)
+
+        # Variations to try for module and name
+        module_norm = module.lower().replace(".", "_")
+        variations = [
+            (module, name),  # Exact match
+            (module.lower(), name),  # Lowercase module
+            ("__export__", f"{module.lower()}_{name}"),  # Standard export format
+            ("__export__", f"{module_norm}_{name}"),  # Normalized module name
+            ("base", name),  # Base module
+        ]
+
+        for m, n in variations:
+            try:
+                domain = [("module", "=", m), ("name", "=", n)]
+                res_id_data = ir_model_data_proxy.search_read(domain, ["res_id"])
+                if res_id_data:
+                    res_id = int(res_id_data[0]["res_id"])
+                    log.debug(f"Resolved {xml_id} via {m}.{n} -> {res_id}")
+                    return res_id
+            except Exception:  # noqa: S112
+                continue
+
+        # Fallback: Search for the entire string in the 'name' field
+        try:
+            domain_full = [("name", "=", xml_id)]
+            res_id_data = ir_model_data_proxy.search_read(domain_full, ["res_id"])
+            if res_id_data:
+                res_id = int(res_id_data[0]["res_id"])
+                log.debug(f"Resolved {xml_id} via full match -> {res_id}")
+                return res_id
+        except Exception:  # noqa: S110
+            pass
+
+    except Exception as e:
+        log.debug(f"Error resolving XML-ID {xml_id}: {e}")
+
+    return None
 
 
 def _recursive_create_batches(  # noqa: C901
@@ -919,17 +1131,66 @@ def _execute_load_batch(  # noqa: C901
             if successful_count < total_count:
                 failed_count = total_count - successful_count
                 log.info(f"Capturing {failed_count} failed records for fail file")
-                # Add error information to the lines that failed
-                for i, line in enumerate(current_chunk):
-                    # Check if this line corresponds to a created record
-                    if i >= len(created_ids) or created_ids[i] is None:
-                        # This record failed, add it to failed_lines with error info
-                        error_msg = "Record creation failed"
-                        if res.get("messages"):
-                            error_msg = res["messages"][0].get("message", error_msg)
 
-                        failed_line = [*list(line), f"Load failed: {error_msg}"]
-                        aggregated_failed_lines.append(failed_line)
+                # Build a map of row numbers to error messages from Odoo's response
+                # Odoo often includes row information in error messages
+                per_row_errors = _extract_per_row_errors(res.get("messages", []))
+
+                # Get the batch-level error message as fallback
+                batch_error_msg = "Record creation failed"
+                if res.get("messages"):
+                    batch_error_msg = res["messages"][0].get("message", batch_error_msg)
+
+                # If we have many failed records but only one error message,
+                # fall back to individual processing for accurate error reporting
+                if failed_count > 1 and not per_row_errors:
+                    log.info(
+                        f"Batch had {failed_count} failures with single error message. "
+                        f"Falling back to individual processing for accurate errors."
+                    )
+                    # Get only the failed lines
+                    failed_lines_to_retry = [
+                        line
+                        for i, line in enumerate(current_chunk)
+                        if i >= len(created_ids) or created_ids[i] is None
+                    ]
+                    if failed_lines_to_retry:
+                        fallback_result = _create_batch_individually(
+                            model,
+                            failed_lines_to_retry,
+                            batch_header,
+                            uid_index,
+                            context,
+                            ignore_list,
+                        )
+                        # Update id_map with new successes
+                        aggregated_id_map.update(fallback_result.get("id_map", {}))
+                        aggregated_failed_lines.extend(
+                            fallback_result.get("failed_lines", [])
+                        )
+                else:
+                    # Add error information to the lines that failed
+                    first_failed = True
+                    for i, line in enumerate(current_chunk):
+                        # Check if this line corresponds to a created record
+                        if i >= len(created_ids) or created_ids[i] is None:
+                            # Try to get a specific error for this row
+                            error_msg = per_row_errors.get(i)
+
+                            if not error_msg:
+                                if first_failed:
+                                    # First failed record gets the batch error
+                                    error_msg = batch_error_msg
+                                    first_failed = False
+                                else:
+                                    # Other records reference batch error
+                                    truncated_msg = batch_error_msg[:100]
+                                    error_msg = (
+                                        f"Failed in same batch: {truncated_msg}..."
+                                    )
+
+                            failed_line = [*list(line), f"Load failed: {error_msg}"]
+                            aggregated_failed_lines.append(failed_line)
 
             aggregated_id_map.update(id_map)
             lines_to_process = lines_to_process[chunk_size:]
@@ -1372,7 +1633,7 @@ def _orchestrate_pass_2(
     """
     unique_id_field_index = header.index(unique_id_field)
     pass_2_data_to_write = _prepare_pass_2_data(
-        all_data, header, unique_id_field_index, id_map, deferred_fields
+        all_data, header, unique_id_field_index, id_map, deferred_fields, model_obj
     )
 
     if not pass_2_data_to_write:
