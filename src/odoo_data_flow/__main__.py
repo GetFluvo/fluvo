@@ -336,6 +336,13 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:
     if groupby is not None:
         kwargs["groupby"] = [col.strip() for col in groupby.split(",") if col.strip()]
 
+    # Convert deferred_fields from comma-separated string to list
+    deferred = kwargs.get("deferred_fields")
+    if deferred is not None:
+        kwargs["deferred_fields"] = [
+            f.strip() for f in deferred.split(",") if f.strip()
+        ]
+
     run_import(**kwargs)
 
 

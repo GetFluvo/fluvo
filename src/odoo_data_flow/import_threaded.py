@@ -888,7 +888,13 @@ def _execute_load_batch(  # noqa: C901
         load_header, load_lines = batch_header, current_chunk
 
         if ignore_list:
-            ignore_set = set(ignore_list)
+            # Normalize ignore_set to handle both 'field' and 'field/id' formats
+            ignore_set = set()
+            for field in ignore_list:
+                if field.endswith("/id"):
+                    ignore_set.add(field[:-3])  # Add base name
+                else:
+                    ignore_set.add(field)
             indices_to_keep = [
                 i
                 for i, h in enumerate(batch_header)
