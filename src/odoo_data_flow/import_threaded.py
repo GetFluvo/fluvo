@@ -701,13 +701,79 @@ def _handle_create_error(  # noqa C901
     return error_message, failed_line, error_summary
 
 
-def _create_batch_individually(
+def _create_xmlid_entry(
+    model: Any,
+    xml_id: str,
+    res_id: int,
+    model_name: str,
+) -> bool:
+    """Create an ir.model.data entry for a record created via create().
+
+    When records are created using Odoo's create() method instead of load(),
+    the XML ID is not automatically persisted. This function creates the
+    ir.model.data entry to ensure the XML ID is saved.
+
+    Args:
+        model: The Odoo model proxy (used to access other models)
+        xml_id: The external ID (e.g., 'MODULE.identifier' or just 'identifier')
+        res_id: The database ID of the created record
+        model_name: The model name (e.g., 'res.partner')
+
+    Returns:
+        True if the ir.model.data entry was created successfully, False otherwise.
+    """
+    try:
+        # Parse module and name from XML ID
+        if "." in xml_id:
+            module, name = xml_id.split(".", 1)
+        else:
+            # Use __import__ as the default module for records without a prefix
+            module = "__import__"
+            name = xml_id
+
+        # Get ir.model.data model
+        ir_model_data = model.browse().env["ir.model.data"]
+
+        # Check if entry already exists
+        existing = ir_model_data.search([
+            ("module", "=", module),
+            ("name", "=", name),
+        ], limit=1)
+
+        if existing:
+            # Update existing entry if it points to a different record
+            if existing.res_id != res_id:
+                log.debug(
+                    f"Updating existing ir.model.data entry for {xml_id} "
+                    f"from res_id={existing.res_id} to res_id={res_id}"
+                )
+                existing.write({"res_id": res_id, "model": model_name})
+            return True
+
+        # Create new ir.model.data entry
+        ir_model_data.create({
+            "module": module,
+            "name": name,
+            "model": model_name,
+            "res_id": res_id,
+        })
+        log.debug(
+            f"Created ir.model.data entry: {module}.{name} -> {model_name}({res_id})"
+        )
+        return True
+    except Exception as e:
+        log.warning(f"Failed to create ir.model.data entry for {xml_id}: {e}")
+        return False
+
+
+def _create_batch_individually(  # noqa: C901
     model: Any,
     batch_lines: list[list[Any]],
     batch_header: list[str],
     uid_index: int,
     context: dict[str, Any],
     ignore_list: list[str],
+    model_name: str = "",
 ) -> dict[str, Any]:
     """Fallback to create records one-by-one to get detailed errors."""
     id_map: dict[str, int] = {}
@@ -758,6 +824,12 @@ def _create_batch_individually(
 
             new_record = model.create(converted_vals, context=context)
             id_map[sanitized_source_id] = new_record.id
+
+            # Create ir.model.data entry for XML ID since create() doesn't do it
+            if model_name:
+                _create_xmlid_entry(
+                    model, sanitized_source_id, new_record.id, model_name
+                )
         except IndexError as e:
             error_message = f"Malformed row detected (row {i + 1} in batch): {e}"
             failed_lines.append([*line, error_message])
@@ -863,13 +935,15 @@ def _execute_load_batch(  # noqa: C901
     )
     uid_index = thread_state["unique_id_field_index"]
     ignore_list = thread_state.get("ignore_list", [])
+    model_name = thread_state.get("model_name", "")
 
     if thread_state.get("force_create"):
         progress.console.print(
             f"Batch {batch_number}: Fail mode active, using `create` method."
         )
         result = _create_batch_individually(
-            model, batch_lines, batch_header, uid_index, context, ignore_list
+            model, batch_lines, batch_header, uid_index, context,
+            ignore_list, model_name
         )
         result["success"] = bool(result.get("id_map"))
         return result
@@ -1168,6 +1242,7 @@ def _execute_load_batch(  # noqa: C901
                             uid_index,
                             context,
                             ignore_list,
+                            model_name,
                         )
                         # Update id_map with new successes
                         aggregated_id_map.update(fallback_result.get("id_map", {}))
@@ -1296,6 +1371,7 @@ def _execute_load_batch(  # noqa: C901
                             uid_index,
                             context,
                             ignore_list,
+                            model_name,
                         )
                         aggregated_id_map.update(fallback_result.get("id_map", {}))
                         aggregated_failed_lines.extend(
@@ -1319,6 +1395,7 @@ def _execute_load_batch(  # noqa: C901
                 uid_index,
                 context,
                 ignore_list,
+                model_name,
             )
             aggregated_id_map.update(fallback_result.get("id_map", {}))
             aggregated_failed_lines.extend(fallback_result.get("failed_lines", []))
@@ -1581,6 +1658,7 @@ def _orchestrate_pass_1(
 
     thread_state_1 = {
         "model": model_obj,
+        "model_name": model_name,
         "context": context,
         "unique_id_field_index": pass_1_uid_index,
         "batch_header": pass_1_header,

@@ -608,6 +608,93 @@ class TestImportThreadedEdgeCases:
         assert new_data == [["1", "Alice"], ["2", "Bob"]]
 
 
+class TestXmlIdCreation:
+    """Tests for XML ID creation when using create() method."""
+
+    def test_create_xmlid_entry_with_module_prefix(self) -> None:
+        """Test XML ID creation with module prefix (e.g., 'my_module.identifier')."""
+        from odoo_data_flow.import_threaded import _create_xmlid_entry
+
+        mock_model = MagicMock()
+        mock_ir_model_data = MagicMock()
+        mock_ir_model_data.search.return_value = []  # No existing entry
+        mock_model.browse.return_value.env = {"ir.model.data": mock_ir_model_data}
+
+        result = _create_xmlid_entry(mock_model, "my_module.partner_001", 42, "res.partner")
+
+        assert result is True
+        mock_ir_model_data.create.assert_called_once_with({
+            "module": "my_module",
+            "name": "partner_001",
+            "model": "res.partner",
+            "res_id": 42,
+        })
+
+    def test_create_xmlid_entry_without_module_prefix(self) -> None:
+        """Test XML ID creation without module prefix (uses __import__)."""
+        from odoo_data_flow.import_threaded import _create_xmlid_entry
+
+        mock_model = MagicMock()
+        mock_ir_model_data = MagicMock()
+        mock_ir_model_data.search.return_value = []  # No existing entry
+        mock_model.browse.return_value.env = {"ir.model.data": mock_ir_model_data}
+
+        result = _create_xmlid_entry(mock_model, "PARTNER_001", 42, "res.partner")
+
+        assert result is True
+        mock_ir_model_data.create.assert_called_once_with({
+            "module": "__import__",
+            "name": "PARTNER_001",
+            "model": "res.partner",
+            "res_id": 42,
+        })
+
+    def test_create_xmlid_entry_existing_entry_same_res_id(self) -> None:
+        """Test that existing entries with same res_id are not updated."""
+        from odoo_data_flow.import_threaded import _create_xmlid_entry
+
+        mock_model = MagicMock()
+        mock_existing = MagicMock()
+        mock_existing.res_id = 42  # Same res_id
+        mock_ir_model_data = MagicMock()
+        mock_ir_model_data.search.return_value = mock_existing
+        mock_model.browse.return_value.env = {"ir.model.data": mock_ir_model_data}
+
+        result = _create_xmlid_entry(mock_model, "my_module.partner_001", 42, "res.partner")
+
+        assert result is True
+        mock_ir_model_data.create.assert_not_called()
+        mock_existing.write.assert_not_called()
+
+    def test_create_xmlid_entry_existing_entry_different_res_id(self) -> None:
+        """Test that existing entries with different res_id are updated."""
+        from odoo_data_flow.import_threaded import _create_xmlid_entry
+
+        mock_model = MagicMock()
+        mock_existing = MagicMock()
+        mock_existing.res_id = 99  # Different res_id
+        mock_ir_model_data = MagicMock()
+        mock_ir_model_data.search.return_value = mock_existing
+        mock_model.browse.return_value.env = {"ir.model.data": mock_ir_model_data}
+
+        result = _create_xmlid_entry(mock_model, "my_module.partner_001", 42, "res.partner")
+
+        assert result is True
+        mock_ir_model_data.create.assert_not_called()
+        mock_existing.write.assert_called_once_with({"res_id": 42, "model": "res.partner"})
+
+    def test_create_xmlid_entry_handles_exception(self) -> None:
+        """Test that exceptions during XML ID creation are handled gracefully."""
+        from odoo_data_flow.import_threaded import _create_xmlid_entry
+
+        mock_model = MagicMock()
+        mock_model.browse.side_effect = Exception("Connection error")
+
+        result = _create_xmlid_entry(mock_model, "my_module.partner_001", 42, "res.partner")
+
+        assert result is False
+
+
 class TestRecursiveBatching:
     """Tests for the recursive batch creation logic."""
 
