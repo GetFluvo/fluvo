@@ -93,6 +93,7 @@ def run_import(  # noqa: C901
     filename: str,
     model: Optional[str],
     deferred_fields: Optional[list[str]],
+    auto_defer: bool,
     unique_id_field: Optional[str],
     no_preflight_checks: bool,
     headless: bool,
@@ -177,6 +178,7 @@ def run_import(  # noqa: C901
             unique_id_field=unique_id_field,
             ignore=ignore or [],
             o2m=o2m,
+            auto_defer=auto_defer,
         ):
             return
 

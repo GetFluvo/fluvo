@@ -244,6 +244,14 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
     "(enables two-pass import).",
 )
 @click.option(
+    "--auto-defer",
+    is_flag=True,
+    default=False,
+    help="Automatically defer all non-required many2one fields. "
+    "Enables progressive import where records are created first, "
+    "then relational fields are populated in Pass 2.",
+)
+@click.option(
     "--unique-id-field",
     default=None,
     help="The column that uniquely identifies records (e.g., 'xml_id'). "

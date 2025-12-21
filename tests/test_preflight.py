@@ -562,6 +562,119 @@ class TestDeferralAndStrategyCheck:
         assert "Action Required" in mock_show_error_panel.call_args[0][0]
 
 
+class TestAutoDeferMode:
+    """Tests for the auto-defer mode in preflight checks."""
+
+    def test_auto_defer_defers_non_required_m2o_fields(
+        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Verify auto_defer=True defers all non-required m2o fields."""
+        mock_df_header = MagicMock()
+        mock_df_header.columns = ["id", "name", "user_id", "country_id"]
+        mock_df_data = MagicMock()
+        mock_polars_read_csv.side_effect = [mock_df_header, mock_df_data]
+
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+            "user_id": {
+                "type": "many2one",
+                "relation": "res.users",
+                "required": False,
+            },
+            "country_id": {
+                "type": "many2one",
+                "relation": "res.country",
+                "required": False,
+            },
+        }
+        import_plan: dict[str, Any] = {}
+        result = preflight.deferral_and_strategy_check(
+            preflight_mode=PreflightMode.NORMAL,
+            model="res.partner",
+            filename="file.csv",
+            config="",
+            import_plan=import_plan,
+            auto_defer=True,
+        )
+        assert result is True
+        assert "user_id" in import_plan["deferred_fields"]
+        assert "country_id" in import_plan["deferred_fields"]
+
+    def test_auto_defer_skips_required_m2o_fields(
+        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Verify auto_defer=True does NOT defer required m2o fields."""
+        mock_df_header = MagicMock()
+        mock_df_header.columns = ["id", "name", "company_id", "user_id"]
+        mock_df_data = MagicMock()
+        mock_polars_read_csv.side_effect = [mock_df_header, mock_df_data]
+
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+            "company_id": {
+                "type": "many2one",
+                "relation": "res.company",
+                "required": True,  # Required field - should NOT be deferred
+            },
+            "user_id": {
+                "type": "many2one",
+                "relation": "res.users",
+                "required": False,  # Not required - should be deferred
+            },
+        }
+        import_plan: dict[str, Any] = {}
+        result = preflight.deferral_and_strategy_check(
+            preflight_mode=PreflightMode.NORMAL,
+            model="res.partner",
+            filename="file.csv",
+            config="",
+            import_plan=import_plan,
+            auto_defer=True,
+        )
+        assert result is True
+        # Only user_id should be deferred, not company_id
+        assert "user_id" in import_plan["deferred_fields"]
+        assert "company_id" not in import_plan["deferred_fields"]
+
+    def test_auto_defer_false_does_not_defer_m2o_fields(
+        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Verify auto_defer=False does NOT defer non-self-referencing m2o fields."""
+        mock_df_header = MagicMock()
+        mock_df_header.columns = ["id", "name", "user_id"]
+        mock_df_data = MagicMock()
+        mock_polars_read_csv.side_effect = [mock_df_header, mock_df_data]
+
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+            "user_id": {
+                "type": "many2one",
+                "relation": "res.users",
+                "required": False,
+            },
+        }
+        import_plan: dict[str, Any] = {}
+        result = preflight.deferral_and_strategy_check(
+            preflight_mode=PreflightMode.NORMAL,
+            model="res.partner",
+            filename="file.csv",
+            config="",
+            import_plan=import_plan,
+            auto_defer=False,
+        )
+        assert result is True
+        # Without auto_defer, non-self-referencing m2o fields should NOT be deferred
+        assert "deferred_fields" not in import_plan or "user_id" not in import_plan.get(
+            "deferred_fields", []
+        )
+
+
 class TestGetOdooFields:
     """Tests for the _get_odoo_fields helper function."""
 

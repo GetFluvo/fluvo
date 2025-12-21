@@ -395,7 +395,7 @@ def _validate_header(
     return True
 
 
-def _plan_deferrals_and_strategies(
+def _plan_deferrals_and_strategies(  # noqa: C901
     header: list[str],
     odoo_fields: dict[str, Any],
     model: str,
@@ -404,7 +404,13 @@ def _plan_deferrals_and_strategies(
     import_plan: dict[str, Any],
     **kwargs: Any,
 ) -> bool:
-    """Analyzes fields to plan deferrals and select import strategies."""
+    """Analyzes fields to plan deferrals and select import strategies.
+
+    When auto_defer is enabled, all non-required many2one fields are automatically
+    deferred to Pass 2, enabling progressive import where records are created first
+    and relational fields are populated afterwards.
+    """
+    auto_defer = kwargs.get("auto_defer", False)
     deferrable_fields = []
     strategies = {}
     df = pl.read_csv(filename, separator=separator, truncate_ragged_lines=True)
@@ -414,14 +420,25 @@ def _plan_deferrals_and_strategies(
         if clean_field_name in odoo_fields:
             field_info = odoo_fields[clean_field_name]
             field_type = field_info.get("type")
+            is_required = field_info.get("required", False)
 
             is_m2o_self = (
                 field_type == "many2one" and field_info.get("relation") == model
             )
+            is_m2o_other = (
+                field_type == "many2one" and field_info.get("relation") != model
+            )
             is_m2m = field_type == "many2many"
             is_o2m = field_type == "one2many"
 
-            if is_m2o_self:
+            # Auto-defer: defer all non-required m2o fields
+            if auto_defer and is_m2o_other and not is_required:
+                deferrable_fields.append(clean_field_name)
+                log.debug(
+                    f"Auto-deferring many2one field '{clean_field_name}' "
+                    f"(relation: {field_info.get('relation')})"
+                )
+            elif is_m2o_self:
                 deferrable_fields.append(clean_field_name)
             elif is_m2m:
                 deferrable_fields.append(clean_field_name)
@@ -435,7 +452,13 @@ def _plan_deferrals_and_strategies(
                 strategies[clean_field_name] = {"strategy": "write_o2m_tuple"}
 
     if deferrable_fields:
-        log.info(f"Detected deferrable fields: {deferrable_fields}")
+        if auto_defer:
+            log.info(
+                f"Auto-defer enabled. Deferring {len(deferrable_fields)} fields to "
+                f"Pass 2: {deferrable_fields}"
+            )
+        else:
+            log.info(f"Detected deferrable fields: {deferrable_fields}")
         unique_id_field = kwargs.get("unique_id_field")
         if not unique_id_field and "id" in header:
             log.info("Automatically using 'id' column as the unique identifier.")
