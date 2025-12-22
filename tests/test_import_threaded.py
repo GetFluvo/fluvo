@@ -229,7 +229,12 @@ class TestExecuteLoadBatch:
         assert len(result["id_map"]) == 4
         assert mock_model.load.call_count == 3
         mock_create_individually.assert_not_called()
-        mock_progress.console.print.assert_called_once_with(
+        # Verify both adaptive throttle and batch reduction messages were shown
+        mock_progress.console.print.assert_any_call(
+            "[yellow]WARN:[/] Server overload detected (502/503). "
+            "Adding 1.0s delay between batches."
+        )
+        mock_progress.console.print.assert_any_call(
             "[yellow]WARN:[/] Batch 1 hit scalable error. "
             "Reducing chunk size to 2 and retrying."
         )

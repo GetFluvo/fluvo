@@ -1325,6 +1325,8 @@ def _execute_load_batch(  # noqa: C901
                 "memory" in error_str
                 or "out of memory" in error_str
                 or "502" in error_str
+                or "503" in error_str
+                or "service unavailable" in error_str
                 or "gateway" in error_str
                 or "proxy" in error_str
                 or "timeout" in error_str
@@ -1334,6 +1336,25 @@ def _execute_load_batch(  # noqa: C901
                 or "too many connections" in error_str.lower()
                 or "poolerror" in error_str.lower()
             )
+
+            # Detect server overload (502/503) for adaptive throttling
+            is_server_overload = (
+                "502" in error_str
+                or "503" in error_str
+                or "service unavailable" in error_str
+                or "bad gateway" in error_str
+            )
+
+            if is_server_overload:
+                # Adaptive throttling: increase delay exponentially on server overload
+                current_throttle = thread_state.get("adaptive_throttle", 0.0)
+                new_throttle = min(current_throttle + 1.0, 10.0)  # Cap at 10 seconds
+                thread_state["adaptive_throttle"] = new_throttle
+                progress.console.print(
+                    f"[yellow]WARN:[/] Server overload detected (502/503). "
+                    f"Adding {new_throttle:.1f}s delay between batches."
+                )
+                time.sleep(new_throttle)
 
             if is_scalable_error and chunk_size > 1:
                 chunk_size = max(1, chunk_size // 2)
@@ -1504,9 +1525,12 @@ def _run_threaded_pass(  # noqa: C901
         if rpc_thread.abort_flag:
             break
 
-        # Add delay between batches (except before the first batch)
-        if batch_delay > 0 and batch_count > 0:
-            time.sleep(batch_delay)
+        # Add delay between batches (except before the first batch).
+        # Combine user-specified delay with adaptive throttle for server overload.
+        adaptive_throttle = thread_state.get("adaptive_throttle", 0.0)
+        total_delay = batch_delay + adaptive_throttle
+        if total_delay > 0 and batch_count > 0:
+            time.sleep(total_delay)
 
         args = (
             [thread_state, data, num]
@@ -1534,6 +1558,16 @@ def _run_threaded_pass(  # noqa: C901
                 if is_successful_batch:
                     successful_batches += 1
                     consecutive_failures = 0
+                    # Gradually reduce adaptive throttle after successful batches
+                    current_throttle = thread_state.get("adaptive_throttle", 0.0)
+                    if current_throttle > 0:
+                        new_throttle = max(0.0, current_throttle - 0.5)
+                        thread_state["adaptive_throttle"] = new_throttle
+                        if new_throttle == 0:
+                            rpc_thread.progress.console.print(
+                                "[green]INFO:[/green] Server recovered. "
+                                "Adaptive throttle disabled."
+                            )
                 else:
                     consecutive_failures += 1
                     if consecutive_failures >= 50:
