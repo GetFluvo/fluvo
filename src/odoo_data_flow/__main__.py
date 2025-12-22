@@ -318,8 +318,48 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
     default=False,
     help="Special handling for one-to-many imports.",
 )
+# --- Import behavior options ---
+@click.option(
+    "--on-missing-ref",
+    default=None,
+    help="Action for missing references: field:action pairs. "
+    "Actions: create (auto-create), skip (skip row), empty (set to False). "
+    "Example: 'country_id:create,user_id:skip,category_id:empty'",
+)
+@click.option(
+    "--auto-create-refs",
+    is_flag=True,
+    default=False,
+    help="Automatically create missing related records for all many2one fields. "
+    "Uses Odoo's name_create to create records with just the name.",
+)
+@click.option(
+    "--set-empty-on-missing",
+    is_flag=True,
+    default=False,
+    help="Set relational fields to empty (False) when reference not found, "
+    "instead of failing the row. Useful for capturing incomplete data.",
+)
+@click.option(
+    "--fallback-values",
+    default=None,
+    help="Default values for invalid selection/boolean fields: field:value pairs. "
+    "Example: 'state:draft,active:true'",
+)
+@click.option(
+    "--tracking-disable/--tracking-enable",
+    default=True,
+    help="Disable/enable mail tracking during import. Disabled by default.",
+)
+@click.option(
+    "--defer-parent-store",
+    is_flag=True,
+    default=False,
+    help="Defer parent_left/parent_right computation for hierarchical models. "
+    "Improves performance for large imports of nested structures.",
+)
 @click.option("--encoding", default="utf-8", help="Encoding of the data file.")
-def import_cmd(connection_file: str, **kwargs: Any) -> None:
+def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     """Runs the data import process."""
     kwargs["config"] = connection_file
     try:
@@ -328,18 +368,97 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:
         log.error(f"Invalid --context dictionary provided: {e}")
         return
 
+    context = kwargs.get("context", {})
+
     # Handle multicompany context
     company_id = kwargs.pop("company_id", None)
     if company_id is not None:
-        context = kwargs.get("context", {})
         # Set allowed_company_ids to enable cross-company access
-        # This allows importing records that reference users/data from other companies
         context["allowed_company_ids"] = [company_id]
         # Also set force_company for compatibility with older Odoo versions
         context["force_company"] = company_id
-        kwargs["context"] = context
         log.info(f"Multicompany mode enabled for company ID: {company_id}")
 
+    # Handle tracking_disable option
+    tracking_disable = kwargs.pop("tracking_disable", True)
+    context["tracking_disable"] = tracking_disable
+    if not tracking_disable:
+        log.info("Mail tracking enabled for this import")
+
+    # Handle defer_parent_store option
+    defer_parent_store = kwargs.pop("defer_parent_store", False)
+    if defer_parent_store:
+        context["defer_parent_store_computation"] = True
+        log.info("Parent store computation will be deferred")
+
+    # Handle --on-missing-ref option: parse field:action pairs
+    on_missing_ref = kwargs.pop("on_missing_ref", None)
+    name_create_enabled_fields: dict[str, bool] = {}
+    import_set_empty_fields: list[str] = []
+
+    if on_missing_ref:
+        for pair in on_missing_ref.split(","):
+            if ":" not in pair:
+                log.warning(
+                    f"Invalid --on-missing-ref format: '{pair}'. "
+                    "Expected 'field:action'"
+                )
+                continue
+            field, action = pair.split(":", 1)
+            field = field.strip()
+            action = action.strip().lower()
+            if action == "create":
+                name_create_enabled_fields[field] = True
+                log.info(f"Field '{field}': will auto-create missing references")
+            elif action == "empty":
+                import_set_empty_fields.append(field)
+                log.info(f"Field '{field}': will set to empty if reference not found")
+            elif action == "skip":
+                # Skip is the default behavior (row goes to fail file)
+                log.info(f"Field '{field}': will skip row if reference not found")
+            else:
+                log.warning(f"Unknown action '{action}' for field '{field}'. "
+                           "Use 'create', 'skip', or 'empty'")
+
+    # Handle --auto-create-refs option
+    auto_create_refs = kwargs.pop("auto_create_refs", False)
+    if auto_create_refs:
+        # This will be handled in the importer to enable name_create for all m2o fields
+        kwargs["auto_create_refs"] = True
+        log.info("Auto-create enabled for all many2one fields")
+
+    # Handle --set-empty-on-missing option
+    set_empty_on_missing = kwargs.pop("set_empty_on_missing", False)
+    if set_empty_on_missing:
+        kwargs["set_empty_on_missing"] = True
+        log.info("Fields will be set to empty when references not found")
+
+    # Handle --fallback-values option: parse field:value pairs
+    fallback_values_str = kwargs.pop("fallback_values", None)
+    fallback_values: dict[str, str] = {}
+    if fallback_values_str:
+        for pair in fallback_values_str.split(","):
+            if ":" not in pair:
+                log.warning(
+                    f"Invalid --fallback-values format: '{pair}'. "
+                    "Expected 'field:value'"
+                )
+                continue
+            field, value = pair.split(":", 1)
+            fallback_values[field.strip()] = value.strip()
+            log.info(f"Fallback value for '{field.strip()}': '{value.strip()}'")
+
+    # Add import options to context
+    if name_create_enabled_fields:
+        context["name_create_enabled_fields"] = name_create_enabled_fields
+    if import_set_empty_fields:
+        context["import_set_empty_fields"] = import_set_empty_fields
+    if fallback_values:
+        context["fallback_values"] = fallback_values
+
+    kwargs["context"] = context
+
+    # Handle groupby option
     groupby = kwargs.get("groupby")
     if groupby is not None:
         kwargs["groupby"] = [col.strip() for col in groupby.split(",") if col.strip()]

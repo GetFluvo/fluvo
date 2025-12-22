@@ -107,6 +107,8 @@ def run_import(  # noqa: C901
     encoding: str,
     o2m: bool,
     groupby: Optional[list[str]],
+    auto_create_refs: bool = False,
+    set_empty_on_missing: bool = False,
 ) -> None:
     """Main entry point for the import command, handling all orchestration."""
     log.info("Starting data import process from file...")
