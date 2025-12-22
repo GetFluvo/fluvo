@@ -491,6 +491,11 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
             f.strip() for f in deferred.split(",") if f.strip()
         ]
 
+    # Convert ignore from comma-separated string to list
+    ignore = kwargs.get("ignore")
+    if ignore is not None:
+        kwargs["ignore"] = [col.strip() for col in ignore.split(",") if col.strip()]
+
     run_import(**kwargs)
 
 
