@@ -7,16 +7,24 @@ from setuptools import setup
 
 
 def get_ext_modules():
-    """Conditionally builds mypyc extensions."""
-    # If the environment variable is set, compile import_threaded.py
+    """Conditionally builds mypyc extensions.
+
+    To compile with mypyc, set the ODF_COMPILE_MYPYC=1 environment variable:
+        ODF_COMPILE_MYPYC=1 python setup.py build_ext --inplace
+
+    Note: mapper.py is excluded because it contains callable objects that
+    lose their signature when compiled, breaking introspection-based tests.
+    """
+    # If the environment variable is set, compile performance-critical modules
     if os.environ.get("ODF_COMPILE_MYPYC") == "1":
-        print("Compiling 'import_threaded.py' and 'importer.py' with mypyc...")
+        print("Compiling import/export modules with mypyc...")
         return mypycify(
             [
                 "src/odoo_data_flow/import_threaded.py",
                 "src/odoo_data_flow/importer.py",
-                "src/odoo_data_flow/lib/mapper.py",
                 "src/odoo_data_flow/export_threaded.py",
+                "src/odoo_data_flow/write_threaded.py",
+                "src/odoo_data_flow/lib/internal/tools.py",
             ]
         )
 
