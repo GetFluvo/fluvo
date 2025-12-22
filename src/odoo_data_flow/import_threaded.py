@@ -957,30 +957,41 @@ def _execute_load_batch(  # noqa: C901
     serialization_retry_count = 0
     max_serialization_retries = 3  # Maximum number of retries for serialization errors
 
+    # Pre-calculate ignore filter indices ONCE before the loop (optimization).
+    # These values don't change during batch processing, so calculate upfront.
+    indices_to_keep: list[int] | None = None
+    filtered_header: list[str] | None = None
+    max_index_needed = 0
+
+    if ignore_list:
+        # Normalize ignore_set to handle both 'field' and 'field/id' formats
+        ignore_set = set()
+        for field in ignore_list:
+            if field.endswith("/id"):
+                ignore_set.add(field[:-3])  # Add base name
+            else:
+                ignore_set.add(field)
+        indices_to_keep = [
+            i
+            for i, h in enumerate(batch_header)
+            if h.split("/")[0] not in ignore_set
+        ]
+        filtered_header = [batch_header[i] for i in indices_to_keep]
+        max_index_needed = max(indices_to_keep) if indices_to_keep else 0
+
     while lines_to_process:
         current_chunk = lines_to_process[:chunk_size]
-        load_header, load_lines = batch_header, current_chunk
 
-        if ignore_list:
-            # Normalize ignore_set to handle both 'field' and 'field/id' formats
-            ignore_set = set()
-            for field in ignore_list:
-                if field.endswith("/id"):
-                    ignore_set.add(field[:-3])  # Add base name
-                else:
-                    ignore_set.add(field)
-            indices_to_keep = [
-                i
-                for i, h in enumerate(batch_header)
-                if h.split("/")[0] not in ignore_set
-            ]
-            load_header = [batch_header[i] for i in indices_to_keep]
-            max_index = max(indices_to_keep) if indices_to_keep else 0
+        # Apply pre-calculated filter or use original data
+        if indices_to_keep is not None and filtered_header is not None:
+            load_header = filtered_header
             load_lines = [
                 [row[i] for i in indices_to_keep]
                 for row in current_chunk
-                if len(row) > max_index
+                if len(row) > max_index_needed
             ]
+        else:
+            load_header, load_lines = batch_header, current_chunk
 
         if not load_lines:
             lines_to_process = lines_to_process[chunk_size:]

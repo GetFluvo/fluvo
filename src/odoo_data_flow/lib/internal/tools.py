@@ -6,8 +6,13 @@ primarily used by the mapper and processor modules.
 """
 
 from collections.abc import Iterable, Iterator
+from functools import lru_cache
 from itertools import islice
 from typing import Any, Callable
+
+# Cache for XML ID sanitization - significantly speeds up repeated sanitizations
+# Max size of 100,000 should cover most imports while keeping memory bounded
+_XMLID_CACHE_SIZE = 100_000
 
 
 def batch(iterable: Iterable[Any], size: int) -> Iterator[list[Any]]:
@@ -37,12 +42,16 @@ def batch(iterable: Iterable[Any], size: int) -> Iterator[list[Any]]:
 # --- Data Formatting Tools ---
 
 
+@lru_cache(maxsize=_XMLID_CACHE_SIZE)
 def to_xmlid(name: str) -> str:
     """Create valid xmlid.
 
     Sanitizes a string to make it a valid XML ID, replacing only characters
     that are invalid in XML IDs. Preserves the required '.' separator between
     module name and identifier in Odoo XML IDs (e.g., 'module.identifier').
+
+    This function is cached with LRU caching for performance, as the same
+    XML IDs are often sanitized multiple times during import operations.
     """
     # A mapping of characters to replace.
     # NOTE: Do NOT replace '.' as it's required to separate module.name in Odoo XML IDs
@@ -50,8 +59,8 @@ def to_xmlid(name: str) -> str:
     # - Spaces, commas, newlines, and pipe characters are invalid
     # - Keep dots as they are required for module.identifier format
     translation_table = str.maketrans({",": "_", "\n": "_", "|": "_", " ": "_"})
-    name = name.translate(translation_table)
-    return name.strip()
+    result = name.translate(translation_table)
+    return result.strip()
 
 
 def to_m2o(prefix: str, value: Any, default: str = "") -> str:

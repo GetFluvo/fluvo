@@ -22,13 +22,19 @@ class RpcThread:
 
         Args:
             max_connection: The maximum number of threads to run in parallel.
+                For best results, align this with your Odoo server's db_maxconn
+                setting (typically 64 for PostgreSQL, divided by number of workers).
         """
         if not isinstance(max_connection, int) or max_connection < 1:
             raise ValueError("max_connection must be a positive integer.")
 
-        # Limit the actual number of connections to prevent pool exhaustion
-        # This is especially important for Odoo which has connection pool limits
-        effective_max_connections = min(max_connection, 4)  # Cap at 4 connections
+        # Use the user-specified connection count directly.
+        # The previous hard-coded cap of 4 was too restrictive for modern setups.
+        # Users should configure this based on their Odoo server's capacity:
+        # - db_maxconn in odoo.conf (default 64)
+        # - Number of Odoo workers
+        # - Recommended: db_maxconn / workers (e.g., 64/4 = 16 connections)
+        effective_max_connections = max_connection
 
         self.executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=effective_max_connections
@@ -38,9 +44,7 @@ class RpcThread:
         self.effective_max_connections = effective_max_connections
 
         log.debug(
-            f"Initialized RPC thread pool with requested {max_connection} "
-            f"connections, effectively using {effective_max_connections} "
-            f"to prevent connection pool exhaustion"
+            f"Initialized RPC thread pool with {effective_max_connections} connections"
         )
 
     def spawn_thread(
