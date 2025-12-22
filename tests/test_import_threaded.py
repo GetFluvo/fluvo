@@ -505,6 +505,43 @@ class TestImportThreadedEdgeCases:
         ):
             _read_data_file(str(source_file), ",", "utf-8", 0)
 
+    def test_read_data_file_unicode_and_multiline(self, tmp_path: Path) -> None:
+        """Test that Unicode characters and multiline values are preserved."""
+        import csv
+
+        source_file = tmp_path / "unicode_test.csv"
+        # Write test data with Unicode and multiline content
+        test_rows = [
+            ["id", "name", "note"],
+            ["test_1", "日本語テスト", "Line 1\nLine 2\nLine 3"],
+            ["test_2", "中文测试", "Tabs\there\tand\nnewlines"],
+            ["test_3", "한국어 테스트", "Special: äöü ñ é"],
+            ["test_4", "Emoji 🎉🚀", 'Contains "quotes"'],
+        ]
+        with open(source_file, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f, delimiter=";", quoting=csv.QUOTE_ALL)
+            writer.writerows(test_rows)
+
+        # Read back using _read_data_file
+        header, data = _read_data_file(str(source_file), ";", "utf-8", 0)
+
+        assert header == ["id", "name", "note"]
+        assert len(data) == 4
+
+        # Verify Unicode preserved
+        assert data[0][1] == "日本語テスト"
+        assert data[1][1] == "中文测试"
+        assert data[2][1] == "한국어 테스트"
+        assert data[3][1] == "Emoji 🎉🚀"
+
+        # Verify multiline preserved
+        assert data[0][2] == "Line 1\nLine 2\nLine 3"
+        assert "\n" in data[1][2]
+        assert "\t" in data[1][2]
+
+        # Verify quotes preserved
+        assert '"quotes"' in data[3][2]
+
     @patch("builtins.open", side_effect=OSError("Permission denied"))
     def test_setup_fail_file_os_error(self, mock_open: MagicMock) -> None:
         """Test that _setup_fail_file handles an OSError."""
