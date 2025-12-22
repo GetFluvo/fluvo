@@ -22,7 +22,7 @@ database = my_odoo_db
 login = admin
 password = my_admin_password
 uid = 2
-protocol = xmlrpc
+protocol = jsonrpc
 ```
 
 ### Configuration Keys
@@ -62,9 +62,33 @@ protocol = xmlrpc
 
 #### `protocol`
 * **Required**: No
-* **Description**: The connection protocol to use for XML-RPC calls. `xmlrpc` uses HTTP, while `xmlrpcs` uses HTTPS for a secure connection. While modern Odoo uses JSON-RPC for its web interface, the external API for this type of integration typically uses XML-RPC.
+* **Description**: The RPC protocol to use for communication with Odoo. The choice of protocol can significantly impact performance.
 * **Default**: `xmlrpc`
-* **Example**: `protocol = xmlrpcs`
+* **Available Options**:
+  * `xmlrpc` - XML-RPC over HTTP (default, compatible with all Odoo versions)
+  * `xmlrpcs` - XML-RPC over HTTPS (secure)
+  * `jsonrpc` - JSON-RPC over HTTP (**recommended for Odoo 10+**, ~30% faster)
+  * `jsonrpcs` - JSON-RPC over HTTPS (secure, recommended for production)
+  * `json2` - JSON-2 API over HTTP (Odoo 19+ only, requires API key)
+  * `json2s` - JSON-2 API over HTTPS (Odoo 19+ only, requires API key)
+
+* **Performance Note**: JSON-RPC is approximately 30% faster than XML-RPC due to more efficient parsing and smaller payload sizes. For Odoo 10 and newer, using `jsonrpc` or `jsonrpcs` is recommended.
+
+* **Odoo 19+ Note**: Odoo 19 introduces the new JSON-2 API which will replace XML-RPC and JSON-RPC in Odoo 20. JSON-2 requires an API key instead of a password. Generate an API key from your Odoo user preferences (Account Security section) and use it in the `password` field.
+
+* **Example**: `protocol = jsonrpcs`
+
+#### Overriding Protocol via CLI
+
+You can override the protocol setting from your config file using the `--protocol` CLI option:
+
+```bash
+# Use JSON-RPC for better performance
+odoo-data-flow import --protocol jsonrpc --connection-file conf/connection.conf ...
+
+# Use JSON-2 for Odoo 19+
+odoo-data-flow import --protocol json2 --connection-file conf/connection.conf ...
+```
 
 ---
 

@@ -6,6 +6,57 @@ The primary way to control performance is by adjusting the parameters passed to 
 
 ---
 
+## Choosing the Right Protocol
+
+The easiest performance win is choosing the right RPC protocol. For Odoo 10 and newer, switching from XML-RPC to JSON-RPC can provide approximately **30% faster imports**.
+
+- **CLI Option**: `--protocol`
+- **Config Key**: `protocol`
+- **Default**: `xmlrpc`
+
+### Protocol Comparison
+
+| Protocol | Odoo Version | Performance | Security |
+|----------|-------------|-------------|----------|
+| `xmlrpc` | 8+ (all) | Baseline | HTTP |
+| `xmlrpcs` | 8+ (all) | Baseline | HTTPS |
+| `jsonrpc` | 10+ | ~30% faster | HTTP |
+| `jsonrpcs` | 10+ | ~30% faster | HTTPS |
+| `json2` | 19+ | Best | HTTP |
+| `json2s` | 19+ | Best | HTTPS |
+
+### Why JSON-RPC is Faster
+
+1. **Smaller payloads**: JSON is more compact than XML
+2. **Faster parsing**: Python's JSON parser is highly optimized
+3. **Better data types**: Native support for all Python types
+
+### Example
+
+```bash
+# Switch to JSON-RPC for better performance
+odoo-data-flow import --protocol jsonrpc --connection-file conf/connection.conf ...
+```
+
+Or set it permanently in your config file:
+
+```ini
+[Connection]
+hostname = odoo.example.com
+database = mydb
+login = admin
+password = secret
+protocol = jsonrpc
+```
+
+```{admonition} Recommendation
+:class: tip
+
+For production imports on Odoo 10+, always use `jsonrpcs` (JSON-RPC over HTTPS) for both security and performance.
+```
+
+---
+
 ## Using Multiple Workers
 
 The most significant performance gain comes from parallel processing. The import client can run multiple "worker" processes simultaneously, each handling a chunk of the data.
@@ -42,6 +93,29 @@ This will add the `--worker=4` flag to the command in your generated `load.sh` s
 
 - **CPU Cores**: A good rule of thumb is to set the number of workers to be equal to, or slightly less than, the number of available CPU cores on your Odoo server.
 - **Database Deadlocks**: The biggest risk with multiple workers is the potential for database deadlocks. This can happen if two workers try to write records that depend on each other at the same time. The library's two-pass error handling system is designed to mitigate this.
+
+### Tuning Workers for Your Server
+
+The optimal number of workers depends on your Odoo server's database connection pool. Check these settings in your `odoo.conf`:
+
+- `db_maxconn`: Maximum database connections per Odoo worker (default: 64)
+- `workers`: Number of Odoo worker processes
+
+**Recommended formula**: `--worker = db_maxconn / odoo_workers`
+
+For example, with `db_maxconn = 64` and `workers = 4`:
+- Maximum safe value: `64 / 4 = 16` workers
+
+```bash
+# For a server with 4 Odoo workers and db_maxconn=64
+odoo-data-flow import --worker 12 --protocol jsonrpc ...
+```
+
+```{admonition} Warning
+:class: warning
+
+Setting `--worker` too high can exhaust your database connection pool, causing "too many connections" errors. Start with a lower value and increase gradually while monitoring server performance.
+```
 
 ## Solving Concurrent Updates with `--groupby`
 
