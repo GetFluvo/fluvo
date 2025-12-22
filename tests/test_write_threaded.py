@@ -82,7 +82,11 @@ class TestRPCThreadWrite:
         result = rpc_thread._execute_batch(lines, 1)
 
         assert result["failed"] == 1
-        assert "'id' is not in list" in result["error_summary"]
+        # Python 3.14+ changed the ValueError message format for list.index()
+        assert (
+            "'id' is not in list" in result["error_summary"]
+            or "x not in list" in result["error_summary"]
+        )
 
     def test_execute_batch_json_decode_error(self) -> None:
         """Tests graceful handling of a JSONDecodeError."""

@@ -141,6 +141,7 @@ class TestImportData:
                 None,
                 1,
                 10,
+                batch_delay=0.0,
                 o2m=True,
                 split_by_cols=None,
             )

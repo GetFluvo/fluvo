@@ -109,6 +109,7 @@ def run_import(  # noqa: C901
     groupby: Optional[list[str]],
     auto_create_refs: bool = False,
     set_empty_on_missing: bool = False,
+    batch_delay: float = 0.0,
 ) -> None:
     """Main entry point for the import command, handling all orchestration."""
     log.info("Starting data import process from file...")
@@ -229,6 +230,7 @@ def run_import(  # noqa: C901
             ignore=ignore or [],
             max_connection=max_conn,
             batch_size=batch_size_run,
+            batch_delay=batch_delay,
             skip=skip,
             force_create=force_create,
             o2m=o2m,

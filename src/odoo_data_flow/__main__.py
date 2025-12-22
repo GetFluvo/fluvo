@@ -286,6 +286,14 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
     type=int,
     help="Number of lines to import per connection.",
 )
+@click.option(
+    "--delay",
+    "batch_delay",
+    default=0.0,
+    type=float,
+    help="Delay in seconds between batches to reduce server load. "
+    "Use 0.5-2.0 for busy servers. Default: 0 (no delay).",
+)
 @click.option("--skip", default=0, type=int, help="Number of initial lines to skip.")
 @click.option(
     "--fail",

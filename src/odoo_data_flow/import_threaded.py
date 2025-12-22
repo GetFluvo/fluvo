@@ -1468,6 +1468,7 @@ def _run_threaded_pass(  # noqa: C901
     target_func: Any,
     batches: Iterable[tuple[int, Any]],
     thread_state: dict[str, Any],
+    batch_delay: float = 0.0,
 ) -> tuple[dict[str, Any], bool]:
     """Orchestrates a multi-threaded pass and aggregates results.
 
@@ -1486,6 +1487,8 @@ def _run_threaded_pass(  # noqa: C901
             batch_data)`. The type of `batch_data` can vary between passes.
         thread_state (dict[str, Any]): A dictionary of shared state to be
             passed to each worker function.
+        batch_delay (float): Delay in seconds between batch submissions to
+            reduce server load. Default: 0.0 (no delay).
 
     Returns:
         tuple[dict[str, Any], bool]: A typle and a dictionary containing
@@ -1494,16 +1497,24 @@ def _run_threaded_pass(  # noqa: C901
     """
     # This logic is brittle but preserved to minimize unrelated changes.
     # It dynamically constructs arguments based on the target function name.
-    futures = {
-        rpc_thread.spawn_thread(
-            target_func,
+    # Spawn threads with optional delay between batches to reduce server load.
+    futures = set()
+    batch_count = 0
+    for num, data in batches:
+        if rpc_thread.abort_flag:
+            break
+
+        # Add delay between batches (except before the first batch)
+        if batch_delay > 0 and batch_count > 0:
+            time.sleep(batch_delay)
+
+        args = (
             [thread_state, data, num]
             if target_func.__name__ == "_execute_write_batch"
-            else [thread_state, data, thread_state.get("batch_header"), num],
+            else [thread_state, data, thread_state.get("batch_header"), num]
         )
-        for num, data in batches
-        if not rpc_thread.abort_flag
-    }
+        futures.add(rpc_thread.spawn_thread(target_func, args))
+        batch_count += 1
 
     aggregated: dict[str, Any] = {
         "id_map": {},
@@ -1604,6 +1615,7 @@ def _orchestrate_pass_1(
     fail_handle: Optional[TextIO],
     max_connection: int,
     batch_size: int,
+    batch_delay: float,
     o2m: bool,
     split_by_cols: Optional[list[str]],
     force_create: bool = False,
@@ -1632,6 +1644,8 @@ def _orchestrate_pass_1(
         fail_handle (Optional[TextIO]): The file handle for the fail file.
         max_connection (int): The number of parallel worker threads to use.
         batch_size (int): The number of records to process in each batch.
+        batch_delay (float): Delay in seconds between batch submissions to
+            reduce server load.
         o2m (bool): Enables one-to-many batching logic.
         force_create (bool): If True, bypasses the `load` method and uses
             the `create` method directly. Used for fail mode.
@@ -1679,7 +1693,7 @@ def _orchestrate_pass_1(
     }
 
     results, aborted = _run_threaded_pass(
-        rpc_pass_1, _execute_load_batch, pass_1_batches, thread_state_1
+        rpc_pass_1, _execute_load_batch, pass_1_batches, thread_state_1, batch_delay
     )
     results["success"] = not aborted
     return results
@@ -1809,6 +1823,7 @@ def import_data(
     ignore: Optional[list[str]] = None,
     max_connection: int = 1,
     batch_size: int = 10,
+    batch_delay: float = 0.0,
     skip: int = 0,
     force_create: bool = False,
     o2m: bool = False,
@@ -1845,6 +1860,8 @@ def import_data(
             from the source file.
         max_connection (int): The number of parallel threads to use.
         batch_size (int): The number of records to process in each batch.
+        batch_delay (float): Delay in seconds between batch submissions to
+            reduce server load. Use 0.5-2.0 for busy servers.
         skip (int): The number of lines to skip at the top of the source file.
         force_create (bool): If True, bypasses the `load` method and uses
             the `create` method directly. Used for fail mode.
@@ -1922,6 +1939,7 @@ def import_data(
                 fail_handle,
                 max_connection,
                 batch_size,
+                batch_delay,
                 o2m,
                 split_by_cols,
                 force_create,
