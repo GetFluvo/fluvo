@@ -10,6 +10,9 @@ from odoo_data_flow.import_threaded import (
     _create_batch_individually,
     _create_batches,
     _execute_load_batch,
+    _execute_write_batch,
+    _extract_per_row_errors,
+    _filter_ignored_columns,
     _format_odoo_error,
     _orchestrate_pass_1,
     _orchestrate_pass_2,
@@ -826,3 +829,406 @@ class TestRecursiveBatching:
             )
         )
         assert len(batches) == 3
+
+
+class TestExtractPerRowErrors:
+    """Tests for the _extract_per_row_errors function."""
+
+    def test_extract_per_row_errors_with_rows_dict(self) -> None:
+        """Test extraction when Odoo provides row info in 'rows' dict."""
+        messages = [
+            {
+                "type": "error",
+                "message": "Validation error on field name",
+                "rows": {"from": 2, "to": 2},
+            }
+        ]
+        result = _extract_per_row_errors(messages)
+        assert 2 in result
+        assert result[2] == "Validation error on field name"
+
+    def test_extract_per_row_errors_with_rows_range(self) -> None:
+        """Test extraction when Odoo provides a range of rows."""
+        messages = [
+            {
+                "type": "error",
+                "message": "Multiple records affected",
+                "rows": {"from": 5, "to": 7},
+            }
+        ]
+        result = _extract_per_row_errors(messages)
+        assert 5 in result
+        assert 6 in result
+        assert 7 in result
+        assert result[5] == "Multiple records affected"
+
+    def test_extract_per_row_errors_row_pattern(self) -> None:
+        """Test extraction from 'Row X:' pattern in message."""
+        messages = [{"type": "error", "message": "Row 5: Missing required field"}]
+        result = _extract_per_row_errors(messages)
+        # Row 5 in 1-based becomes index 4 in 0-based
+        assert 4 in result
+        assert "Missing required field" in result[4]
+
+    def test_extract_per_row_errors_line_pattern(self) -> None:
+        """Test extraction from 'Line X:' pattern in message."""
+        messages = [{"type": "error", "message": "Line 3: Invalid value"}]
+        result = _extract_per_row_errors(messages)
+        # Line 3 in 1-based becomes index 2 in 0-based
+        assert 2 in result
+
+    def test_extract_per_row_errors_at_row_pattern(self) -> None:
+        """Test extraction from 'at row X' pattern in message."""
+        messages = [{"type": "error", "message": "Error occurred at row 10"}]
+        result = _extract_per_row_errors(messages)
+        assert 9 in result  # 0-based index
+
+    def test_extract_per_row_errors_in_row_pattern(self) -> None:
+        """Test extraction from 'in row X' pattern in message."""
+        messages = [{"type": "error", "message": "Duplicate found in row 4"}]
+        result = _extract_per_row_errors(messages)
+        assert 3 in result  # 0-based index
+
+    def test_extract_per_row_errors_empty_messages(self) -> None:
+        """Test with empty messages list."""
+        result = _extract_per_row_errors([])
+        assert result == {}
+
+    def test_extract_per_row_errors_no_row_info(self) -> None:
+        """Test with message that has no row information."""
+        messages = [{"type": "error", "message": "Generic error without row info"}]
+        result = _extract_per_row_errors(messages)
+        assert result == {}
+
+
+class TestFormatOdooError:
+    """Additional tests for _format_odoo_error."""
+
+    def test_format_odoo_error_extracts_data_message(self) -> None:
+        """Test that error dict with data.message is properly extracted."""
+        error_dict = {"data": {"message": "Field 'name' is required"}}
+        result = _format_odoo_error(str(error_dict))
+        assert result == "Field 'name' is required"
+
+    def test_format_odoo_error_strips_newlines(self) -> None:
+        """Test that newlines are stripped from error messages."""
+        error_with_newlines = "First line\nSecond line\nThird line"
+        result = _format_odoo_error(error_with_newlines)
+        assert "\n" not in result
+        assert "First line Second line Third line" == result
+
+
+class TestFilterIgnoredColumns:
+    """Tests for _filter_ignored_columns edge cases."""
+
+    def test_filter_ignored_columns_empty_ignore(self) -> None:
+        """Test that empty ignore list returns original data."""
+        header = ["id", "name", "age"]
+        data = [["1", "Alice", "30"]]
+        new_header, new_data = _filter_ignored_columns([], header, data)
+        assert new_header == header
+        assert new_data == data
+
+    def test_filter_ignored_columns_all_columns_ignored(self) -> None:
+        """Test when all non-id columns are ignored."""
+        header = ["id", "name"]
+        data = [["1", "Alice"]]
+        new_header, new_data = _filter_ignored_columns(["id", "name"], header, data)
+        assert new_header == []
+        assert new_data == [[]]
+
+    def test_filter_ignored_columns_malformed_row(self) -> None:
+        """Test handling of rows with fewer columns than header."""
+        header = ["id", "name", "age", "city"]
+        data = [
+            ["1", "Alice", "30", "NYC"],  # Valid
+            ["2", "Bob"],  # Malformed - too few columns
+            ["3", "Charlie", "25", "LA"],  # Valid
+        ]
+        new_header, new_data = _filter_ignored_columns(["age"], header, data)
+        # Malformed row should be skipped
+        assert len(new_data) == 2
+        assert new_data[0][0] == "1"
+        assert new_data[1][0] == "3"
+
+    def test_filter_ignored_columns_with_subfield_notation(self) -> None:
+        """Test that parent_id/id is filtered when parent_id is ignored."""
+        header = ["id", "name", "parent_id/id"]
+        data = [["1", "A", "p1"]]
+        new_header, new_data = _filter_ignored_columns(["parent_id"], header, data)
+        assert "parent_id/id" not in new_header
+        assert new_header == ["id", "name"]
+
+
+class TestExecuteWriteBatch:
+    """Tests for the _execute_write_batch function."""
+
+    def test_execute_write_batch_success(self) -> None:
+        """Test successful batch write operation."""
+        mock_model = MagicMock()
+        thread_state = {"model": mock_model, "context": {"tracking_disable": True}}
+        batch_writes = ([1, 2, 3], {"name": "Updated"})
+
+        result = _execute_write_batch(thread_state, batch_writes, 1)
+
+        assert result["success"] is True
+        assert result["successful_writes"] == 3
+        assert result["failed_writes"] == []
+        mock_model.write.assert_called_once_with(
+            [1, 2, 3], {"name": "Updated"}, context={"tracking_disable": True}
+        )
+
+    def test_execute_write_batch_failure(self) -> None:
+        """Test batch write operation that fails."""
+        mock_model = MagicMock()
+        mock_model.write.side_effect = Exception("Access denied")
+        thread_state = {"model": mock_model, "context": {}}
+        batch_writes = ([1, 2], {"parent_id": 10})
+
+        result = _execute_write_batch(thread_state, batch_writes, 1)
+
+        assert result["success"] is False
+        assert result["successful_writes"] == 0
+        assert len(result["failed_writes"]) == 2
+        assert result["failed_writes"][0][0] == 1
+        assert result["failed_writes"][1][0] == 2
+        assert "Access denied" in result["error_summary"]
+
+
+class TestExecuteLoadBatchEdgeCases:
+    """Additional edge case tests for _execute_load_batch."""
+
+    def test_execute_load_batch_force_create_mode(self) -> None:
+        """Test that force_create bypasses load and uses create directly."""
+        mock_model = MagicMock()
+        mock_record = MagicMock()
+        mock_record.id = 42
+        mock_model.create.return_value = mock_record
+        mock_model.browse.return_value.env.ref.return_value = None
+
+        mock_progress = MagicMock()
+        thread_state = {
+            "model": mock_model,
+            "progress": mock_progress,
+            "unique_id_field_index": 0,
+            "ignore_list": [],
+            "force_create": True,
+            "model_name": "res.partner",
+            "context": {},
+        }
+        batch_header = ["id", "name"]
+        batch_lines = [["rec1", "A"]]
+
+        result = _execute_load_batch(thread_state, batch_lines, batch_header, 1)
+
+        # In force_create mode, load should NOT be called
+        mock_model.load.assert_not_called()
+        # create should be called via _create_batch_individually
+        assert result["success"] is True
+
+    @patch("odoo_data_flow.import_threaded._create_batch_individually")
+    def test_execute_load_batch_timeout_ignored(
+        self, mock_create_individually: MagicMock
+    ) -> None:
+        """Test that client-side timeouts are ignored to allow server processing."""
+        mock_model = MagicMock()
+        mock_model.load.side_effect = [
+            Exception("timed out"),
+            {"ids": [1, 2]},
+        ]
+        mock_progress = MagicMock()
+        thread_state = {
+            "model": mock_model,
+            "progress": mock_progress,
+            "unique_id_field_index": 0,
+            "ignore_list": [],
+        }
+        batch_header = ["id", "name"]
+        batch_lines = [["rec1", "A"], ["rec2", "B"]]
+
+        result = _execute_load_batch(thread_state, batch_lines, batch_header, 1)
+
+        # Timeout should be ignored and processing should continue
+        assert result["success"] is True
+        mock_create_individually.assert_not_called()
+
+    @patch("odoo_data_flow.import_threaded._create_batch_individually")
+    @patch("odoo_data_flow.import_threaded.time.sleep")
+    def test_execute_load_batch_connection_pool_error(
+        self, mock_sleep: MagicMock, mock_create_individually: MagicMock
+    ) -> None:
+        """Test that connection pool errors trigger batch size reduction."""
+        mock_model = MagicMock()
+        mock_model.load.side_effect = [
+            Exception("connection pool is full"),
+            {"ids": [1]},
+            {"ids": [2]},
+        ]
+        mock_progress = MagicMock()
+        thread_state = {
+            "model": mock_model,
+            "progress": mock_progress,
+            "unique_id_field_index": 0,
+            "ignore_list": [],
+        }
+        batch_header = ["id", "name"]
+        batch_lines = [["rec1", "A"], ["rec2", "B"]]
+
+        result = _execute_load_batch(thread_state, batch_lines, batch_header, 1)
+
+        assert result["success"] is True
+        # Should reduce batch size on pool error
+        mock_progress.console.print.assert_any_call(
+            "[yellow]WARN:[/] Batch 1 hit scalable error. "
+            "Reducing chunk size to 1 and retrying."
+        )
+
+    @patch("odoo_data_flow.import_threaded._create_batch_individually")
+    def test_execute_load_batch_empty_load_lines(
+        self, mock_create_individually: MagicMock
+    ) -> None:
+        """Test handling when filtering results in empty load_lines."""
+        mock_model = MagicMock()
+        mock_model.load.return_value = {"ids": []}
+        mock_progress = MagicMock()
+        thread_state = {
+            "model": mock_model,
+            "progress": mock_progress,
+            "unique_id_field_index": 0,
+            "ignore_list": ["name"],  # Ignore the only non-id column
+        }
+        batch_header = ["id", "name"]
+        # Row has fewer columns than needed after filtering
+        batch_lines = [["rec1"]]
+
+        result = _execute_load_batch(thread_state, batch_lines, batch_header, 1)
+
+        # Should handle gracefully
+        assert result is not None
+
+
+class TestReadDataFileEdgeCases:
+    """Additional tests for _read_data_file edge cases."""
+
+    def test_read_data_file_with_skip(self, tmp_path: Path) -> None:
+        """Test that skip parameter correctly skips rows."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id,name\nskip1,A\nskip2,B\nkeep1,C\nkeep2,D")
+
+        header, data = _read_data_file(str(source_file), ",", "utf-8", skip=2)
+
+        assert header == ["id", "name"]
+        assert len(data) == 2
+        assert data[0][0] == "keep1"
+        assert data[1][0] == "keep2"
+
+
+class TestCreateBatchIndividuallyEdgeCases:
+    """Additional tests for _create_batch_individually edge cases."""
+
+    def test_create_batch_individually_serialization_error(self) -> None:
+        """Test handling of database serialization errors."""
+        mock_model = MagicMock()
+        mock_model.browse.return_value.env.ref.return_value = None
+        mock_model.create.side_effect = Exception("could not serialize access")
+
+        batch_header = ["id", "name"]
+        batch_lines = [["rec1", "A"]]
+
+        result = _create_batch_individually(
+            mock_model, batch_lines, batch_header, 0, {}, []
+        )
+
+        # Serialization errors should not add to failed_lines (retryable)
+        assert len(result["failed_lines"]) == 0
+
+    def test_create_batch_individually_connection_pool_error(self) -> None:
+        """Test handling of connection pool exhaustion errors."""
+        mock_model = MagicMock()
+        mock_model.browse.return_value.env.ref.return_value = None
+        mock_model.create.side_effect = Exception("connection pool is full")
+
+        batch_header = ["id", "name"]
+        batch_lines = [["rec1", "A"]]
+
+        result = _create_batch_individually(
+            mock_model, batch_lines, batch_header, 0, {}, []
+        )
+
+        # Pool errors should add to failed_lines for retry
+        assert len(result["failed_lines"]) == 1
+        assert "connection pool exhaustion" in result["failed_lines"][0][-1]
+
+    def test_create_batch_individually_odoo_server_error(self) -> None:
+        """Test handling of Odoo server internal errors."""
+        mock_model = MagicMock()
+        mock_model.browse.return_value.env.ref.return_value = None
+        mock_model.create.side_effect = Exception(
+            "Odoo Server Error: tuple index out of range"
+        )
+
+        batch_header = ["id", "name"]
+        batch_lines = [["rec1", "A"]]
+
+        result = _create_batch_individually(
+            mock_model, batch_lines, batch_header, 0, {}, []
+        )
+
+        # Server internal errors should be recorded
+        assert len(result["failed_lines"]) == 1
+        assert "Odoo server internal error" in result["failed_lines"][0][-1]
+
+    def test_create_batch_individually_constraint_violation(self) -> None:
+        """Test handling of database constraint violations."""
+        mock_model = MagicMock()
+        mock_model.browse.return_value.env.ref.return_value = None
+        mock_model.create.side_effect = Exception(
+            "check constraint 'nospaces' violated"
+        )
+
+        batch_header = ["id", "name"]
+        batch_lines = [["rec1", "A"]]
+
+        result = _create_batch_individually(
+            mock_model, batch_lines, batch_header, 0, {}, []
+        )
+
+        assert len(result["failed_lines"]) == 1
+        assert "constraint" in result["error_summary"].lower()
+
+
+class TestImportDataWithDictConfig:
+    """Tests for import_data with dict config."""
+
+    @patch("odoo_data_flow.import_threaded._read_data_file")
+    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_dict")
+    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    def test_import_data_with_dict_config(
+        self,
+        mock_run_pass: MagicMock,
+        mock_get_conn: MagicMock,
+        mock_read_file: MagicMock,
+    ) -> None:
+        """Test import_data accepts dict config."""
+        mock_read_file.return_value = (["id", "name"], [["xml_a", "A"]])
+        mock_run_pass.return_value = (
+            {"id_map": {"xml_a": 101}, "failed_lines": []},
+            False,
+        )
+        mock_get_conn.return_value.get_model.return_value = MagicMock()
+
+        config_dict = {
+            "hostname": "localhost",
+            "database": "test",
+            "login": "admin",
+            "password": "admin",
+        }
+        result, _ = import_data(
+            config=config_dict,
+            model="res.partner",
+            unique_id_field="id",
+            file_csv="dummy.csv",
+        )
+
+        assert result is True
+        mock_get_conn.assert_called_once_with(config_dict)
