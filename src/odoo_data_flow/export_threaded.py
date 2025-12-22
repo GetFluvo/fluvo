@@ -27,7 +27,7 @@ from .lib import cache, conf_lib
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch
 from .lib.odoo_lib import ODOO_TO_POLARS_MAP
-from .logging_config import log
+from .logging_config import log, suppress_console_handler
 
 # --- Fix for csv.field_size_limit OverflowError ---
 max_int = sys.maxsize
@@ -504,7 +504,7 @@ def _process_export_batches(  # noqa: C901
         TimeRemainingColumn(),
     )
     try:
-        with progress:
+        with suppress_console_handler(), progress:
             task = progress.add_task(
                 f"[cyan]Exporting {model_name}...", total=total_ids
             )

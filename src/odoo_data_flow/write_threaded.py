@@ -24,7 +24,7 @@ from rich.progress import (
 from .lib import conf_lib
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch  # FIX: Add missing import
-from .logging_config import log
+from .logging_config import log, suppress_console_handler
 
 try:
     csv.field_size_limit(sys.maxsize)
@@ -239,7 +239,7 @@ def write_data(
     rpc_thread = None
     total_failed = 0
     try:
-        with progress:
+        with suppress_console_handler(), progress:
             task_id = progress.add_task(
                 f"Writing to [bold]{model}[/bold]",
                 total=len(data),

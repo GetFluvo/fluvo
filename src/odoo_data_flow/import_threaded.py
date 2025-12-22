@@ -27,7 +27,7 @@ from rich.progress import (
 from .lib import conf_lib
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch, to_xmlid
-from .logging_config import log
+from .logging_config import log, suppress_console_handler
 
 try:
     csv.field_size_limit(sys.maxsize)
@@ -1957,7 +1957,7 @@ def import_data(
     )
 
     overall_success = False
-    with progress:
+    with suppress_console_handler(), progress:
         try:
             pass_1_results = _orchestrate_pass_1(
                 progress,

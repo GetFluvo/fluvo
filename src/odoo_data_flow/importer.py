@@ -24,7 +24,7 @@ from . import import_threaded
 from .enums import PreflightMode
 from .lib import cache, preflight, relational_import, sort
 from .lib.internal.ui import _show_error_panel
-from .logging_config import log
+from .logging_config import log, suppress_console_handler
 
 
 def _count_lines(filepath: str) -> int:
@@ -260,7 +260,7 @@ def run_import(  # noqa: C901
             source_df = pl.read_csv(
                 filename, separator=separator, truncate_ragged_lines=True
             )
-            with Progress() as progress:
+            with suppress_console_handler(), Progress() as progress:
                 task_id = progress.add_task(
                     "Pass 2/2: Relational fields",
                     total=len(import_plan["strategies"]),
