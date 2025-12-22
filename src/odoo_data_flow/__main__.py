@@ -230,6 +230,18 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
     type=click.Path(exists=True, dir_okay=False),
     help="Path to the Odoo connection file.",
 )
+@click.option(
+    "--protocol",
+    type=click.Choice(
+        ["xmlrpc", "xmlrpcs", "jsonrpc", "jsonrpcs", "json2", "json2s"],
+        case_sensitive=False,
+    ),
+    default=None,
+    help="RPC protocol to use. Options: xmlrpc (default for Odoo 8-9), "
+    "jsonrpc (recommended for Odoo 10-18, ~30%% faster), "
+    "json2 (Odoo 19+, requires API key). "
+    "If not specified, uses protocol from config file or defaults to xmlrpc.",
+)
 @click.option("--file", "filename", required=True, help="File to import.")
 @click.option(
     "--model",
@@ -361,7 +373,16 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
 @click.option("--encoding", default="utf-8", help="Encoding of the data file.")
 def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     """Runs the data import process."""
-    kwargs["config"] = connection_file
+    # Handle protocol option - create config dict if protocol specified
+    protocol = kwargs.pop("protocol", None)
+    if protocol:
+        # Pass config as dict with protocol instead of file path
+        # conf_lib will merge this with file contents
+        kwargs["config"] = {"_config_file": connection_file, "protocol": protocol}
+        log.info(f"Using {protocol} protocol for RPC communication")
+    else:
+        kwargs["config"] = connection_file
+
     try:
         kwargs["context"] = ast.literal_eval(kwargs.get("context", "{}"))
     except (ValueError, SyntaxError) as e:
@@ -525,6 +546,18 @@ def write_cmd(connection_file: str, **kwargs: Any) -> None:
     type=click.Path(exists=True, dir_okay=False),
     help="Path to the Odoo connection file.",
 )
+@click.option(
+    "--protocol",
+    type=click.Choice(
+        ["xmlrpc", "xmlrpcs", "jsonrpc", "jsonrpcs", "json2", "json2s"],
+        case_sensitive=False,
+    ),
+    default=None,
+    help="RPC protocol to use. Options: xmlrpc (default for Odoo 8-9), "
+    "jsonrpc (recommended for Odoo 10-18, ~30%% faster), "
+    "json2 (Odoo 19+, requires API key). "
+    "If not specified, uses protocol from config file or defaults to xmlrpc.",
+)
 @click.option("--output", required=True, help="Output file path.")
 @click.option("--model", required=True, help="Odoo model to export from.")
 @click.option(
@@ -577,7 +610,13 @@ def write_cmd(connection_file: str, **kwargs: Any) -> None:
 )
 def export_cmd(connection_file: str, **kwargs: Any) -> None:
     """Runs the data export process."""
-    kwargs["config"] = connection_file
+    # Handle protocol option - create config dict if protocol specified
+    protocol = kwargs.pop("protocol", None)
+    if protocol:
+        kwargs["config"] = {"_config_file": connection_file, "protocol": protocol}
+        log.info(f"Using {protocol} protocol for RPC communication")
+    else:
+        kwargs["config"] = connection_file
     run_export(**kwargs)
 
 
