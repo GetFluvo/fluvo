@@ -24,6 +24,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
+from .lib import checkpoint as ckpt
 from .lib import conf_lib
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch, to_xmlid
@@ -2077,8 +2078,14 @@ def _orchestrate_pass_2(
     failed_writes = pass_2_results.get("failed_writes", [])
     if fail_writer and failed_writes:
         log.warning("Writing failed Pass 2 records to fail file...")
+        # Import sanitization function to match id_map key format
+        from .lib.internal.tools import to_xmlid
+
         reverse_id_map = {v: k for k, v in id_map.items()}
-        source_data_map = {row[unique_id_field_index]: row for row in all_data}
+        # Build source_data_map using sanitized IDs to match id_map keys
+        source_data_map = {
+            to_xmlid(row[unique_id_field_index]): row for row in all_data
+        }
         failed_lines = []
         for db_id, _, error_message in failed_writes:
             source_id = reverse_id_map.get(db_id)
@@ -2086,8 +2093,18 @@ def _orchestrate_pass_2(
                 original_row = list(source_data_map[source_id])
                 original_row.append(error_message)
                 failed_lines.append(original_row)
+            else:
+                log.debug(
+                    f"Could not find source data for db_id={db_id}, "
+                    f"source_id={source_id}"
+                )
         if failed_lines:
             fail_writer.writerows(failed_lines)
+        else:
+            log.warning(
+                f"Pass 2 had {len(failed_writes)} failed writes but could not "
+                "map them back to source data."
+            )
 
     # Pass 2 is successful ONLY if not aborted AND no writes failed.
     successful_writes = pass_2_results.get("successful_writes", 0)
@@ -2113,6 +2130,8 @@ def import_data(
     o2m: bool = False,
     split_by_cols: Optional[list[str]] = None,
     stream: bool = False,
+    resume: bool = True,
+    enable_checkpoint: bool = True,
 ) -> tuple[bool, dict[str, int]]:
     """Orchestrates a robust, multi-threaded, two-pass import process.
 
@@ -2166,6 +2185,20 @@ def import_data(
         deferred_fields or [],
         ignore or [],
     )
+
+    # --- Checkpoint: Check for resumable session ---
+    checkpoint: Optional[ckpt.CheckpointData] = None
+    session_id = ""
+    if enable_checkpoint or resume:
+        session_id = ckpt.generate_session_id(file_csv, config, model)
+
+        if resume:
+            checkpoint = ckpt.load_checkpoint(file_csv, config, model)
+            if checkpoint:
+                log.info(
+                    f"Resuming from checkpoint: {checkpoint.records_processed} records "
+                    f"already processed, starting from batch {checkpoint.last_completed_batch + 1}"
+                )
 
     # Determine if streaming mode is possible
     can_stream = stream and not o2m and not split_by_cols and not deferred and not force_create
@@ -2260,26 +2293,37 @@ def import_data(
                 pass_2_successful = True
                 updates_made = 0
             else:
-                # Standard mode - use pre-loaded data
-                pass_1_results = _orchestrate_pass_1(
-                    progress,
-                    model_obj,
-                    model,
-                    header,
-                    all_data,
-                    unique_id_field,
-                    deferred,
-                    ignore,
-                    context,
-                    fail_writer,
-                    fail_handle,
-                    max_connection,
-                    batch_size,
-                    batch_delay,
-                    o2m,
-                    split_by_cols,
-                    force_create,
-                )
+                # --- Checkpoint: Check if Pass 1 was already completed ---
+                if checkpoint and checkpoint.pass_1_complete:
+                    log.info(
+                        f"Pass 1 already completed in previous run. "
+                        f"Restoring {len(checkpoint.id_map)} ID mappings."
+                    )
+                    pass_1_results = {
+                        "success": True,
+                        "id_map": {k: int(v) for k, v in checkpoint.id_map.items()},
+                    }
+                else:
+                    # Standard mode - use pre-loaded data
+                    pass_1_results = _orchestrate_pass_1(
+                        progress,
+                        model_obj,
+                        model,
+                        header,
+                        all_data,
+                        unique_id_field,
+                        deferred,
+                        ignore,
+                        context,
+                        fail_writer,
+                        fail_handle,
+                        max_connection,
+                        batch_size,
+                        batch_delay,
+                        o2m,
+                        split_by_cols,
+                        force_create,
+                    )
 
             # A pass is only successful if it wasn't aborted.
             pass_1_successful = pass_1_results.get("success", False)
@@ -2288,6 +2332,30 @@ def import_data(
 
             # If we get here, Pass 1 was not aborted. Now determine final status.
             id_map = pass_1_results.get("id_map", {})
+
+            # --- Checkpoint: Save after Pass 1 completes ---
+            if enable_checkpoint and session_id and not can_stream:
+                file_hash = ckpt._compute_file_hash(file_csv)
+                new_checkpoint = ckpt.CheckpointData(
+                    session_id=session_id,
+                    file_path=file_csv,
+                    file_hash=file_hash,
+                    model=model,
+                    config_hash=ckpt._compute_config_hash(config),
+                    last_completed_batch=0,  # Not tracking batch-level
+                    total_batches=0,
+                    records_processed=len(id_map),
+                    records_created=len(id_map),
+                    records_failed=0,
+                    id_map={k: v for k, v in id_map.items()},
+                    deferred_fields=deferred,
+                    pass_1_complete=True,
+                    pass_2_complete=False,
+                )
+                ckpt.save_checkpoint(new_checkpoint)
+                log.debug(
+                    f"Checkpoint saved after Pass 1: {len(id_map)} records created."
+                )
 
             if not can_stream:
                 pass_2_successful = True  # Assume success if no Pass 2 is needed.
@@ -2321,4 +2389,10 @@ def import_data(
         "updated_relations": updates_made,
         "id_map": id_map,
     }
+
+    # --- Checkpoint: Clean up on success ---
+    if overall_success and enable_checkpoint and session_id:
+        ckpt.delete_checkpoint(file_csv, session_id)
+        log.debug("Import completed successfully, checkpoint deleted.")
+
     return overall_success, stats

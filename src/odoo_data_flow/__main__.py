@@ -333,6 +333,14 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
     "reference users/data from different companies.",
 )
 @click.option(
+    "--all-companies",
+    is_flag=True,
+    default=False,
+    help="Automatically set allowed_company_ids to all companies the user has access to. "
+    "This mimics the behavior of the Odoo web interface and enables importing records "
+    "that reference data across multiple companies.",
+)
+@click.option(
     "--o2m",
     is_flag=True,
     default=False,
@@ -387,6 +395,19 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
     "Ideal for very large files. Not compatible with --o2m, --groupby, "
     "--defer, or --fail options.",
 )
+@click.option(
+    "--resume/--no-resume",
+    default=True,
+    help="Resume from checkpoint if available. Enabled by default. "
+    "When enabled, imports can be resumed after crashes or interruptions.",
+)
+@click.option(
+    "--no-checkpoint",
+    is_flag=True,
+    default=False,
+    help="Disable checkpoint saving during import. Use for small imports "
+    "where checkpointing overhead is not needed.",
+)
 def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     """Runs the data import process."""
     # Handle protocol option - create config dict if protocol specified
@@ -409,7 +430,35 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
 
     # Handle multicompany context
     company_id = kwargs.pop("company_id", None)
-    if company_id is not None:
+    all_companies = kwargs.pop("all_companies", False)
+
+    if all_companies:
+        # Fetch all companies the user has access to
+        from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
+
+        try:
+            if isinstance(kwargs["config"], dict):
+                conn = get_connection_from_dict(kwargs["config"])
+            else:
+                conn = get_connection_from_config(kwargs["config"])
+
+            user_model = conn.get_model("res.users")
+            user_data = user_model.read(conn.user_id, ["company_ids"])
+            user_company_ids = user_data.get("company_ids", [])
+
+            if user_company_ids:
+                context["allowed_company_ids"] = user_company_ids
+                log.info(
+                    f"All-companies mode: enabled access to {len(user_company_ids)} "
+                    f"companies: {user_company_ids}"
+                )
+            else:
+                log.warning("No company access found for user. Continuing without setting allowed_company_ids.")
+        except Exception as e:
+            log.error(f"Failed to fetch user companies: {e}")
+            log.warning("Continuing without setting allowed_company_ids.")
+
+    elif company_id is not None:
         # Set allowed_company_ids to enable cross-company access
         context["allowed_company_ids"] = [company_id]
         # Also set force_company for compatibility with older Odoo versions

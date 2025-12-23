@@ -111,6 +111,8 @@ def run_import(  # noqa: C901
     set_empty_on_missing: bool = False,
     batch_delay: float = 0.0,
     stream: bool = False,
+    resume: bool = True,
+    no_checkpoint: bool = False,
 ) -> None:
     """Main entry point for the import command, handling all orchestration."""
     log.info("Starting data import process from file...")
@@ -237,6 +239,8 @@ def run_import(  # noqa: C901
             o2m=o2m,
             split_by_cols=groupby,
             stream=stream,
+            resume=resume,
+            enable_checkpoint=not no_checkpoint,
         )
     finally:
         if (

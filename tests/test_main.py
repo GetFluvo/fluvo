@@ -342,3 +342,138 @@ def test_module_install_languages_command(
         mock_run_install.assert_called_once_with(
             config="conn.conf", languages=["en_US", "fr_FR"]
         )
+
+
+# --- All-Companies Flag Tests ---
+
+
+@patch("odoo_data_flow.__main__.run_import")
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+def test_all_companies_flag_sets_context(
+    mock_get_conn: MagicMock, mock_run_import: MagicMock, runner: CliRunner
+) -> None:
+    """Tests that --all-companies fetches user companies and sets context."""
+    # Mock the connection and user data
+    mock_conn = MagicMock()
+    mock_conn.user_id = 2
+    mock_user_model = MagicMock()
+    mock_user_model.read.return_value = {"company_ids": [1, 2, 3]}
+    mock_conn.get_model.return_value = mock_user_model
+    mock_get_conn.return_value = mock_conn
+
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "my.csv",
+                "--model",
+                "res.partner",
+                "--all-companies",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_run_import.assert_called_once()
+        call_kwargs = mock_run_import.call_args.kwargs
+        # Verify allowed_company_ids was set in context
+        assert call_kwargs["context"]["allowed_company_ids"] == [1, 2, 3]
+
+
+@patch("odoo_data_flow.__main__.run_import")
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+def test_all_companies_flag_handles_empty_companies(
+    mock_get_conn: MagicMock, mock_run_import: MagicMock, runner: CliRunner
+) -> None:
+    """Tests that --all-companies handles users with no company access gracefully."""
+    mock_conn = MagicMock()
+    mock_conn.user_id = 2
+    mock_user_model = MagicMock()
+    mock_user_model.read.return_value = {"company_ids": []}
+    mock_conn.get_model.return_value = mock_user_model
+    mock_get_conn.return_value = mock_conn
+
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "my.csv",
+                "--model",
+                "res.partner",
+                "--all-companies",
+            ],
+        )
+        assert result.exit_code == 0
+        # Should still proceed, just without allowed_company_ids
+        mock_run_import.assert_called_once()
+        assert "No company access found" in result.output
+
+
+@patch("odoo_data_flow.__main__.run_import")
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+def test_all_companies_flag_handles_connection_error(
+    mock_get_conn: MagicMock, mock_run_import: MagicMock, runner: CliRunner
+) -> None:
+    """Tests that --all-companies handles connection errors gracefully."""
+    mock_get_conn.side_effect = Exception("Connection failed")
+
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "my.csv",
+                "--model",
+                "res.partner",
+                "--all-companies",
+            ],
+        )
+        assert result.exit_code == 0
+        # Should still proceed, just without allowed_company_ids
+        mock_run_import.assert_called_once()
+        assert "Failed to fetch user companies" in result.output
+
+
+@patch("odoo_data_flow.__main__.run_import")
+def test_company_id_flag_sets_context(
+    mock_run_import: MagicMock, runner: CliRunner
+) -> None:
+    """Tests that --company-id sets allowed_company_ids in context."""
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "my.csv",
+                "--model",
+                "res.partner",
+                "--company-id",
+                "5",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_run_import.assert_called_once()
+        call_kwargs = mock_run_import.call_args.kwargs
+        # Verify allowed_company_ids was set to single company
+        assert call_kwargs["context"]["allowed_company_ids"] == [5]
+        assert call_kwargs["context"]["force_company"] == 5
