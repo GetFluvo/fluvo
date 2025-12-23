@@ -4,6 +4,7 @@ These checks are run before the main import process to catch common,
 systemic errors early (e.g., missing languages, incorrect configuration).
 """
 
+import csv
 from typing import Any, Callable, Optional, Union, cast
 
 import polars as pl
@@ -520,4 +521,279 @@ def deferral_and_strategy_check(
         return False
 
     log.info("Pre-flight Check Successful: All columns are valid fields on the model.")
+    return True
+
+
+def _extract_references_from_csv(  # noqa: C901
+    filename: str,
+    header: list[str],
+    odoo_fields: dict[str, Any],
+    separator: str = ";",
+    encoding: str = "utf-8",
+    ignore: Optional[list[str]] = None,
+) -> dict[str, dict[str, set[str]]]:
+    """Extract all unique references from relational columns in CSV.
+
+    Returns dict mapping model name to dict of column name to set of references.
+    """
+    ignore = ignore or []
+    references: dict[str, dict[str, set[str]]] = {}
+
+    # Identify relational columns
+    relational_cols: dict[int, tuple[str, str, str]] = {}  # index -> (col, model, type)
+    for i, col in enumerate(header):
+        if col in ignore or not col:
+            continue
+        base_field = col.split("/")[0]
+        field_info = odoo_fields.get(base_field, {})
+        field_type = field_info.get("type", "")
+        relation = field_info.get("relation", "")
+
+        if field_type in ("many2one", "many2many") and relation:
+            relational_cols[i] = (col, relation, field_type)
+            if relation not in references:
+                references[relation] = {}
+            if col not in references[relation]:
+                references[relation][col] = set()
+
+    if not relational_cols:
+        return references
+
+    # Scan CSV and collect all references
+    try:
+        with open(filename, encoding=encoding, newline="") as f:
+            reader = csv.reader(f, delimiter=separator)
+            next(reader)  # Skip header
+
+            for row in reader:
+                for idx, (col, relation, field_type) in relational_cols.items():
+                    if idx >= len(row):
+                        continue
+                    value = row[idx].strip()
+                    if not value:
+                        continue
+
+                    # Handle multiple values for m2m
+                    if field_type == "many2many":
+                        values = [v.strip() for v in value.split(",") if v.strip()]
+                    else:
+                        values = [value]
+
+                    for ref in values:
+                        references[relation][col].add(ref)
+    except Exception as e:
+        log.warning(f"Error scanning CSV for references: {e}")
+
+    return references
+
+
+def _check_references_exist(  # noqa: C901
+    connection: Any,
+    references: dict[str, dict[str, set[str]]],
+) -> dict[str, dict[str, set[str]]]:
+    """Check which references exist in Odoo.
+
+    Returns dict of missing references: model -> column -> set of missing refs.
+    """
+    missing: dict[str, dict[str, set[str]]] = {}
+
+    for model, columns in references.items():
+        # Collect all unique refs for this model
+        all_refs: set[str] = set()
+        for refs in columns.values():
+            all_refs.update(refs)
+
+        if not all_refs:
+            continue
+
+        # Separate external IDs from database IDs
+        external_ids: set[str] = set()
+        db_ids: set[int] = set()
+        invalid_refs: set[str] = set()
+
+        for ref in all_refs:
+            if "." in ref:
+                external_ids.add(ref)
+            else:
+                try:
+                    db_ids.add(int(ref))
+                except ValueError:
+                    invalid_refs.add(ref)
+
+        # Check external IDs in batch
+        existing_external: set[str] = set()
+        if external_ids:
+            try:
+                ir_model_data = connection.get_model("ir.model.data")
+                # Build domain for batch lookup
+                domain_parts = []
+                for ext_id in external_ids:
+                    if "." in ext_id:
+                        module, name = ext_id.split(".", 1)
+                        domain_parts.append(
+                            [
+                                "&",
+                                "&",
+                                ("module", "=", module),
+                                ("name", "=", name),
+                                ("model", "=", model),
+                            ]
+                        )
+
+                # Combine with OR
+                if domain_parts:
+                    if len(domain_parts) == 1:
+                        domain = domain_parts[0]
+                    else:
+                        domain = ["|"] * (len(domain_parts) - 1)
+                        for part in domain_parts:
+                            domain.extend(part)
+
+                    results = ir_model_data.search_read(
+                        domain, ["module", "name"], limit=len(external_ids)
+                    )
+                    for r in results:
+                        existing_external.add(f"{r['module']}.{r['name']}")
+            except Exception as e:
+                log.debug(f"Error checking external IDs for {model}: {e}")
+
+        # Check database IDs in batch
+        existing_db: set[int] = set()
+        if db_ids:
+            try:
+                model_obj = connection.get_model(model)
+                results = model_obj.search([("id", "in", list(db_ids))])
+                existing_db = set(results)
+            except Exception as e:
+                log.debug(f"Error checking database IDs for {model}: {e}")
+
+        # Find missing refs for each column
+        missing_external = external_ids - existing_external
+        missing_db = db_ids - existing_db
+        all_missing = missing_external | {str(i) for i in missing_db} | invalid_refs
+
+        if all_missing:
+            for col, refs in columns.items():
+                col_missing = refs & all_missing
+                if col_missing:
+                    if model not in missing:
+                        missing[model] = {}
+                    if col not in missing[model]:
+                        missing[model][col] = set()
+                    missing[model][col].update(col_missing)
+
+    return missing
+
+
+def _display_missing_references(
+    missing: dict[str, dict[str, set[str]]],
+) -> None:
+    """Display missing references in a formatted panel."""
+    console = Console()
+    lines = []
+
+    total_missing = sum(
+        len(refs) for cols in missing.values() for refs in cols.values()
+    )
+    lines.append(f"[red]✗[/red] Found {total_missing} missing references\n")
+
+    for model, columns in missing.items():
+        lines.append(f"[bold]Model: {model}[/bold]")
+        for col, refs in columns.items():
+            lines.append(f"  • Column '{col}': {len(refs)} missing")
+            # Show first few examples
+            examples = sorted(refs)[:5]
+            lines.append(f"    Examples: {', '.join(examples)}")
+            if len(refs) > 5:
+                lines.append(f"    ... and {len(refs) - 5} more")
+        lines.append("")
+
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title="[bold red]Missing References Detected[/bold red]",
+            expand=False,
+        )
+    )
+
+
+@register_check
+def reference_check(
+    preflight_mode: "PreflightMode",
+    model: str,
+    filename: str,
+    config: Union[str, dict[str, Any]],
+    **kwargs: Any,
+) -> bool:
+    """Pre-flight check to verify all relational references exist."""
+    check_refs = kwargs.get("check_refs", "warn")
+    if check_refs == "skip":
+        log.debug("Skipping reference pre-flight check (--check-refs=skip).")
+        return True
+
+    if preflight_mode == PreflightMode.FAIL_MODE:
+        log.debug("Skipping reference pre-flight check in fail mode.")
+        return True
+
+    log.info("Running pre-flight check: Verifying relational references...")
+
+    separator = kwargs.get("separator", ";")
+    encoding = kwargs.get("encoding", "utf-8")
+    ignore = kwargs.get("ignore", [])
+
+    # Get CSV header
+    csv_header = _get_csv_header(filename, separator)
+    if not csv_header:
+        return check_refs != "fail"
+
+    # Get Odoo fields
+    odoo_fields = _get_odoo_fields(config, model)
+    if not odoo_fields:
+        return check_refs != "fail"
+
+    # Extract all references from CSV
+    references = _extract_references_from_csv(
+        filename, csv_header, odoo_fields, separator, encoding, ignore
+    )
+
+    if not any(refs for cols in references.values() for refs in cols.values()):
+        log.info("No relational references found to check.")
+        return True
+
+    # Get connection for checking
+    try:
+        if isinstance(config, dict):
+            connection = conf_lib.get_connection_from_dict(config)
+        else:
+            connection = conf_lib.get_connection_from_config(config)
+    except Exception as e:
+        log.warning(f"Could not connect to check references: {e}")
+        return check_refs != "fail"
+
+    # Check which references exist
+    missing = _check_references_exist(connection, references)
+
+    if not missing:
+        total_refs = sum(
+            len(refs) for cols in references.values() for refs in cols.values()
+        )
+        log.info(f"All {total_refs} relational references verified successfully.")
+        return True
+
+    # Handle missing references
+    _display_missing_references(missing)
+
+    if check_refs == "fail":
+        _show_error_panel(
+            "Reference Check Failed",
+            "Import aborted due to missing references. "
+            "Use --check-refs=warn to continue anyway.",
+        )
+        return False
+
+    # check_refs == "warn"
+    log.warning(
+        "Continuing with import despite missing references. "
+        "Some records may fail to import."
+    )
     return True

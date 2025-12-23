@@ -113,6 +113,7 @@ def run_import(  # noqa: C901
     stream: bool = False,
     resume: bool = True,
     no_checkpoint: bool = False,
+    check_refs: str = "warn",
 ) -> None:
     """Main entry point for the import command, handling all orchestration."""
     log.info("Starting data import process from file...")
@@ -185,6 +186,8 @@ def run_import(  # noqa: C901
             ignore=ignore or [],
             o2m=o2m,
             auto_defer=auto_defer,
+            check_refs=check_refs,
+            encoding=encoding,
         ):
             return
 

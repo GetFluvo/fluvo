@@ -341,6 +341,14 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
     help="Skip all pre-flight checks before starting the import.",
 )
 @click.option(
+    "--check-refs",
+    type=click.Choice(["fail", "warn", "skip"], case_sensitive=False),
+    default="warn",
+    help="Action for pre-import reference check: "
+    "fail (abort if missing), warn (continue with warning), skip (no check). "
+    "Default: warn.",
+)
+@click.option(
     "--worker", default=1, type=int, help="Number of simultaneous connections."
 )
 @click.option(
