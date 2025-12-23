@@ -379,6 +379,14 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
     "Improves performance for large imports of nested structures.",
 )
 @click.option("--encoding", default="utf-8", help="Encoding of the data file.")
+@click.option(
+    "--stream",
+    is_flag=True,
+    default=False,
+    help="Stream CSV data without loading entire file into memory. "
+    "Ideal for very large files. Not compatible with --o2m, --groupby, "
+    "--defer, or --fail options.",
+)
 def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     """Runs the data import process."""
     # Handle protocol option - create config dict if protocol specified

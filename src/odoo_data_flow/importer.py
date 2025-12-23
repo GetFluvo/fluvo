@@ -110,6 +110,7 @@ def run_import(  # noqa: C901
     auto_create_refs: bool = False,
     set_empty_on_missing: bool = False,
     batch_delay: float = 0.0,
+    stream: bool = False,
 ) -> None:
     """Main entry point for the import command, handling all orchestration."""
     log.info("Starting data import process from file...")
@@ -235,6 +236,7 @@ def run_import(  # noqa: C901
             force_create=force_create,
             o2m=o2m,
             split_by_cols=groupby,
+            stream=stream,
         )
     finally:
         if (

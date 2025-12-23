@@ -7,6 +7,7 @@ import pytest
 from rich.progress import Progress
 
 from odoo_data_flow.import_threaded import (
+    _count_csv_rows,
     _create_batch_individually,
     _create_batches,
     _execute_load_batch,
@@ -18,6 +19,7 @@ from odoo_data_flow.import_threaded import (
     _orchestrate_pass_2,
     _read_data_file,
     _setup_fail_file,
+    _stream_csv_batches,
     import_data,
 )
 
@@ -1232,3 +1234,263 @@ class TestImportDataWithDictConfig:
 
         assert result is True
         mock_get_conn.assert_called_once_with(config_dict)
+
+
+class TestStreamingCSV:
+    """Tests for streaming CSV functionality."""
+
+    def test_count_csv_rows(self, tmp_path: Path) -> None:
+        """Test counting CSV rows."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id,name\nrec1,A\nrec2,B\nrec3,C\nrec4,D")
+
+        count = _count_csv_rows(str(source_file), ",", "utf-8", skip=0)
+        assert count == 4
+
+    def test_count_csv_rows_with_skip(self, tmp_path: Path) -> None:
+        """Test counting CSV rows with skip."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id,name\nskip1,A\nskip2,B\nkeep1,C\nkeep2,D")
+
+        count = _count_csv_rows(str(source_file), ",", "utf-8", skip=2)
+        assert count == 2
+
+    def test_count_csv_rows_nonexistent_file(self) -> None:
+        """Test counting CSV rows on nonexistent file returns 0."""
+        count = _count_csv_rows("/nonexistent/file.csv", ",", "utf-8", skip=0)
+        assert count == 0
+
+    def test_stream_csv_batches_basic(self, tmp_path: Path) -> None:
+        """Test basic streaming batch generation."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id,name,age\nrec1,A,25\nrec2,B,30\nrec3,C,35\nrec4,D,40")
+
+        batches = list(_stream_csv_batches(
+            str(source_file), ",", "utf-8", skip=0, batch_size=2, ignore=[]
+        ))
+
+        assert len(batches) == 2
+        # First batch
+        header1, num1, data1 = batches[0]
+        assert header1 == ["id", "name", "age"]
+        assert num1 == 1
+        assert len(data1) == 2
+        assert data1[0] == ["rec1", "A", "25"]
+
+        # Second batch
+        header2, num2, data2 = batches[1]
+        assert header2 == ["id", "name", "age"]
+        assert num2 == 2
+        assert len(data2) == 2
+        assert data2[0] == ["rec3", "C", "35"]
+
+    def test_stream_csv_batches_with_ignore(self, tmp_path: Path) -> None:
+        """Test streaming with column filtering."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id,name,age,city\nrec1,A,25,NYC\nrec2,B,30,LA")
+
+        batches = list(_stream_csv_batches(
+            str(source_file), ",", "utf-8", skip=0, batch_size=10, ignore=["age"]
+        ))
+
+        assert len(batches) == 1
+        header, _, data = batches[0]
+        assert header == ["id", "name", "city"]
+        assert "age" not in header
+        assert len(data[0]) == 3
+
+    def test_stream_csv_batches_with_skip(self, tmp_path: Path) -> None:
+        """Test streaming with skipped rows."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id,name\nskip1,A\nskip2,B\nkeep1,C\nkeep2,D")
+
+        batches = list(_stream_csv_batches(
+            str(source_file), ",", "utf-8", skip=2, batch_size=10, ignore=[]
+        ))
+
+        assert len(batches) == 1
+        _, _, data = batches[0]
+        assert len(data) == 2
+        assert data[0][0] == "keep1"
+
+    def test_stream_csv_batches_missing_id_column(self, tmp_path: Path) -> None:
+        """Test streaming fails without id column."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("name,age\nA,25\nB,30")
+
+        with pytest.raises(ValueError, match="must contain an 'id' column"):
+            list(_stream_csv_batches(
+                str(source_file), ",", "utf-8", skip=0, batch_size=10, ignore=[]
+            ))
+
+    def test_stream_csv_batches_semicolon_separator(self, tmp_path: Path) -> None:
+        """Test streaming with semicolon separator."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id;name;age\nrec1;A;25\nrec2;B;30")
+
+        batches = list(_stream_csv_batches(
+            str(source_file), ";", "utf-8", skip=0, batch_size=10, ignore=[]
+        ))
+
+        assert len(batches) == 1
+        header, _, data = batches[0]
+        assert header == ["id", "name", "age"]
+        assert data[0] == ["rec1", "A", "25"]
+
+    def test_stream_csv_batches_exact_batch_boundary(self, tmp_path: Path) -> None:
+        """Test streaming when data aligns exactly with batch size."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id,name\nrec1,A\nrec2,B\nrec3,C\nrec4,D")
+
+        batches = list(_stream_csv_batches(
+            str(source_file), ",", "utf-8", skip=0, batch_size=2, ignore=[]
+        ))
+
+        assert len(batches) == 2
+        assert len(batches[0][2]) == 2
+        assert len(batches[1][2]) == 2
+
+
+class TestImportDataStreamingMode:
+    """Tests for import_data streaming mode."""
+
+    @patch("odoo_data_flow.import_threaded._read_data_file")
+    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    def test_stream_mode_falls_back_when_not_compatible(
+        self,
+        mock_run_pass: MagicMock,
+        mock_get_conn: MagicMock,
+        mock_read_file: MagicMock,
+    ) -> None:
+        """Test that streaming mode falls back when not compatible."""
+        mock_read_file.return_value = (["id", "name"], [["xml_a", "A"]])
+        mock_run_pass.return_value = (
+            {"id_map": {"xml_a": 101}, "failed_lines": []},
+            False,
+        )
+        mock_get_conn.return_value.get_model.return_value = MagicMock()
+
+        # With o2m=True, streaming should fall back to standard mode
+        result, _ = import_data(
+            config="dummy.conf",
+            model="res.partner",
+            unique_id_field="id",
+            file_csv="dummy.csv",
+            stream=True,
+            o2m=True,  # This makes streaming incompatible
+        )
+
+        # Should still succeed but use standard mode
+        assert result is True
+        # Standard mode reads the file
+        mock_read_file.assert_called_once()
+
+    @patch("odoo_data_flow.import_threaded._read_data_file")
+    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    def test_stream_mode_falls_back_with_deferred(
+        self,
+        mock_run_pass: MagicMock,
+        mock_get_conn: MagicMock,
+        mock_read_file: MagicMock,
+    ) -> None:
+        """Test streaming falls back when deferred_fields are present."""
+        mock_read_file.return_value = (["id", "name", "parent_id"], [["xml_a", "A", ""]])
+        mock_run_pass.return_value = (
+            {"id_map": {"xml_a": 101}, "failed_lines": []},
+            False,
+        )
+        mock_get_conn.return_value.get_model.return_value = MagicMock()
+
+        result, _ = import_data(
+            config="dummy.conf",
+            model="res.partner",
+            unique_id_field="id",
+            file_csv="dummy.csv",
+            stream=True,
+            deferred_fields=["parent_id"],  # Not compatible with streaming
+        )
+
+        assert result is True
+        mock_read_file.assert_called_once()
+
+    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.import_threaded._execute_load_batch")
+    def test_stream_mode_uses_streaming_orchestrator(
+        self,
+        mock_execute_batch: MagicMock,
+        mock_get_conn: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that streaming mode uses the streaming orchestrator."""
+        # Create a real CSV file for streaming
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id,name\nrec1,A\nrec2,B")
+
+        mock_model = MagicMock()
+        mock_model.load.return_value = {"ids": [1, 2]}
+        mock_get_conn.return_value.get_model.return_value = mock_model
+
+        # Mock _execute_load_batch to return proper results
+        mock_execute_batch.return_value = {
+            "success": True,
+            "id_map": {"rec1": 1, "rec2": 2},
+            "failed_lines": [],
+        }
+
+        result, stats = import_data(
+            config="dummy.conf",
+            model="res.partner",
+            unique_id_field="id",
+            file_csv=str(source_file),
+            separator=",",
+            stream=True,  # Enable streaming
+        )
+
+        assert result is True
+        # Verify streaming was used (execute_load_batch should be called)
+        mock_execute_batch.assert_called()
+
+    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+    def test_stream_mode_handles_missing_uid_field(
+        self,
+        mock_get_conn: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test streaming handles missing unique ID field gracefully."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id,name\nrec1,A\nrec2,B")
+
+        mock_get_conn.return_value.get_model.return_value = MagicMock()
+
+        result, _ = import_data(
+            config="dummy.conf",
+            model="res.partner",
+            unique_id_field="nonexistent_field",  # Field not in CSV
+            file_csv=str(source_file),
+            separator=",",
+            stream=True,
+        )
+
+        # Should fail gracefully
+        assert result is False
+
+    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+    def test_stream_mode_handles_file_not_found(
+        self,
+        mock_get_conn: MagicMock,
+    ) -> None:
+        """Test streaming handles nonexistent file gracefully."""
+        mock_get_conn.return_value.get_model.return_value = MagicMock()
+
+        result, _ = import_data(
+            config="dummy.conf",
+            model="res.partner",
+            unique_id_field="id",
+            file_csv="/nonexistent/file.csv",
+            stream=True,
+        )
+
+        # Should fail gracefully
+        assert result is False

@@ -157,6 +157,112 @@ def _read_data_file(
         return [], []
 
 
+def _count_csv_rows(file_path: str, separator: str, encoding: str, skip: int) -> int:
+    """Quickly counts the number of data rows in a CSV file.
+
+    This function reads through the file once to count rows, which is
+    needed for progress bar initialization when streaming.
+
+    Args:
+        file_path: The full path to the source CSV file.
+        separator: The delimiter character.
+        encoding: The character encoding of the file.
+        skip: The number of lines to skip after the header.
+
+    Returns:
+        The number of data rows (excluding header and skipped lines).
+    """
+    count = 0
+    try:
+        with open(file_path, encoding=encoding, newline="") as f:
+            reader = csv.reader(f, delimiter=separator)
+            next(reader)  # Skip header
+            for _ in range(skip):
+                next(reader)
+            for _ in reader:
+                count += 1
+    except Exception:
+        pass
+    return count
+
+
+def _stream_csv_batches(
+    file_path: str,
+    separator: str,
+    encoding: str,
+    skip: int,
+    batch_size: int,
+    ignore: list[str],
+) -> Generator[tuple[list[str], int, list[list[Any]]], None, None]:
+    """Streams CSV data in batches without loading the entire file into memory.
+
+    This generator opens the CSV file and yields batches of rows along with
+    the header. It is memory-efficient for large files as it only keeps
+    one batch in memory at a time.
+
+    Args:
+        file_path: The full path to the source CSV file.
+        separator: The delimiter character used to separate columns.
+        encoding: The character encoding of the file.
+        skip: The number of lines to skip at the top of the file.
+        batch_size: The number of records to include in each batch.
+        ignore: A list of column names to ignore during import.
+
+    Yields:
+        Tuples of (header, batch_number, batch_data) where:
+        - header: The list of column names (same for each batch)
+        - batch_number: The sequential batch number (1-indexed)
+        - batch_data: A list of rows for this batch
+
+    Raises:
+        ValueError: If the source file does not contain a required 'id' column.
+        FileNotFoundError: If the source file does not exist.
+    """
+    with open(file_path, encoding=encoding, newline="") as f:
+        reader = csv.reader(f, delimiter=separator)
+        header = next(reader)
+
+        if "id" not in header:
+            raise ValueError("Source file must contain an 'id' column.")
+
+        for _ in range(skip):
+            next(reader)
+
+        # Pre-calculate indices to keep for filtering ignored columns
+        ignore_set = set(ignore) if ignore else set()
+        if ignore_set:
+            indices_to_keep = [
+                i for i, h in enumerate(header) if h.split("/")[0] not in ignore_set
+            ]
+            filtered_header = [header[i] for i in indices_to_keep]
+        else:
+            indices_to_keep = None
+            filtered_header = header
+
+        current_batch: list[list[Any]] = []
+        batch_number = 0
+
+        for row in reader:
+            # Apply column filtering if needed
+            if indices_to_keep is not None:
+                if len(row) < max(indices_to_keep) + 1:
+                    # Skip malformed rows
+                    continue
+                row = [row[i] for i in indices_to_keep]
+
+            current_batch.append(row)
+
+            if len(current_batch) >= batch_size:
+                batch_number += 1
+                yield filtered_header, batch_number, current_batch
+                current_batch = []
+
+        # Yield any remaining rows
+        if current_batch:
+            batch_number += 1
+            yield filtered_header, batch_number, current_batch
+
+
 def _filter_ignored_columns(
     ignore: list[str], header: list[str], data: list[list[Any]]
 ) -> tuple[list[str], list[list[Any]]]:
@@ -1733,6 +1839,150 @@ def _orchestrate_pass_1(
     return results
 
 
+def _orchestrate_streaming_pass_1(
+    progress: Progress,
+    model_obj: Any,
+    model_name: str,
+    file_csv: str,
+    separator: str,
+    encoding: str,
+    skip: int,
+    unique_id_field: str,
+    ignore: list[str],
+    context: dict[str, Any],
+    fail_writer: Optional[Any],
+    fail_handle: Optional[TextIO],
+    max_connection: int,
+    batch_size: int,
+    batch_delay: float,
+    total_records: int,
+) -> dict[str, Any]:
+    """Orchestrates a streaming Pass 1 import without loading all data into memory.
+
+    This function is an alternative to _orchestrate_pass_1 that uses streaming
+    to process the CSV file. It reads and processes batches directly from the
+    file, never loading the entire dataset into memory. This is ideal for
+    large files when no grouping (o2m, split_by_cols) is required.
+
+    Args:
+        progress: The rich Progress instance for updating the UI.
+        model_obj: The connected Odoo model object used for RPC calls.
+        model_name: The technical name of the target Odoo model.
+        file_csv: Path to the source CSV file.
+        separator: The CSV delimiter character.
+        encoding: The character encoding of the file.
+        skip: Number of lines to skip after header.
+        unique_id_field: The name of the column containing the unique source ID.
+        ignore: A list of fields to ignore during import.
+        context: The context dictionary for the Odoo RPC call.
+        fail_writer: The CSV writer object for recording failures.
+        fail_handle: The file handle for the fail file.
+        max_connection: The number of parallel worker threads to use.
+        batch_size: The number of records to process in each batch.
+        batch_delay: Delay in seconds between batch submissions.
+        total_records: Total number of records for progress display.
+
+    Returns:
+        dict[str, Any]: A dictionary containing the results of the pass,
+            including the `id_map` ({source_id: db_id}), a list of any
+            `failed_lines`, and a `success` boolean flag.
+    """
+    rpc_pass_1 = RPCThreadImport(
+        max_connection, progress, TaskID(0), fail_writer, fail_handle
+    )
+
+    # Calculate number of batches for progress display
+    num_batches = (total_records + batch_size - 1) // batch_size if total_records else 1
+
+    pass_1_task = progress.add_task(
+        f"Pass 1/1: Streaming import to [bold]{model_name}[/bold]",
+        total=num_batches,
+        last_error="",
+    )
+    rpc_pass_1.task_id = pass_1_task
+
+    # Aggregated results
+    combined_id_map: dict[str, int] = {}
+    combined_failed_lines: list[list[Any]] = []
+    aborted = False
+    header: Optional[list[str]] = None
+    unique_id_field_index: Optional[int] = None
+
+    try:
+        batch_generator = _stream_csv_batches(
+            file_csv, separator, encoding, skip, batch_size, ignore
+        )
+
+        for batch_header, batch_num, batch_data in batch_generator:
+            if rpc_pass_1.abort_flag:
+                aborted = True
+                break
+
+            # First batch: set up header and field index
+            if header is None:
+                header = batch_header
+                try:
+                    unique_id_field_index = header.index(unique_id_field)
+                except ValueError:
+                    log.error(
+                        f"Unique ID field '{unique_id_field}' not found in header."
+                    )
+                    return {"success": False, "id_map": {}, "failed_lines": []}
+
+            thread_state = {
+                "model": model_obj,
+                "model_name": model_name,
+                "context": context,
+                "unique_id_field_index": unique_id_field_index,
+                "batch_header": header,
+                "force_create": False,
+                "progress": progress,
+                "ignore_list": [],  # Already filtered by streaming
+            }
+
+            # Submit batch for processing
+            rpc_pass_1.spawn_thread(
+                _execute_load_batch, [thread_state, batch_data, header, batch_num]
+            )
+
+            # Apply batch delay if configured
+            if batch_delay > 0:
+                time.sleep(batch_delay)
+
+        # Wait for all threads to complete
+        rpc_pass_1.wait()
+
+        # Collect results from all futures
+        for future in rpc_pass_1.futures:
+            if future.done() and not future.cancelled():
+                try:
+                    result = future.result()
+                    if result:
+                        combined_id_map.update(result.get("id_map", {}))
+                        combined_failed_lines.extend(result.get("failed_lines", []))
+                        # Update progress
+                        progress.advance(pass_1_task)
+                except Exception as e:
+                    log.error(f"Streaming batch failed: {e}")
+
+    except FileNotFoundError:
+        log.error(f"Source file not found: {file_csv}")
+        return {"success": False, "id_map": {}, "failed_lines": []}
+    except ValueError as e:
+        log.error(str(e))
+        return {"success": False, "id_map": {}, "failed_lines": []}
+    except KeyboardInterrupt:
+        log.warning("Import interrupted by user.")
+        rpc_pass_1.abort_flag = True
+        aborted = True
+
+    return {
+        "success": not aborted,
+        "id_map": combined_id_map,
+        "failed_lines": combined_failed_lines,
+    }
+
+
 def _orchestrate_pass_2(
     progress: Progress,
     model_obj: Any,
@@ -1862,6 +2112,7 @@ def import_data(
     force_create: bool = False,
     o2m: bool = False,
     split_by_cols: Optional[list[str]] = None,
+    stream: bool = False,
 ) -> tuple[bool, dict[str, int]]:
     """Orchestrates a robust, multi-threaded, two-pass import process.
 
@@ -1902,6 +2153,9 @@ def import_data(
         o2m (bool): Enables special handling for one-to-many imports where
             child lines follow a parent record.
         split_by_cols: The column names to group records by to avoid concurrent updates.
+        stream (bool): If True, uses streaming mode to process the CSV file
+            without loading it entirely into memory. Ideal for large files.
+            Not compatible with o2m, split_by_cols, or deferred_fields.
 
     Returns:
         tuple[bool, int]: True if the entire import process completed without any
@@ -1912,11 +2166,28 @@ def import_data(
         deferred_fields or [],
         ignore or [],
     )
-    header, all_data = _read_data_file(file_csv, separator, encoding, skip)
-    record_count = len(all_data)
 
-    if not header:
-        return False, {}
+    # Determine if streaming mode is possible
+    can_stream = stream and not o2m and not split_by_cols and not deferred and not force_create
+    if stream and not can_stream:
+        log.warning(
+            "Streaming mode requested but not compatible with current options. "
+            "Falling back to standard mode. Streaming requires: no o2m, no groupby, "
+            "no deferred fields, and no force_create."
+        )
+
+    if can_stream:
+        # Use streaming mode - don't load all data into memory
+        log.info("Using streaming mode for memory-efficient import.")
+        record_count = _count_csv_rows(file_csv, separator, encoding, skip)
+        header = None  # Will be set during streaming
+    else:
+        # Standard mode - load all data
+        header, all_data = _read_data_file(file_csv, separator, encoding, skip)
+        record_count = len(all_data)
+
+        if not header:
+            return False, {}
 
     try:
         if isinstance(config, dict):
@@ -1941,7 +2212,13 @@ def import_data(
         )
         _show_error_panel(title, friendly_message)
         return False, {}
-    fail_writer, fail_handle = _setup_fail_file(fail_file, header, separator, encoding)
+
+    # For streaming mode, we defer fail file setup (header not known yet)
+    # For standard mode, set up fail file now
+    fail_writer, fail_handle = None, None
+    if not can_stream and fail_file:
+        fail_writer, fail_handle = _setup_fail_file(fail_file, header, separator, encoding)
+
     console = Console()
     progress = Progress(
         SpinnerColumn(),
@@ -1959,25 +2236,51 @@ def import_data(
     overall_success = False
     with suppress_console_handler(), progress:
         try:
-            pass_1_results = _orchestrate_pass_1(
-                progress,
-                model_obj,
-                model,
-                header,
-                all_data,
-                unique_id_field,
-                deferred,
-                ignore,
-                context,
-                fail_writer,
-                fail_handle,
-                max_connection,
-                batch_size,
-                batch_delay,
-                o2m,
-                split_by_cols,
-                force_create,
-            )
+            if can_stream:
+                # Use streaming mode - process batches directly from file
+                pass_1_results = _orchestrate_streaming_pass_1(
+                    progress,
+                    model_obj,
+                    model,
+                    file_csv,
+                    separator,
+                    encoding,
+                    skip,
+                    unique_id_field,
+                    ignore,
+                    context,
+                    fail_writer,
+                    fail_handle,
+                    max_connection,
+                    batch_size,
+                    batch_delay,
+                    record_count,
+                )
+                # Streaming mode doesn't support Pass 2
+                pass_2_successful = True
+                updates_made = 0
+            else:
+                # Standard mode - use pre-loaded data
+                pass_1_results = _orchestrate_pass_1(
+                    progress,
+                    model_obj,
+                    model,
+                    header,
+                    all_data,
+                    unique_id_field,
+                    deferred,
+                    ignore,
+                    context,
+                    fail_writer,
+                    fail_handle,
+                    max_connection,
+                    batch_size,
+                    batch_delay,
+                    o2m,
+                    split_by_cols,
+                    force_create,
+                )
+
             # A pass is only successful if it wasn't aborted.
             pass_1_successful = pass_1_results.get("success", False)
             if not pass_1_successful:
@@ -1985,25 +2288,27 @@ def import_data(
 
             # If we get here, Pass 1 was not aborted. Now determine final status.
             id_map = pass_1_results.get("id_map", {})
-            pass_2_successful = True  # Assume success if no Pass 2 is needed.
-            updates_made = 0
 
-            if deferred:
-                pass_2_successful, updates_made = _orchestrate_pass_2(
-                    progress,
-                    model_obj,
-                    model,
-                    header,
-                    all_data,
-                    unique_id_field,
-                    id_map,
-                    deferred,
-                    context,
-                    fail_writer,
-                    fail_handle,
-                    max_connection,
-                    batch_size,
-                )
+            if not can_stream:
+                pass_2_successful = True  # Assume success if no Pass 2 is needed.
+                updates_made = 0
+
+                if deferred:
+                    pass_2_successful, updates_made = _orchestrate_pass_2(
+                        progress,
+                        model_obj,
+                        model,
+                        header,
+                        all_data,
+                        unique_id_field,
+                        id_map,
+                        deferred,
+                        context,
+                        fail_writer,
+                        fail_handle,
+                        max_connection,
+                        batch_size,
+                    )
 
         finally:
             if fail_handle:
