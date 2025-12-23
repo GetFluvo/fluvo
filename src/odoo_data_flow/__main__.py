@@ -9,17 +9,81 @@ import click
 
 from .converter import run_path_to_image, run_url_to_image
 from .exporter import run_export
-from .importer import run_import
+from .importer import _infer_model_from_filename, run_import
 from .lib.actions.language_installer import run_language_installation
 from .lib.actions.module_manager import (
     run_module_installation,
     run_module_uninstallation,
     run_update_module_list,
 )
+from .lib.validation import display_validation_results, validate_csv_data
 from .logging_config import log, setup_logging
 from .migrator import run_migration
 from .workflow_runner import run_invoice_v9_workflow
 from .writer import run_write
+
+
+def _run_dry_run_validation(connection_file: str, **kwargs: Any) -> None:
+    """Run dry-run validation mode without importing."""
+    from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
+    from .lib.internal.ui import _show_error_panel
+
+    filename = kwargs.get("filename")
+    model = kwargs.get("model")
+    separator = kwargs.get("separator", ";")
+    encoding = kwargs.get("encoding", "utf-8")
+    ignore = kwargs.get("ignore")
+    protocol = kwargs.get("protocol")
+
+    if not filename:
+        _show_error_panel("Dry Run Error", "No file specified for validation.")
+        return
+
+    # Infer model if not provided
+    if not model:
+        model = _infer_model_from_filename(filename)
+        if not model:
+            _show_error_panel(
+                "Model Not Found",
+                "Could not infer model from filename. Please use the --model option.",
+            )
+            return
+
+    # Parse ignore list
+    ignore_list: list[str] = []
+    if ignore:
+        ignore_list = [col.strip() for col in ignore.split(",") if col.strip()]
+
+    log.info(f"Starting dry-run validation for {model}...")
+
+    try:
+        # Get connection
+        if protocol:
+            config: Any = {"_config_file": connection_file, "protocol": protocol}
+            conn = get_connection_from_dict(config)
+        else:
+            conn = get_connection_from_config(connection_file)
+
+        # Get model fields info
+        model_obj = conn.get_model(model)
+        fields_info = model_obj.fields_get()
+
+        # Run validation
+        result = validate_csv_data(
+            file_path=filename,
+            model=model,
+            fields_info=fields_info,
+            connection=conn,
+            separator=separator,
+            encoding=encoding,
+            ignore=ignore_list,
+        )
+
+        # Display results
+        display_validation_results(result, model)
+
+    except Exception as e:
+        _show_error_panel("Validation Error", f"Failed to validate data: {e}")
 
 
 def run_project_flow(flow_file: str, flow_name: Optional[str]) -> None:
@@ -336,9 +400,9 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
     "--all-companies",
     is_flag=True,
     default=False,
-    help="Automatically set allowed_company_ids to all companies the user has access to. "
-    "This mimics the behavior of the Odoo web interface and enables importing records "
-    "that reference data across multiple companies.",
+    help="Automatically set allowed_company_ids to all companies the user has "
+    "access to. This mimics the behavior of the Odoo web interface and enables "
+    "importing records that reference data across multiple companies.",
 )
 @click.option(
     "--o2m",
@@ -408,8 +472,21 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
     help="Disable checkpoint saving during import. Use for small imports "
     "where checkpointing overhead is not needed.",
 )
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Validate data without importing. Checks required fields, "
+    "selection values, and reference existence.",
+)
 def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     """Runs the data import process."""
+    # Handle dry-run mode early
+    dry_run = kwargs.pop("dry_run", False)
+    if dry_run:
+        _run_dry_run_validation(connection_file, **kwargs)
+        return
+
     # Handle protocol option - create config dict if protocol specified
     protocol = kwargs.pop("protocol", None)
     if protocol:
@@ -453,7 +530,10 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
                     f"companies: {user_company_ids}"
                 )
             else:
-                log.warning("No company access found for user. Continuing without setting allowed_company_ids.")
+                log.warning(
+                    "No company access found for user. "
+                    "Continuing without setting allowed_company_ids."
+                )
         except Exception as e:
             log.error(f"Failed to fetch user companies: {e}")
             log.warning("Continuing without setting allowed_company_ids.")
