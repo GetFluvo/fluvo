@@ -114,6 +114,8 @@ def run_import(  # noqa: C901
     resume: bool = True,
     no_checkpoint: bool = False,
     check_refs: str = "warn",
+    skip_unchanged: bool = False,
+    adaptive_throttle: bool = False,
 ) -> None:
     """Main entry point for the import command, handling all orchestration."""
     log.info("Starting data import process from file...")
@@ -244,6 +246,8 @@ def run_import(  # noqa: C901
             stream=stream,
             resume=resume,
             enable_checkpoint=not no_checkpoint,
+            skip_unchanged=skip_unchanged,
+            adaptive_throttle=adaptive_throttle,
         )
     finally:
         if (

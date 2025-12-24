@@ -26,6 +26,9 @@ from rich.progress import (
 
 from .lib import checkpoint as ckpt
 from .lib import conf_lib
+from .lib import idempotent as idempotent_lib
+from .lib import retry as retry_lib
+from .lib import throttle as throttle_lib
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch, to_xmlid
 from .logging_config import log, suppress_console_handler
@@ -1168,7 +1171,15 @@ def _execute_load_batch(  # noqa: C901
                     f"{preview_line}"
                 )
 
+            # Record timing for throttle controller
+            load_start = time.time()
             res = model.load(load_header, sanitized_load_lines, context=context)
+            load_time = time.time() - load_start
+
+            # Record response time for health-aware throttling
+            throttle_ctrl = thread_state.get("throttle_controller")
+            if throttle_ctrl:
+                throttle_ctrl.record_response(load_time)
 
             # DEBUG: Log detailed information about the load response
             log.debug(f"Load response type: {type(res)}")
@@ -1398,13 +1409,17 @@ def _execute_load_batch(  # noqa: C901
             serialization_retry_count = 0
 
         except Exception as e:
-            error_str = str(e).lower()
+            error_str = str(e)
+            error_str_lower = error_str.lower()
+
+            # Use retry module to categorize the error
+            error_category, error_pattern = retry_lib.categorize_error(error_str)
 
             # SPECIAL CASE: Client-side timeouts for local processing
             # These should be IGNORED entirely to allow long server processing
             if (
-                "timed out" == error_str.strip()
-                or "read timeout" in error_str
+                "timed out" == error_str_lower.strip()
+                or "read timeout" in error_str_lower
                 or type(e).__name__ == "ReadTimeout"
             ):
                 log.debug(
@@ -1414,95 +1429,57 @@ def _execute_load_batch(  # noqa: C901
                 lines_to_process = lines_to_process[chunk_size:]
                 continue
 
-            # SPECIAL CASE: Database connection pool exhaustion
-            # These should be treated as scalable errors to reduce load on the server
-            if (
-                "connection pool is full" in error_str.lower()
-                or "too many connections" in error_str.lower()
-                or "poolerror" in error_str.lower()
-            ):
-                log.warning(
-                    "Database connection pool exhaustion detected. "
-                    "Reducing chunk size and retrying to reduce server load."
-                )
-                is_scalable_error = True
+            # Transient errors: retry with exponential backoff
+            is_transient = error_category == retry_lib.ErrorCategory.TRANSIENT
 
-            # For all other exceptions, use the original scalable error detection
-            is_scalable_error = (
-                "memory" in error_str
-                or "out of memory" in error_str
-                or "502" in error_str
-                or "503" in error_str
-                or "service unavailable" in error_str
-                or "gateway" in error_str
-                or "proxy" in error_str
-                or "timeout" in error_str
-                or "could not serialize access" in error_str
-                or "concurrent update" in error_str
-                or "connection pool is full" in error_str.lower()
-                or "too many connections" in error_str.lower()
-                or "poolerror" in error_str.lower()
-            )
-
-            # Detect server overload (502/503) for adaptive throttling
-            is_server_overload = (
-                "502" in error_str
-                or "503" in error_str
-                or "service unavailable" in error_str
-                or "bad gateway" in error_str
+            # Detect server overload for adaptive throttling
+            is_server_overload = error_pattern in (
+                "502", "503", "service unavailable", "bad gateway"
             )
 
             if is_server_overload:
-                # Adaptive throttling: increase delay exponentially on server overload
-                current_throttle = thread_state.get("adaptive_throttle", 0.0)
-                new_throttle = min(current_throttle + 1.0, 10.0)  # Cap at 10 seconds
-                thread_state["adaptive_throttle"] = new_throttle
-                progress.console.print(
-                    f"[yellow]WARN:[/] Server overload detected (502/503). "
-                    f"Adding {new_throttle:.1f}s delay between batches."
+                # Adaptive throttling with exponential backoff
+                retry_attempt = thread_state.get("retry_attempt", 0) + 1
+                thread_state["retry_attempt"] = retry_attempt
+                backoff_config = retry_lib.RetryConfig(
+                    base_delay=1.0, max_delay=30.0, exponential_base=2.0
                 )
-                time.sleep(new_throttle)
+                delay = retry_lib.calculate_backoff_delay(retry_attempt, backoff_config)
+                progress.console.print(
+                    f"[yellow]WARN:[/] Server overload detected ({error_pattern}). "
+                    f"Backing off for {delay:.1f}s (attempt {retry_attempt})."
+                )
+                time.sleep(delay)
 
-            if is_scalable_error and chunk_size > 1:
+            if is_transient and chunk_size > 1:
                 chunk_size = max(1, chunk_size // 2)
                 progress.console.print(
-                    f"[yellow]WARN:[/] Batch {batch_number} hit scalable error. "
-                    f"Reducing chunk size to {chunk_size} and retrying."
+                    f"[yellow]WARN:[/] Batch {batch_number} hit transient error "
+                    f"({error_pattern}). Reducing chunk size to {chunk_size}."
                 )
-                if (
-                    "could not serialize access" in error_str
-                    or "concurrent update" in error_str
-                ):
-                    progress.console.print(
-                        "[yellow]INFO:[/] Database serialization conflict detected. "
-                        "This is often caused by concurrent processes updating the "
-                        "same records. Retrying with smaller batch size."
+
+                # Serialization conflicts get exponential backoff
+                if error_pattern in ("could not serialize access", "deadlock"):
+                    backoff_config = retry_lib.RetryConfig(
+                        base_delay=0.1, max_delay=5.0, exponential_base=2.0
                     )
+                    delay = retry_lib.calculate_backoff_delay(
+                        serialization_retry_count + 1, backoff_config
+                    )
+                    progress.console.print(
+                        f"[yellow]INFO:[/] Database serialization conflict. "
+                        f"Waiting {delay:.2f}s before retry."
+                    )
+                    time.sleep(delay)
 
-                    # Add a small delay for serialization conflicts
-                    # to give other processes time to complete.
-                    time.sleep(
-                        0.1 * serialization_retry_count
-                    )  # Linear backoff: 0.1s, 0.2s, 0.3s
-
-                    # Track serialization retries to prevent infinite loops
                     serialization_retry_count += 1
                     if serialization_retry_count >= max_serialization_retries:
                         progress.console.print(
                             f"[yellow]WARN:[/] Max serialization retries "
                             f"({max_serialization_retries}) reached. "
-                            f"Moving records to fallback processing to prevent infinite"
-                            f" retry loop."
+                            f"Falling back to individual processing."
                         )
-                        # Fall back to individual create processing
-                        # instead of continuing to retry
-                        clean_error = str(e).strip().replace("\n", " ")
-                        progress.console.print(
-                            f"[yellow]WARN:[/] Batch {batch_number} failed `load` "
-                            f"('{clean_error}'). "
-                            f"Falling back to `create` for {len(current_chunk)} "
-                            f"records due to persistent serialization conflicts."
-                        )
+                        clean_error = error_str.strip().replace("\n", " ")
                         fallback_result = _create_batch_individually(
                             model,
                             current_chunk,
@@ -1517,11 +1494,19 @@ def _execute_load_batch(  # noqa: C901
                             fallback_result.get("failed_lines", [])
                         )
                         lines_to_process = lines_to_process[chunk_size:]
-                        serialization_retry_count = 0  # Reset counter for next batch
+                        serialization_retry_count = 0
+                        thread_state["retry_attempt"] = 0  # Reset on success
                         continue
                 continue
 
-            clean_error = str(e).strip().replace("\n", " ")
+            # For permanent/recoverable errors, get recommendation and fall back
+            recommendation = retry_lib.get_retry_recommendation(error_str)
+            log.debug(
+                f"Error category: {error_category.value}, "
+                f"recommendation: {recommendation['action']}"
+            )
+
+            clean_error = error_str.strip().replace("\n", " ")
             progress.console.print(
                 f"[yellow]WARN:[/] Batch {batch_number} failed `load` "
                 f"('{clean_error}'). "
@@ -1628,16 +1613,24 @@ def _run_threaded_pass(  # noqa: C901
     # Spawn threads with optional delay between batches to reduce server load.
     futures = set()
     batch_count = 0
+    throttle_ctrl = thread_state.get("throttle_controller")
     for num, data in batches:
         if rpc_thread.abort_flag:
             break
 
         # Add delay between batches (except before the first batch).
-        # Combine user-specified delay with adaptive throttle for server overload.
-        adaptive_throttle = thread_state.get("adaptive_throttle", 0.0)
-        total_delay = batch_delay + adaptive_throttle
-        if total_delay > 0 and batch_count > 0:
-            time.sleep(total_delay)
+        # Use throttle controller if available, otherwise use simple delay
+        if throttle_ctrl and batch_count > 0:
+            # Use health-aware throttle controller
+            delay = throttle_ctrl.get_delay()
+            if delay > 0:
+                time.sleep(delay)
+        elif batch_delay > 0 and batch_count > 0:
+            # Fallback to simple delay
+            adaptive_throttle = thread_state.get("adaptive_throttle", 0.0)
+            total_delay = batch_delay + adaptive_throttle
+            if total_delay > 0:
+                time.sleep(total_delay)
 
         args = (
             [thread_state, data, num]
@@ -1760,6 +1753,7 @@ def _orchestrate_pass_1(
     o2m: bool,
     split_by_cols: Optional[list[str]],
     force_create: bool = False,
+    throttle_controller: Optional[throttle_lib.ThrottleController] = None,
 ) -> dict[str, Any]:
     """Orchestrates the multi-threaded Pass 1 (load/create).
 
@@ -1831,6 +1825,7 @@ def _orchestrate_pass_1(
         "force_create": force_create,
         "progress": progress,
         "ignore_list": pass_1_ignore_list,
+        "throttle_controller": throttle_controller,
     }
 
     results, aborted = _run_threaded_pass(
@@ -2132,6 +2127,8 @@ def import_data(
     stream: bool = False,
     resume: bool = True,
     enable_checkpoint: bool = True,
+    skip_unchanged: bool = False,
+    adaptive_throttle: bool = False,
 ) -> tuple[bool, dict[str, int]]:
     """Orchestrates a robust, multi-threaded, two-pass import process.
 
@@ -2246,11 +2243,71 @@ def import_data(
         _show_error_panel(title, friendly_message)
         return False, {}
 
+    # Apply idempotent filtering if enabled (skip unchanged records)
+    idempotent_stats = None
+    if skip_unchanged and not can_stream and header and all_data:
+        log.info("Idempotent mode: checking for unchanged records...")
+        try:
+            # Get the ID field index
+            id_field = unique_id_field or "id"
+            if id_field in header:
+                id_index = header.index(id_field)
+                # Extract external IDs from the data
+                external_ids = [
+                    str(row[id_index]).strip()
+                    for row in all_data
+                    if id_index < len(row) and row[id_index]
+                ]
+
+                if external_ids:
+                    # Get fields to compare (exclude ignored fields)
+                    compare_fields = [
+                        h for h in header
+                        if h != id_field and h not in (ignore or [])
+                    ]
+
+                    # Fetch existing records from Odoo
+                    existing_records = idempotent_lib.get_existing_records(
+                        connection, model, external_ids, compare_fields
+                    )
+
+                    if existing_records:
+                        # Filter out unchanged rows
+                        original_count = len(all_data)
+                        all_data, idempotent_stats = idempotent_lib.filter_unchanged_rows(
+                            all_data, header, existing_records,
+                            id_field=id_field, compare_fields=compare_fields
+                        )
+                        record_count = len(all_data)
+
+                        log.info(
+                            f"Idempotent filter: {original_count} -> {record_count} "
+                            f"records (skipped {idempotent_stats.skipped_records} "
+                            f"unchanged)"
+                        )
+                    else:
+                        log.debug("No existing records found, all records are new")
+            else:
+                log.warning(
+                    f"ID field '{id_field}' not found in header, "
+                    "skipping idempotent filtering"
+                )
+        except Exception as e:
+            log.warning(f"Error during idempotent filtering, continuing: {e}")
+
     # For streaming mode, we defer fail file setup (header not known yet)
     # For standard mode, set up fail file now
     fail_writer, fail_handle = None, None
     if not can_stream and fail_file:
         fail_writer, fail_handle = _setup_fail_file(fail_file, header, separator, encoding)
+
+    # Create throttle controller for adaptive throttling
+    throttle_controller = None
+    if adaptive_throttle:
+        throttle_controller = throttle_lib.create_throttle_controller(
+            base_delay=batch_delay
+        )
+        log.info("Adaptive throttle enabled: will adjust delays based on server health")
 
     console = Console()
     progress = Progress(
@@ -2323,6 +2380,7 @@ def import_data(
                         o2m,
                         split_by_cols,
                         force_create,
+                        throttle_controller,
                     )
 
             # A pass is only successful if it wasn't aborted.
@@ -2389,6 +2447,27 @@ def import_data(
         "updated_relations": updates_made,
         "id_map": id_map,
     }
+
+    # Add idempotent stats if available
+    if idempotent_stats:
+        stats["skipped_unchanged"] = idempotent_stats.skipped_records
+        stats["new_records"] = idempotent_stats.new_records
+        stats["changed_records"] = idempotent_stats.changed_records
+
+    # Add throttle stats if available
+    if throttle_controller:
+        throttle_stats = throttle_controller.stats
+        stats["throttle_stats"] = {
+            "total_delay_added": throttle_stats.total_delay_added,
+            "batch_size_reductions": throttle_stats.batch_size_reductions,
+            "health_recoveries": throttle_stats.health_recoveries,
+            "avg_response_time": throttle_stats.avg_response_time,
+        }
+        if throttle_stats.total_delay_added > 0:
+            log.info(
+                f"Throttle summary: {throttle_stats.total_delay_added:.1f}s total delay, "
+                f"{throttle_stats.health_recoveries} recoveries"
+            )
 
     # --- Checkpoint: Clean up on success ---
     if overall_success and enable_checkpoint and session_id:

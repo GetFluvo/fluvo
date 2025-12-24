@@ -487,6 +487,20 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
     help="Validate data without importing. Checks required fields, "
     "selection values, and reference existence.",
 )
+@click.option(
+    "--skip-unchanged",
+    is_flag=True,
+    default=False,
+    help="Skip records that already exist with identical values. "
+    "Makes imports idempotent by comparing field values before importing.",
+)
+@click.option(
+    "--adaptive-throttle",
+    is_flag=True,
+    default=False,
+    help="Enable health-aware throttling that automatically adjusts batch sizes "
+    "and delays based on server response times. Helps prevent server overload.",
+)
 def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     """Runs the data import process."""
     # Handle dry-run mode early

@@ -199,17 +199,18 @@ class TestExecuteLoadBatch:
         assert mock_model.load.call_count == 6
         mock_create_individually.assert_not_called()
         mock_progress.console.print.assert_any_call(
-            "[yellow]WARN:[/] Batch 1 hit scalable error. "
-            "Reducing chunk size to 2 and retrying."
+            "[yellow]WARN:[/] Batch 1 hit transient error (out of memory). "
+            "Reducing chunk size to 2."
         )
         mock_progress.console.print.assert_any_call(
-            "[yellow]WARN:[/] Batch 1 hit scalable error. "
-            "Reducing chunk size to 1 and retrying."
+            "[yellow]WARN:[/] Batch 1 hit transient error (memory). "
+            "Reducing chunk size to 1."
         )
 
+    @patch("odoo_data_flow.import_threaded.time.sleep")
     @patch("odoo_data_flow.import_threaded._create_batch_individually")
     def test_batch_scales_down_on_gateway_error(
-        self, mock_create_individually: MagicMock
+        self, mock_create_individually: MagicMock, mock_sleep: MagicMock
     ) -> None:
         """Verify batch size is reduced on 502 gateway errors."""
         mock_model = MagicMock()
@@ -235,13 +236,16 @@ class TestExecuteLoadBatch:
         assert mock_model.load.call_count == 3
         mock_create_individually.assert_not_called()
         # Verify both adaptive throttle and batch reduction messages were shown
+        # Note: the server overload message has jitter in the delay, so check prefix
+        calls = [str(c) for c in mock_progress.console.print.call_args_list]
+        assert any(
+            "Server overload detected (502). Backing off for" in c
+            and "(attempt 1)" in c
+            for c in calls
+        ), f"Server overload message not found in: {calls}"
         mock_progress.console.print.assert_any_call(
-            "[yellow]WARN:[/] Server overload detected (502/503). "
-            "Adding 1.0s delay between batches."
-        )
-        mock_progress.console.print.assert_any_call(
-            "[yellow]WARN:[/] Batch 1 hit scalable error. "
-            "Reducing chunk size to 2 and retrying."
+            "[yellow]WARN:[/] Batch 1 hit transient error (502). "
+            "Reducing chunk size to 2."
         )
 
     @patch("odoo_data_flow.import_threaded._create_batch_individually")
@@ -1081,8 +1085,8 @@ class TestExecuteLoadBatchEdgeCases:
         assert result["success"] is True
         # Should reduce batch size on pool error
         mock_progress.console.print.assert_any_call(
-            "[yellow]WARN:[/] Batch 1 hit scalable error. "
-            "Reducing chunk size to 1 and retrying."
+            "[yellow]WARN:[/] Batch 1 hit transient error (connection pool). "
+            "Reducing chunk size to 1."
         )
 
     @patch("odoo_data_flow.import_threaded._create_batch_individually")
