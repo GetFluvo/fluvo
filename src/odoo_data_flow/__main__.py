@@ -16,6 +16,12 @@ from .lib.actions.module_manager import (
     run_module_uninstallation,
     run_update_module_list,
 )
+from .lib.actions.vies_manager import (
+    disable_vat_validation,
+    get_vat_validation_settings,
+    restore_vat_validation_settings,
+    run_vies_validation,
+)
 from .lib.validation import display_validation_results, validate_csv_data
 from .logging_config import log, setup_logging
 from .migrator import run_migration
@@ -284,6 +290,315 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
     """Runs the legacy Odoo v9 invoice processing workflow."""
     kwargs["config"] = connection_file
     run_invoice_v9_workflow(**kwargs)
+
+
+# --- VAT Validation Command Group ---
+@cli.group(name="vat")
+def vat_group() -> None:
+    """Commands for managing VAT/VIES validation settings."""
+    pass
+
+
+@vat_group.command(name="get-settings")
+@click.option(
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
+)
+@click.option(
+    "--company-ids",
+    default=None,
+    help="Comma-separated list of company IDs to check. If not specified, checks all.",
+)
+@click.option(
+    "--include-stdnum/--no-stdnum",
+    default=True,
+    help="Include stdnum validation settings. Default: True.",
+)
+def vat_get_settings_cmd(
+    connection_file: str,
+    company_ids: Optional[str],
+    include_stdnum: bool,
+) -> None:
+    """Get current VAT validation settings for all companies."""
+    from rich.console import Console
+    from rich.table import Table
+
+    company_id_list: Optional[list[int]] = None
+    if company_ids:
+        company_id_list = [int(c.strip()) for c in company_ids.split(",") if c.strip()]
+
+    settings = get_vat_validation_settings(
+        config=connection_file,
+        company_ids=company_id_list,
+        include_stdnum=include_stdnum,
+    )
+
+    if not settings:
+        Console().print("[red]Failed to retrieve VAT settings.[/red]")
+        return
+
+    console = Console()
+    table = Table(title="VAT Validation Settings")
+    table.add_column("Company ID", style="cyan")
+    table.add_column("VIES Check", style="green")
+
+    for company_id, vies_enabled in sorted(settings.vies_settings.items()):
+        table.add_row(str(company_id), "✓ Enabled" if vies_enabled else "✗ Disabled")
+
+    console.print(table)
+
+    if include_stdnum and settings.stdnum_settings:
+        console.print("\n[bold]stdnum Settings (ir.config_parameter):[/bold]")
+        for key, value in settings.stdnum_settings.items():
+            console.print(f"  {key}: {value}")
+
+
+@vat_group.command(name="disable")
+@click.option(
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
+)
+@click.option(
+    "--company-ids",
+    default=None,
+    help="Comma-separated list of company IDs. If not specified, disables for all.",
+)
+@click.option(
+    "--vies/--no-vies",
+    default=True,
+    help="Disable VIES online check. Default: True.",
+)
+@click.option(
+    "--stdnum/--no-stdnum",
+    default=True,
+    help="Disable stdnum format validation. Default: True.",
+)
+@click.option(
+    "--save-settings",
+    is_flag=True,
+    default=True,
+    help="Save current settings for later restoration. Default: True.",
+)
+@click.option(
+    "--output",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="Save settings to a JSON file for later restoration.",
+)
+def vat_disable_cmd(
+    connection_file: str,
+    company_ids: Optional[str],
+    vies: bool,
+    stdnum: bool,
+    save_settings: bool,
+    output: Optional[str],
+) -> None:
+    """Disable VAT validation (VIES and/or stdnum) for companies."""
+    import json
+
+    from rich.console import Console
+
+    console = Console()
+
+    company_id_list: Optional[list[int]] = None
+    if company_ids:
+        company_id_list = [int(c.strip()) for c in company_ids.split(",") if c.strip()]
+
+    settings = disable_vat_validation(
+        config=connection_file,
+        company_ids=company_id_list,
+        disable_vies=vies,
+        disable_stdnum=stdnum,
+        save_settings=save_settings,
+    )
+
+    if not settings:
+        console.print("[red]Failed to disable VAT validation.[/red]")
+        return
+
+    console.print("[green]VAT validation disabled successfully.[/green]")
+
+    if output:
+        settings_dict = {
+            "vies_settings": settings.vies_settings,
+            "stdnum_settings": settings.stdnum_settings,
+            "timestamp": settings.timestamp,
+        }
+        with open(output, "w") as f:
+            json.dump(settings_dict, f, indent=2)
+        console.print(f"Settings saved to: {output}")
+    elif save_settings:
+        console.print(
+            "[dim]Settings stored in memory. Use 'vat restore' to restore them.[/dim]"
+        )
+
+
+@vat_group.command(name="restore")
+@click.option(
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
+)
+@click.option(
+    "--input",
+    "input_file",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Restore settings from a JSON file saved by 'vat disable --output'.",
+)
+def vat_restore_cmd(
+    connection_file: str,
+    input_file: Optional[str],
+) -> None:
+    """Restore VAT validation settings to their original state."""
+    import json
+
+    from rich.console import Console
+
+    from .lib.actions.vies_manager import VatValidationSettings
+
+    console = Console()
+
+    if input_file:
+        with open(input_file) as f:
+            data = json.load(f)
+        # Convert string keys back to int for company IDs
+        vies_settings = {int(k): v for k, v in data.get("vies_settings", {}).items()}
+        settings = VatValidationSettings(
+            vies_settings=vies_settings,
+            stdnum_settings=data.get("stdnum_settings", {}),
+            timestamp=data.get("timestamp", 0),
+        )
+    else:
+        console.print(
+            "[red]No settings file provided. "
+            "Use --input to specify a settings file.[/red]"
+        )
+        console.print(
+            "[dim]Tip: Use 'vat disable --output settings.json' to save settings.[/dim]"
+        )
+        return
+
+    success = restore_vat_validation_settings(
+        config=connection_file,
+        settings=settings,
+    )
+
+    if success:
+        console.print("[green]VAT validation settings restored successfully.[/green]")
+    else:
+        console.print("[red]Failed to restore VAT validation settings.[/red]")
+
+
+@vat_group.command(name="validate")
+@click.option(
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
+)
+@click.option(
+    "--batch-size",
+    default=50,
+    type=int,
+    help="Number of records to validate per batch. Default: 50.",
+)
+@click.option(
+    "--delay",
+    default=1.0,
+    type=float,
+    help="Delay between batches in seconds. Default: 1.0.",
+)
+@click.option(
+    "--notify-users",
+    default=None,
+    help="Comma-separated list of user IDs to notify on failures.",
+)
+@click.option(
+    "--domain",
+    default=None,
+    help="Odoo domain filter as a list string. "
+    "Example: \"[('is_company', '=', True)]\"",
+)
+@click.option(
+    "--max-records",
+    default=None,
+    type=int,
+    help="Maximum number of records to validate.",
+)
+def vat_validate_cmd(
+    connection_file: str,
+    batch_size: int,
+    delay: float,
+    notify_users: Optional[str],
+    domain: Optional[str],
+    max_records: Optional[int],
+) -> None:
+    """Validate VAT numbers against VIES in batches with optional notifications."""
+    import ast
+
+    from rich.console import Console
+    from rich.table import Table
+
+    console = Console()
+
+    notify_user_ids: Optional[list[int]] = None
+    if notify_users:
+        notify_user_ids = [int(u.strip()) for u in notify_users.split(",") if u.strip()]
+
+    parsed_domain: Optional[list[Any]] = None
+    if domain:
+        try:
+            parsed_domain = ast.literal_eval(domain)
+        except (ValueError, SyntaxError) as e:
+            console.print(f"[red]Invalid domain format: {e}[/red]")
+            return
+
+    console.print(f"Starting VIES validation (batch size: {batch_size})...")
+
+    result = run_vies_validation(
+        config=connection_file,
+        batch_size=batch_size,
+        delay_between_batches=delay,
+        notify_user_ids=notify_user_ids,
+        domain=parsed_domain,
+        max_records=max_records,
+    )
+
+    # Display results
+    table = Table(title="VIES Validation Results")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+
+    table.add_row("Total Checked", str(result.total_checked))
+    table.add_row("Valid", str(result.valid_count))
+    table.add_row("Invalid", str(result.invalid_count))
+    table.add_row("Errors", str(result.error_count))
+
+    console.print(table)
+
+    if result.invalid_partners:
+        console.print("\n[bold red]Invalid VAT Numbers:[/bold red]")
+        for partner in result.invalid_partners[:20]:
+            console.print(
+                f"  Partner {partner['id']}: {partner['vat']} - {partner['name']}"
+            )
+        if len(result.invalid_partners) > 20:
+            console.print(f"  ... and {len(result.invalid_partners) - 20} more")
+
+    if result.error_partners:
+        console.print("\n[bold yellow]Errors:[/bold yellow]")
+        for partner in result.error_partners[:10]:
+            console.print(
+                f"  Partner {partner['id']}: {partner['vat']} - {partner['error']}"
+            )
+        if len(result.error_partners) > 10:
+            console.print(f"  ... and {len(result.error_partners) - 10} more")
 
 
 # --- Import Command ---
