@@ -80,6 +80,168 @@ odoo-data-flow module uninstall --modules stock,account
 
 ---
 
+## VAT Validation Management
+
+When importing large numbers of contacts into Odoo, VAT validation can cause significant issues:
+
+* **VIES (VAT Information Exchange System):** Online EU VAT validation that causes API timeouts with many contacts
+* **stdnum validation:** Python-based local format checking that adds CPU overhead
+
+The `vat` command group allows you to temporarily disable these validations during imports and restore them afterwards.
+
+### Checking Current Settings
+
+Before making changes, you can check the current VAT validation settings for all companies:
+
+```bash
+odoo-data-flow vat get-settings --connection-file conf/connection.conf
+```
+
+This displays a table showing which companies have VIES checking enabled.
+
+### Disabling VAT Validation for Import
+
+To disable VAT validation before a large contact import:
+
+```bash
+# Disable and save settings to a file for later restoration
+odoo-data-flow vat disable --connection-file conf/connection.conf --output vat_settings.json
+
+# Disable only VIES (keep stdnum validation)
+odoo-data-flow vat disable --connection-file conf/connection.conf --no-stdnum --output vat_settings.json
+
+# Disable for specific companies only
+odoo-data-flow vat disable --connection-file conf/connection.conf --company-ids 1,2,3 --output vat_settings.json
+```
+
+#### Command-Line Options
+
+| Option | Description |
+| :--- | :--- |
+| `--connection-file` | **(Required)** Path to your connection config file. |
+| `--company-ids` | Comma-separated list of company IDs. If omitted, applies to all companies. |
+| `--vies/--no-vies` | Enable/disable VIES online check. Default: disable. |
+| `--stdnum/--no-stdnum` | Enable/disable stdnum format validation. Default: disable. |
+| `--output` | Save original settings to a JSON file for later restoration. |
+
+### Restoring VAT Validation Settings
+
+After your import is complete, restore the original settings:
+
+```bash
+odoo-data-flow vat restore --connection-file conf/connection.conf --input vat_settings.json
+```
+
+### Batch VAT Validation
+
+After importing contacts with validation disabled, you can validate VAT numbers in controlled batches to avoid API timeouts:
+
+```bash
+# Validate all partners with VAT numbers
+odoo-data-flow vat validate --connection-file conf/connection.conf --batch-size 50 --delay 1.0
+
+# Validate with user notifications on failures
+odoo-data-flow vat validate --connection-file conf/connection.conf --notify-users 1,2
+
+# Validate only companies
+odoo-data-flow vat validate --connection-file conf/connection.conf \
+    --domain "[('is_company', '=', True)]" \
+    --max-records 1000
+```
+
+#### Command-Line Options
+
+| Option | Description |
+| :--- | :--- |
+| `--connection-file` | **(Required)** Path to your connection config file. |
+| `--batch-size` | Number of records per batch. Default: 50. |
+| `--delay` | Seconds to wait between batches. Default: 1.0. |
+| `--notify-users` | Comma-separated user IDs to notify on failures. |
+| `--domain` | Odoo domain filter (e.g., `"[('is_company', '=', True)]"`). |
+| `--max-records` | Maximum number of records to validate. |
+
+### Complete Import Workflow Example
+
+Here's a typical workflow for importing contacts with VAT validation management:
+
+```bash
+# 1. Save current settings and disable validation
+odoo-data-flow vat disable --connection-file conf/connection.conf --output vat_settings.json
+
+# 2. Run the contact import
+odoo-data-flow import --connection-file conf/connection.conf \
+    --file contacts.csv \
+    --model res.partner \
+    --worker 4 \
+    --size 500
+
+# 3. Restore VAT validation settings
+odoo-data-flow vat restore --connection-file conf/connection.conf --input vat_settings.json
+
+# 4. Validate VAT numbers in batches with notifications
+odoo-data-flow vat validate --connection-file conf/connection.conf \
+    --batch-size 50 \
+    --delay 2.0 \
+    --notify-users 1
+```
+
+### Programmatic Usage
+
+You can also use these functions programmatically in Python:
+
+```python
+from odoo_data_flow.lib.actions.vies_manager import (
+    disable_vat_validation,
+    restore_vat_validation_settings,
+    run_import_with_vat_validation_disabled,
+)
+
+# Option 1: Manual control
+settings = disable_vat_validation("conf/connection.conf")
+# ... run your import ...
+restore_vat_validation_settings("conf/connection.conf", settings)
+
+# Option 2: Context manager style
+from odoo_data_flow.importer import run_import
+
+result = run_import_with_vat_validation_disabled(
+    config="conf/connection.conf",
+    import_func=run_import,
+    import_kwargs={
+        "config": "conf/connection.conf",
+        "filename": "contacts.csv",
+        "model": "res.partner",
+        # ... other import options
+    },
+)
+```
+
+### Custom VAT Validators
+
+For high-performance VAT validation, you can replace the default Python validator with a custom implementation (e.g., Rust-based via PyO3):
+
+```python
+from odoo_data_flow.lib.actions.vies_manager import (
+    set_custom_vat_validator,
+    validate_vat_local,
+)
+
+# Define a custom validator function
+def my_rust_validator(vat: str) -> tuple[bool, str | None]:
+    # Call your Rust library here
+    from my_rust_vat_lib import validate
+    result = validate(vat)
+    return result.is_valid, result.error_message
+
+# Register it
+set_custom_vat_validator(my_rust_validator)
+
+# Now validate_vat_local() will use your custom validator
+is_valid, error = validate_vat_local("BE0123456789")
+```
+
+---
+
 ## Data Processing Workflows
 
 This command group is for running multi-step processes on records that are already in the database.
