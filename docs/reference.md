@@ -25,9 +25,22 @@ This module contains the main `Processor` class used for data transformation.
 ## Mapper Functions (`lib.mapper`)
 
 This module contains all the built-in `mapper` functions for data transformation.
+These are row-by-row functions that work with Python dictionaries.
 
 ```{eval-rst}
 .. automodule:: odoo_data_flow.lib.mapper
+   :members:
+   :undoc-members:
+```
+
+## Expression-Based Mappers (`lib.expr`)
+
+This module provides high-performance Polars expression-based mappers.
+These return `pl.Expr` objects that leverage Polars' vectorized execution engine
+for 10-100x speedups compared to the row-by-row `mapper` functions.
+
+```{eval-rst}
+.. automodule:: odoo_data_flow.lib.expr
    :members:
    :undoc-members:
 ```
