@@ -744,12 +744,12 @@ def reference_check(
     # Get CSV header
     csv_header = _get_csv_header(filename, separator)
     if not csv_header:
-        return check_refs != "fail"
+        return bool(check_refs != "fail")
 
     # Get Odoo fields
     odoo_fields = _get_odoo_fields(config, model)
     if not odoo_fields:
-        return check_refs != "fail"
+        return bool(check_refs != "fail")
 
     # Extract all references from CSV
     references = _extract_references_from_csv(
@@ -768,7 +768,7 @@ def reference_check(
             connection = conf_lib.get_connection_from_config(config)
     except Exception as e:
         log.warning(f"Could not connect to check references: {e}")
-        return check_refs != "fail"
+        return bool(check_refs != "fail")
 
     # Check which references exist
     missing = _check_references_exist(connection, references)

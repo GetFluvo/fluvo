@@ -289,14 +289,14 @@ def _check_reference_exists(connection: Any, model: str, ref_value: str) -> bool
             count = ir_model_data.search_count(
                 [("module", "=", module), ("name", "=", name), ("model", "=", model)]
             )
-            return count > 0
+            return bool(count > 0)
 
         # Check if it's a database ID
         try:
             db_id = int(ref_value)
             model_obj = connection.get_model(model)
             count = model_obj.search_count([("id", "=", db_id)])
-            return count > 0
+            return bool(count > 0)
         except ValueError:
             # Not a valid ID format
             return False

@@ -139,9 +139,9 @@ def get_existing_records(
         res_id_to_ext_id = {v: k for k, v in ext_id_to_res_id.items()}
 
         for record in records:
-            ext_id = res_id_to_ext_id.get(record["id"])
-            if ext_id:
-                result[ext_id] = record
+            record_ext_id = res_id_to_ext_id.get(record["id"])
+            if record_ext_id is not None:
+                result[record_ext_id] = record
 
     except Exception as e:
         log.warning(f"Error fetching existing records: {e}")
