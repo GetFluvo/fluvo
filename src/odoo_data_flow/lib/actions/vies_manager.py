@@ -34,9 +34,34 @@ from ...logging_config import log
 
 # EU country codes for VAT validation
 EU_COUNTRY_CODES = {
-    "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "EL", "ES",
-    "FI", "FR", "HR", "HU", "IE", "IT", "LT", "LU", "LV", "MT",
-    "NL", "PL", "PT", "RO", "SE", "SI", "SK", "XI",  # XI = Northern Ireland
+    "AT",
+    "BE",
+    "BG",
+    "CY",
+    "CZ",
+    "DE",
+    "DK",
+    "EE",
+    "EL",
+    "ES",
+    "FI",
+    "FR",
+    "HR",
+    "HU",
+    "IE",
+    "IT",
+    "LT",
+    "LU",
+    "LV",
+    "MT",
+    "NL",
+    "PL",
+    "PT",
+    "RO",
+    "SE",
+    "SI",
+    "SK",
+    "XI",  # XI = Northern Ireland
 }
 
 # Basic VAT format patterns per country (simplified)
@@ -300,7 +325,7 @@ class ViesValidationResult:
     error_partners: list[dict[str, Any]] = field(default_factory=list)
 
 
-def get_vat_validation_settings(
+def get_vat_validation_settings(  # noqa: C901
     config: Union[str, dict[str, Any]],
     company_ids: Optional[list[int]] = None,
     include_stdnum: bool = True,
@@ -363,8 +388,8 @@ def get_vat_validation_settings(
                         if value is not None:
                             settings.stdnum_settings[param_name] = str(value)
                             log.debug(f"System param {param_name} = {value}")
-                    except Exception:
-                        pass  # Parameter doesn't exist
+                    except Exception as e:
+                        log.debug(f"Parameter {param_name} not found: {e}")
             except Exception as e:
                 log.debug(f"Could not get stdnum settings: {e}")
 
@@ -379,7 +404,7 @@ def get_vat_validation_settings(
 get_vies_settings = get_vat_validation_settings
 
 
-def disable_vat_validation(
+def disable_vat_validation(  # noqa: C901
     config: Union[str, dict[str, Any]],
     company_ids: Optional[list[int]] = None,
     disable_vies: bool = True,
@@ -478,13 +503,15 @@ def disable_vies_check(
 ) -> Optional[VatValidationSettings]:
     """Disable VIES check for all or specified companies (legacy function)."""
     return disable_vat_validation(
-        config, company_ids,
-        disable_vies=True, disable_stdnum=False,
-        save_settings=save_settings
+        config,
+        company_ids,
+        disable_vies=True,
+        disable_stdnum=False,
+        save_settings=save_settings,
     )
 
 
-def restore_vat_validation_settings(
+def restore_vat_validation_settings(  # noqa: C901
     config: Union[str, dict[str, Any]],
     settings: VatValidationSettings,
 ) -> bool:
@@ -546,9 +573,7 @@ def restore_vat_validation_settings(
                     except Exception as e:
                         log.error(f"Failed to restore {param_name}: {e}")
                         success = False
-                log.info(
-                    f"Restored {len(settings.stdnum_settings)} stdnum parameters"
-                )
+                log.info(f"Restored {len(settings.stdnum_settings)} stdnum parameters")
             except Exception as e:
                 log.warning(f"Could not restore stdnum settings: {e}")
                 success = False
@@ -564,7 +589,7 @@ def restore_vat_validation_settings(
 restore_vies_settings = restore_vat_validation_settings
 
 
-def run_vies_validation(
+def run_vies_validation(  # noqa: C901
     config: Union[str, dict[str, Any]],
     batch_size: int = 50,
     delay_between_batches: float = 1.0,
@@ -661,21 +686,25 @@ def run_vies_validation(
                         result.valid_count += 1
                     else:
                         result.invalid_count += 1
-                        result.invalid_partners.append({
-                            "id": partner["id"],
-                            "name": partner["name"],
-                            "vat": vat,
-                            "user_id": partner.get("user_id"),
-                        })
+                        result.invalid_partners.append(
+                            {
+                                "id": partner["id"],
+                                "name": partner["name"],
+                                "vat": vat,
+                                "user_id": partner.get("user_id"),
+                            }
+                        )
 
                 except Exception as e:
                     result.error_count += 1
-                    result.error_partners.append({
-                        "id": partner["id"],
-                        "name": partner["name"],
-                        "vat": vat,
-                        "error": str(e),
-                    })
+                    result.error_partners.append(
+                        {
+                            "id": partner["id"],
+                            "name": partner["name"],
+                            "vat": vat,
+                            "error": str(e),
+                        }
+                    )
                     log.debug(f"VIES validation error for {partner['name']}: {e}")
 
             offset += current_batch_size
@@ -727,10 +756,10 @@ def _validate_vat_vies(
         try:
             result = partner_obj.vies_vat_check(vat)
             if isinstance(result, dict):
-                return result.get("valid", False)
+                return bool(result.get("valid", False))
             return bool(result)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"vies_vat_check not available: {e}")
 
         # Fallback: Try using the simple_vat_check or check_vat methods
         try:
@@ -739,8 +768,8 @@ def _validate_vat_vies(
             country_id = country_id_value[0] if country_id_value else False
             result = partner_obj.simple_vat_check(country_id, vat)
             return bool(result)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"simple_vat_check not available: {e}")
 
         # Last resort: Try the base.vat module's check
         try:
@@ -790,14 +819,18 @@ def _send_vies_notifications(
         # Create notification for each user
         for user_id in notify_user_ids:
             try:
-                mail_obj.create({
-                    "message_type": "notification",
-                    "subtype_id": 1,  # Note subtype
-                    "body": message_body,
-                    "partner_ids": [(4, user_id)],  # Link to user's partner
-                    "model": "res.partner",
-                    "res_id": invalid_partners[0]["id"] if invalid_partners else False,
-                })
+                mail_obj.create(
+                    {
+                        "message_type": "notification",
+                        "subtype_id": 1,  # Note subtype
+                        "body": message_body,
+                        "partner_ids": [(4, user_id)],  # Link to user's partner
+                        "model": "res.partner",
+                        "res_id": invalid_partners[0]["id"]
+                        if invalid_partners
+                        else False,
+                    }
+                )
                 log.info(f"Sent VIES notification to user ID {user_id}")
             except Exception as e:
                 log.warning(f"Failed to notify user ID {user_id}: {e}")
@@ -849,10 +882,11 @@ def run_import_with_vat_validation_disabled(
 
     # Step 1: Disable validation and save original settings
     original_settings = disable_vat_validation(
-        config, company_ids,
+        config,
+        company_ids,
         disable_vies=disable_vies,
         disable_stdnum=disable_stdnum,
-        save_settings=True
+        save_settings=True,
     )
 
     if original_settings is None:

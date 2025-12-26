@@ -196,9 +196,7 @@ class TestReferenceCheck:
     @patch("odoo_data_flow.lib.preflight._get_csv_header")
     @patch("odoo_data_flow.lib.preflight._get_odoo_fields")
     @patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config")
-    def test_skip_mode_returns_true(
-        self, mock_conn, mock_fields, mock_header
-    ):
+    def test_skip_mode_returns_true(self, mock_conn, mock_fields, mock_header):
         """Test that skip mode immediately returns True."""
         from odoo_data_flow.enums import PreflightMode
 
@@ -265,12 +263,8 @@ class TestReferenceCheck:
         mock_fields.return_value = {
             "partner_id": {"type": "many2one", "relation": "res.partner"}
         }
-        mock_extract.return_value = {
-            "res.partner": {"partner_id/id": {"base.missing"}}
-        }
-        mock_check.return_value = {
-            "res.partner": {"partner_id/id": {"base.missing"}}
-        }
+        mock_extract.return_value = {"res.partner": {"partner_id/id": {"base.missing"}}}
+        mock_check.return_value = {"res.partner": {"partner_id/id": {"base.missing"}}}
 
         result = preflight.reference_check(
             preflight_mode=PreflightMode.NORMAL,
@@ -305,12 +299,8 @@ class TestReferenceCheck:
         mock_fields.return_value = {
             "partner_id": {"type": "many2one", "relation": "res.partner"}
         }
-        mock_extract.return_value = {
-            "res.partner": {"partner_id/id": {"base.missing"}}
-        }
-        mock_check.return_value = {
-            "res.partner": {"partner_id/id": {"base.missing"}}
-        }
+        mock_extract.return_value = {"res.partner": {"partner_id/id": {"base.missing"}}}
+        mock_check.return_value = {"res.partner": {"partner_id/id": {"base.missing"}}}
 
         result = preflight.reference_check(
             preflight_mode=PreflightMode.NORMAL,

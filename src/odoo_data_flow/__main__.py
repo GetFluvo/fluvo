@@ -920,8 +920,10 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
                 # Skip is the default behavior (row goes to fail file)
                 log.info(f"Field '{field}': will skip row if reference not found")
             else:
-                log.warning(f"Unknown action '{action}' for field '{field}'. "
-                           "Use 'create', 'skip', or 'empty'")
+                log.warning(
+                    f"Unknown action '{action}' for field '{field}'. "
+                    "Use 'create', 'skip', or 'empty'"
+                )
 
     # Handle --auto-create-refs option
     auto_create_refs = kwargs.pop("auto_create_refs", False)

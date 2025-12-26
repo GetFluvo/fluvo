@@ -185,8 +185,8 @@ def _count_csv_rows(file_path: str, separator: str, encoding: str, skip: int) ->
                 next(reader)
             for _ in reader:
                 count += 1
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug(f"Error counting lines: {e}")
     return count
 
 
@@ -845,10 +845,13 @@ def _create_xmlid_entry(
         ir_model_data = model.browse().env["ir.model.data"]
 
         # Check if entry already exists
-        existing = ir_model_data.search([
-            ("module", "=", module),
-            ("name", "=", name),
-        ], limit=1)
+        existing = ir_model_data.search(
+            [
+                ("module", "=", module),
+                ("name", "=", name),
+            ],
+            limit=1,
+        )
 
         if existing:
             # Update existing entry if it points to a different record
@@ -861,12 +864,14 @@ def _create_xmlid_entry(
             return True
 
         # Create new ir.model.data entry
-        ir_model_data.create({
-            "module": module,
-            "name": name,
-            "model": model_name,
-            "res_id": res_id,
-        })
+        ir_model_data.create(
+            {
+                "module": module,
+                "name": name,
+                "model": model_name,
+                "res_id": res_id,
+            }
+        )
         log.debug(
             f"Created ir.model.data entry: {module}.{name} -> {model_name}({res_id})"
         )
@@ -1052,8 +1057,13 @@ def _execute_load_batch(  # noqa: C901
             f"Batch {batch_number}: Fail mode active, using `create` method."
         )
         result = _create_batch_individually(
-            model, batch_lines, batch_header, uid_index, context,
-            ignore_list, model_name
+            model,
+            batch_lines,
+            batch_header,
+            uid_index,
+            context,
+            ignore_list,
+            model_name,
         )
         result["success"] = bool(result.get("id_map"))
         return result
@@ -1082,9 +1092,7 @@ def _execute_load_batch(  # noqa: C901
             else:
                 ignore_set.add(field)
         indices_to_keep = [
-            i
-            for i, h in enumerate(batch_header)
-            if h.split("/")[0] not in ignore_set
+            i for i, h in enumerate(batch_header) if h.split("/")[0] not in ignore_set
         ]
         filtered_header = [batch_header[i] for i in indices_to_keep]
         max_index_needed = max(indices_to_keep) if indices_to_keep else 0
@@ -1434,7 +1442,10 @@ def _execute_load_batch(  # noqa: C901
 
             # Detect server overload for adaptive throttling
             is_server_overload = error_pattern in (
-                "502", "503", "service unavailable", "bad gateway"
+                "502",
+                "503",
+                "service unavailable",
+                "bad gateway",
             )
 
             if is_server_overload:
@@ -1785,6 +1796,8 @@ def _orchestrate_pass_1(
         force_create (bool): If True, bypasses the `load` method and uses
             the `create` method directly. Used for fail mode.
         split_by_cols: The column names to group records by to avoid concurrent updates.
+        throttle_controller: Optional controller for adaptive throttling based
+            on server response times.
 
     Returns:
         dict[str, Any]: A dictionary containing the results of the pass,
@@ -1835,7 +1848,7 @@ def _orchestrate_pass_1(
     return results
 
 
-def _orchestrate_streaming_pass_1(
+def _orchestrate_streaming_pass_1(  # noqa: C901
     progress: Progress,
     model_obj: Any,
     model_name: str,
@@ -2106,7 +2119,7 @@ def _orchestrate_pass_2(
     return not aborted and not failed_writes, successful_writes
 
 
-def import_data(
+def import_data(  # noqa: C901
     config: Union[str, dict[str, Any]],
     model: str,
     unique_id_field: str,
@@ -2172,6 +2185,14 @@ def import_data(
         stream (bool): If True, uses streaming mode to process the CSV file
             without loading it entirely into memory. Ideal for large files.
             Not compatible with o2m, split_by_cols, or deferred_fields.
+        resume (bool): If True and a checkpoint exists, resume from the last
+            successful batch instead of starting over.
+        enable_checkpoint (bool): If True, saves progress checkpoints to allow
+            resuming interrupted imports.
+        skip_unchanged (bool): If True, skips records that haven't changed
+            since the last import based on content hash.
+        adaptive_throttle (bool): If True, enables health-aware throttling that
+            adjusts batch size and delays based on server response times.
 
     Returns:
         tuple[bool, int]: True if the entire import process completed without any
@@ -2192,13 +2213,16 @@ def import_data(
         if resume:
             checkpoint = ckpt.load_checkpoint(file_csv, config, model)
             if checkpoint:
+                batch_num = checkpoint.last_completed_batch + 1
                 log.info(
                     f"Resuming from checkpoint: {checkpoint.records_processed} records "
-                    f"already processed, starting from batch {checkpoint.last_completed_batch + 1}"
+                    f"already processed, starting from batch {batch_num}"
                 )
 
     # Determine if streaming mode is possible
-    can_stream = stream and not o2m and not split_by_cols and not deferred and not force_create
+    can_stream = (
+        stream and not o2m and not split_by_cols and not deferred and not force_create
+    )
     if stream and not can_stream:
         log.warning(
             "Streaming mode requested but not compatible with current options. "
@@ -2262,8 +2286,7 @@ def import_data(
                 if external_ids:
                     # Get fields to compare (exclude ignored fields)
                     compare_fields = [
-                        h for h in header
-                        if h != id_field and h not in (ignore or [])
+                        h for h in header if h != id_field and h not in (ignore or [])
                     ]
 
                     # Fetch existing records from Odoo
@@ -2274,9 +2297,14 @@ def import_data(
                     if existing_records:
                         # Filter out unchanged rows
                         original_count = len(all_data)
-                        all_data, idempotent_stats = idempotent_lib.filter_unchanged_rows(
-                            all_data, header, existing_records,
-                            id_field=id_field, compare_fields=compare_fields
+                        all_data, idempotent_stats = (
+                            idempotent_lib.filter_unchanged_rows(
+                                all_data,
+                                header,
+                                existing_records,
+                                id_field=id_field,
+                                compare_fields=compare_fields,
+                            )
                         )
                         record_count = len(all_data)
 
@@ -2298,8 +2326,10 @@ def import_data(
     # For streaming mode, we defer fail file setup (header not known yet)
     # For standard mode, set up fail file now
     fail_writer, fail_handle = None, None
-    if not can_stream and fail_file:
-        fail_writer, fail_handle = _setup_fail_file(fail_file, header, separator, encoding)
+    if not can_stream and fail_file and header is not None:
+        fail_writer, fail_handle = _setup_fail_file(
+            fail_file, header, separator, encoding
+        )
 
     # Create throttle controller for adaptive throttling
     throttle_controller = None
@@ -2360,7 +2390,7 @@ def import_data(
                         "success": True,
                         "id_map": {k: int(v) for k, v in checkpoint.id_map.items()},
                     }
-                else:
+                elif header is not None and all_data is not None:
                     # Standard mode - use pre-loaded data
                     pass_1_results = _orchestrate_pass_1(
                         progress,
@@ -2419,7 +2449,7 @@ def import_data(
                 pass_2_successful = True  # Assume success if no Pass 2 is needed.
                 updates_made = 0
 
-                if deferred:
+                if deferred and header is not None and all_data is not None:
                     pass_2_successful, updates_made = _orchestrate_pass_2(
                         progress,
                         model_obj,
@@ -2464,10 +2494,9 @@ def import_data(
             "avg_response_time": throttle_stats.avg_response_time,
         }
         if throttle_stats.total_delay_added > 0:
-            log.info(
-                f"Throttle summary: {throttle_stats.total_delay_added:.1f}s total delay, "
-                f"{throttle_stats.health_recoveries} recoveries"
-            )
+            delay = throttle_stats.total_delay_added
+            recoveries = throttle_stats.health_recoveries
+            log.info(f"Throttle summary: {delay:.1f}s delay, {recoveries} recoveries")
 
     # --- Checkpoint: Clean up on success ---
     if overall_success and enable_checkpoint and session_id:

@@ -672,15 +672,19 @@ class TestXmlIdCreation:
         mock_ir_model_data.search.return_value = []  # No existing entry
         mock_model.browse.return_value.env = {"ir.model.data": mock_ir_model_data}
 
-        result = _create_xmlid_entry(mock_model, "my_module.partner_001", 42, "res.partner")
+        result = _create_xmlid_entry(
+            mock_model, "my_module.partner_001", 42, "res.partner"
+        )
 
         assert result is True
-        mock_ir_model_data.create.assert_called_once_with({
-            "module": "my_module",
-            "name": "partner_001",
-            "model": "res.partner",
-            "res_id": 42,
-        })
+        mock_ir_model_data.create.assert_called_once_with(
+            {
+                "module": "my_module",
+                "name": "partner_001",
+                "model": "res.partner",
+                "res_id": 42,
+            }
+        )
 
     def test_create_xmlid_entry_without_module_prefix(self) -> None:
         """Test XML ID creation without module prefix (uses __import__)."""
@@ -694,12 +698,14 @@ class TestXmlIdCreation:
         result = _create_xmlid_entry(mock_model, "PARTNER_001", 42, "res.partner")
 
         assert result is True
-        mock_ir_model_data.create.assert_called_once_with({
-            "module": "__import__",
-            "name": "PARTNER_001",
-            "model": "res.partner",
-            "res_id": 42,
-        })
+        mock_ir_model_data.create.assert_called_once_with(
+            {
+                "module": "__import__",
+                "name": "PARTNER_001",
+                "model": "res.partner",
+                "res_id": 42,
+            }
+        )
 
     def test_create_xmlid_entry_existing_entry_same_res_id(self) -> None:
         """Test that existing entries with same res_id are not updated."""
@@ -712,7 +718,9 @@ class TestXmlIdCreation:
         mock_ir_model_data.search.return_value = mock_existing
         mock_model.browse.return_value.env = {"ir.model.data": mock_ir_model_data}
 
-        result = _create_xmlid_entry(mock_model, "my_module.partner_001", 42, "res.partner")
+        result = _create_xmlid_entry(
+            mock_model, "my_module.partner_001", 42, "res.partner"
+        )
 
         assert result is True
         mock_ir_model_data.create.assert_not_called()
@@ -729,11 +737,15 @@ class TestXmlIdCreation:
         mock_ir_model_data.search.return_value = mock_existing
         mock_model.browse.return_value.env = {"ir.model.data": mock_ir_model_data}
 
-        result = _create_xmlid_entry(mock_model, "my_module.partner_001", 42, "res.partner")
+        result = _create_xmlid_entry(
+            mock_model, "my_module.partner_001", 42, "res.partner"
+        )
 
         assert result is True
         mock_ir_model_data.create.assert_not_called()
-        mock_existing.write.assert_called_once_with({"res_id": 42, "model": "res.partner"})
+        mock_existing.write.assert_called_once_with(
+            {"res_id": 42, "model": "res.partner"}
+        )
 
     def test_create_xmlid_entry_handles_exception(self) -> None:
         """Test that exceptions during XML ID creation are handled gracefully."""
@@ -742,7 +754,9 @@ class TestXmlIdCreation:
         mock_model = MagicMock()
         mock_model.browse.side_effect = Exception("Connection error")
 
-        result = _create_xmlid_entry(mock_model, "my_module.partner_001", 42, "res.partner")
+        result = _create_xmlid_entry(
+            mock_model, "my_module.partner_001", 42, "res.partner"
+        )
 
         assert result is False
 
@@ -951,7 +965,7 @@ class TestFilterIgnoredColumns:
             ["2", "Bob"],  # Malformed - too few columns
             ["3", "Charlie", "25", "LA"],  # Valid
         ]
-        new_header, new_data = _filter_ignored_columns(["age"], header, data)
+        _new_header, new_data = _filter_ignored_columns(["age"], header, data)
         # Malformed row should be skipped
         assert len(new_data) == 2
         assert new_data[0][0] == "1"
@@ -961,7 +975,7 @@ class TestFilterIgnoredColumns:
         """Test that parent_id/id is filtered when parent_id is ignored."""
         header = ["id", "name", "parent_id/id"]
         data = [["1", "A", "p1"]]
-        new_header, new_data = _filter_ignored_columns(["parent_id"], header, data)
+        new_header, _new_data = _filter_ignored_columns(["parent_id"], header, data)
         assert "parent_id/id" not in new_header
         assert new_header == ["id", "name"]
 
@@ -1267,11 +1281,15 @@ class TestStreamingCSV:
     def test_stream_csv_batches_basic(self, tmp_path: Path) -> None:
         """Test basic streaming batch generation."""
         source_file = tmp_path / "source.csv"
-        source_file.write_text("id,name,age\nrec1,A,25\nrec2,B,30\nrec3,C,35\nrec4,D,40")
+        source_file.write_text(
+            "id,name,age\nrec1,A,25\nrec2,B,30\nrec3,C,35\nrec4,D,40"
+        )
 
-        batches = list(_stream_csv_batches(
-            str(source_file), ",", "utf-8", skip=0, batch_size=2, ignore=[]
-        ))
+        batches = list(
+            _stream_csv_batches(
+                str(source_file), ",", "utf-8", skip=0, batch_size=2, ignore=[]
+            )
+        )
 
         assert len(batches) == 2
         # First batch
@@ -1293,9 +1311,11 @@ class TestStreamingCSV:
         source_file = tmp_path / "source.csv"
         source_file.write_text("id,name,age,city\nrec1,A,25,NYC\nrec2,B,30,LA")
 
-        batches = list(_stream_csv_batches(
-            str(source_file), ",", "utf-8", skip=0, batch_size=10, ignore=["age"]
-        ))
+        batches = list(
+            _stream_csv_batches(
+                str(source_file), ",", "utf-8", skip=0, batch_size=10, ignore=["age"]
+            )
+        )
 
         assert len(batches) == 1
         header, _, data = batches[0]
@@ -1308,9 +1328,11 @@ class TestStreamingCSV:
         source_file = tmp_path / "source.csv"
         source_file.write_text("id,name\nskip1,A\nskip2,B\nkeep1,C\nkeep2,D")
 
-        batches = list(_stream_csv_batches(
-            str(source_file), ",", "utf-8", skip=2, batch_size=10, ignore=[]
-        ))
+        batches = list(
+            _stream_csv_batches(
+                str(source_file), ",", "utf-8", skip=2, batch_size=10, ignore=[]
+            )
+        )
 
         assert len(batches) == 1
         _, _, data = batches[0]
@@ -1323,18 +1345,22 @@ class TestStreamingCSV:
         source_file.write_text("name,age\nA,25\nB,30")
 
         with pytest.raises(ValueError, match="must contain an 'id' column"):
-            list(_stream_csv_batches(
-                str(source_file), ",", "utf-8", skip=0, batch_size=10, ignore=[]
-            ))
+            list(
+                _stream_csv_batches(
+                    str(source_file), ",", "utf-8", skip=0, batch_size=10, ignore=[]
+                )
+            )
 
     def test_stream_csv_batches_semicolon_separator(self, tmp_path: Path) -> None:
         """Test streaming with semicolon separator."""
         source_file = tmp_path / "source.csv"
         source_file.write_text("id;name;age\nrec1;A;25\nrec2;B;30")
 
-        batches = list(_stream_csv_batches(
-            str(source_file), ";", "utf-8", skip=0, batch_size=10, ignore=[]
-        ))
+        batches = list(
+            _stream_csv_batches(
+                str(source_file), ";", "utf-8", skip=0, batch_size=10, ignore=[]
+            )
+        )
 
         assert len(batches) == 1
         header, _, data = batches[0]
@@ -1346,9 +1372,11 @@ class TestStreamingCSV:
         source_file = tmp_path / "source.csv"
         source_file.write_text("id,name\nrec1,A\nrec2,B\nrec3,C\nrec4,D")
 
-        batches = list(_stream_csv_batches(
-            str(source_file), ",", "utf-8", skip=0, batch_size=2, ignore=[]
-        ))
+        batches = list(
+            _stream_csv_batches(
+                str(source_file), ",", "utf-8", skip=0, batch_size=2, ignore=[]
+            )
+        )
 
         assert len(batches) == 2
         assert len(batches[0][2]) == 2
@@ -1400,7 +1428,10 @@ class TestImportDataStreamingMode:
         mock_read_file: MagicMock,
     ) -> None:
         """Test streaming falls back when deferred_fields are present."""
-        mock_read_file.return_value = (["id", "name", "parent_id"], [["xml_a", "A", ""]])
+        mock_read_file.return_value = (
+            ["id", "name", "parent_id"],
+            [["xml_a", "A", ""]],
+        )
         mock_run_pass.return_value = (
             {"id_map": {"xml_a": 101}, "failed_lines": []},
             False,
@@ -1443,7 +1474,7 @@ class TestImportDataStreamingMode:
             "failed_lines": [],
         }
 
-        result, stats = import_data(
+        result, _stats = import_data(
             config="dummy.conf",
             model="res.partner",
             unique_id_field="id",

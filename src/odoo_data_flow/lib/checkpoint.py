@@ -40,6 +40,7 @@ class CheckpointData:
     timestamp: str = ""
 
     def __post_init__(self) -> None:
+        """Set default timestamp if not provided."""
         if not self.timestamp:
             self.timestamp = datetime.now().isoformat()
 

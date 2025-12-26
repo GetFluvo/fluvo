@@ -7,7 +7,7 @@ adjust batch sizes and delays to prevent overloading the Odoo server.
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from ..logging_config import log
 
@@ -100,12 +100,8 @@ class ThrottleController:
         """
         self.stats.total_requests += 1
         self.stats.total_response_time += response_time
-        self.stats.min_response_time = min(
-            self.stats.min_response_time, response_time
-        )
-        self.stats.max_response_time = max(
-            self.stats.max_response_time, response_time
-        )
+        self.stats.min_response_time = min(self.stats.min_response_time, response_time)
+        self.stats.max_response_time = max(self.stats.max_response_time, response_time)
 
         # Add to rolling window
         self.response_times.append(response_time)
@@ -211,7 +207,7 @@ class ThrottleController:
             self.stats.total_delay_added += self.current_delay
             time.sleep(self.current_delay)
 
-    def get_health_status(self) -> dict:
+    def get_health_status(self) -> dict[str, Any]:
         """Get current health status as a dict.
 
         Returns:

@@ -243,7 +243,11 @@ class TestQueryRelationInfoFromOdoo:
         """Test successful query from ir.model.relation."""
         mock_relation_model = MagicMock()
         mock_relation_model.search_read.return_value = [
-            {"name": "partner_category_rel", "model": "res.partner", "comodel": "res.partner.category"}
+            {
+                "name": "partner_category_rel",
+                "model": "res.partner",
+                "comodel": "res.partner.category",
+            }
         ]
         mock_get_conn.return_value.get_model.return_value = mock_relation_model
 
@@ -269,7 +273,9 @@ class TestQueryRelationInfoFromOdoo:
         assert result is None
 
     @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
-    def test_query_relation_info_invalid_field_error(self, mock_get_conn: MagicMock) -> None:
+    def test_query_relation_info_invalid_field_error(
+        self, mock_get_conn: MagicMock
+    ) -> None:
         """Test handling of Invalid field ValueError."""
         mock_relation_model = MagicMock()
         mock_relation_model.search_read.side_effect = ValueError(
@@ -284,7 +290,9 @@ class TestQueryRelationInfoFromOdoo:
         assert result is None
 
     @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
-    def test_query_relation_info_other_value_error(self, mock_get_conn: MagicMock) -> None:
+    def test_query_relation_info_other_value_error(
+        self, mock_get_conn: MagicMock
+    ) -> None:
         """Test that other ValueErrors are re-raised."""
         mock_relation_model = MagicMock()
         mock_relation_model.search_read.side_effect = ValueError("Some other error")
@@ -296,7 +304,9 @@ class TestQueryRelationInfoFromOdoo:
             )
 
     @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_dict")
-    def test_query_relation_info_with_dict_config(self, mock_get_conn: MagicMock) -> None:
+    def test_query_relation_info_with_dict_config(
+        self, mock_get_conn: MagicMock
+    ) -> None:
         """Test query with dict config."""
         mock_relation_model = MagicMock()
         mock_relation_model.search_read.return_value = []
@@ -310,7 +320,9 @@ class TestQueryRelationInfoFromOdoo:
         mock_get_conn.assert_called_once()
 
     @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
-    def test_query_relation_info_connection_error(self, mock_get_conn: MagicMock) -> None:
+    def test_query_relation_info_connection_error(
+        self, mock_get_conn: MagicMock
+    ) -> None:
         """Test handling of connection errors."""
         mock_get_conn.side_effect = Exception("Connection failed")
 
@@ -389,9 +401,7 @@ class TestDeriveMissingRelationInfo:
     """Tests for _derive_missing_relation_info."""
 
     @patch("odoo_data_flow.lib.relational_import._query_relation_info_from_odoo")
-    def test_derive_missing_uses_odoo_query_result(
-        self, mock_query: MagicMock
-    ) -> None:
+    def test_derive_missing_uses_odoo_query_result(self, mock_query: MagicMock) -> None:
         """Test that Odoo query result is used when available."""
         mock_query.return_value = ("odoo_relation_table", "odoo_relation_field")
 
@@ -457,7 +467,9 @@ class TestRunDirectRelationalImportEdgeCases:
 
         assert result is None
 
-    @patch("odoo_data_flow.lib.relational_import._resolve_related_ids", return_value=None)
+    @patch(
+        "odoo_data_flow.lib.relational_import._resolve_related_ids", return_value=None
+    )
     @patch("odoo_data_flow.lib.relational_import.cache.load_id_map")
     def test_run_direct_relational_import_resolve_fails(
         self, mock_load_id_map: MagicMock, mock_resolve: MagicMock
@@ -515,8 +527,12 @@ class TestRunWriteTupleImportEdgeCases:
 
         assert result is False
 
-    @patch("odoo_data_flow.lib.relational_import._resolve_related_ids", return_value=None)
-    def test_run_write_tuple_import_resolve_fails(self, mock_resolve: MagicMock) -> None:
+    @patch(
+        "odoo_data_flow.lib.relational_import._resolve_related_ids", return_value=None
+    )
+    def test_run_write_tuple_import_resolve_fails(
+        self, mock_resolve: MagicMock
+    ) -> None:
         """Test handling when related ID resolution fails."""
         source_df = pl.DataFrame({"id": ["p1"], "category_id": ["cat1"]})
         strategy_details = {
@@ -550,7 +566,9 @@ class TestRunWriteTupleImportEdgeCases:
     ) -> None:
         """Test handling when field is not found in source DataFrame."""
         source_df = pl.DataFrame({"id": ["p1"], "name": ["Partner 1"]})
-        mock_resolve.return_value = pl.DataFrame({"external_id": ["cat1"], "db_id": [11]})
+        mock_resolve.return_value = pl.DataFrame(
+            {"external_id": ["cat1"], "db_id": [11]}
+        )
         strategy_details = {
             "relation_table": "partner_category_rel",
             "relation_field": "partner_id",
@@ -584,10 +602,12 @@ class TestRunWriteO2MTupleImportEdgeCases:
         self, mock_get_conn: MagicMock
     ) -> None:
         """Test O2M import with dict config."""
-        source_df = pl.DataFrame({
-            "id": ["p1"],
-            "line_ids": ['[{"product": "prodA"}]'],
-        })
+        source_df = pl.DataFrame(
+            {
+                "id": ["p1"],
+                "line_ids": ['[{"product": "prodA"}]'],
+            }
+        )
         mock_parent_model = MagicMock()
         mock_get_conn.return_value.get_model.return_value = mock_parent_model
 
@@ -647,11 +667,15 @@ class TestRunWriteO2MTupleImportEdgeCases:
         This is a limitation in the current implementation.
         """
         # Provide BOTH columns to test the filtering logic
-        source_df = pl.DataFrame({
-            "id": ["p1"],
-            "line_ids": ['[{"product": "prodA"}]'],
-            "line_ids/id": ["external_id_not_used"],  # This triggers the fallback detection
-        })
+        source_df = pl.DataFrame(
+            {
+                "id": ["p1"],
+                "line_ids": ['[{"product": "prodA"}]'],
+                "line_ids/id": [
+                    "external_id_not_used"
+                ],  # This triggers the fallback detection
+            }
+        )
         mock_parent_model = MagicMock()
         mock_get_conn.return_value.get_model.return_value = mock_parent_model
 
@@ -679,10 +703,12 @@ class TestRunWriteO2MTupleImportEdgeCases:
         self, mock_get_conn: MagicMock
     ) -> None:
         """Test handling of JSON decode errors."""
-        source_df = pl.DataFrame({
-            "id": ["p1"],
-            "line_ids": ["not valid json"],
-        })
+        source_df = pl.DataFrame(
+            {
+                "id": ["p1"],
+                "line_ids": ["not valid json"],
+            }
+        )
         mock_parent_model = MagicMock()
         mock_get_conn.return_value.get_model.return_value = mock_parent_model
 
@@ -710,10 +736,12 @@ class TestRunWriteO2MTupleImportEdgeCases:
         self, mock_get_conn: MagicMock
     ) -> None:
         """Test handling when JSON is not a list."""
-        source_df = pl.DataFrame({
-            "id": ["p1"],
-            "line_ids": ['{"product": "prodA"}'],  # Not a list
-        })
+        source_df = pl.DataFrame(
+            {
+                "id": ["p1"],
+                "line_ids": ['{"product": "prodA"}'],  # Not a list
+            }
+        )
         mock_parent_model = MagicMock()
         mock_get_conn.return_value.get_model.return_value = mock_parent_model
 
@@ -741,10 +769,12 @@ class TestRunWriteO2MTupleImportEdgeCases:
         self, mock_get_conn: MagicMock
     ) -> None:
         """Test handling when parent ID is not in id_map."""
-        source_df = pl.DataFrame({
-            "id": ["p1", "p2"],
-            "line_ids": ['[{"product": "A"}]', '[{"product": "B"}]'],
-        })
+        source_df = pl.DataFrame(
+            {
+                "id": ["p1", "p2"],
+                "line_ids": ['[{"product": "A"}]', '[{"product": "B"}]'],
+            }
+        )
         mock_parent_model = MagicMock()
         mock_get_conn.return_value.get_model.return_value = mock_parent_model
 
@@ -769,16 +799,20 @@ class TestRunWriteO2MTupleImportEdgeCases:
         # Only p1 should be processed
         mock_parent_model.write.assert_called_once()
 
-    @patch("odoo_data_flow.lib.relational_import.writer.write_relational_failures_to_csv")
+    @patch(
+        "odoo_data_flow.lib.relational_import.writer.write_relational_failures_to_csv"
+    )
     @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
     def test_run_write_o2m_tuple_import_write_exception(
         self, mock_get_conn: MagicMock, mock_write_failures: MagicMock
     ) -> None:
         """Test handling when write() raises an exception."""
-        source_df = pl.DataFrame({
-            "id": ["p1"],
-            "line_ids": ['[{"product": "prodA"}]'],
-        })
+        source_df = pl.DataFrame(
+            {
+                "id": ["p1"],
+                "line_ids": ['[{"product": "prodA"}]'],
+            }
+        )
         mock_parent_model = MagicMock()
         mock_parent_model.write.side_effect = Exception("Write failed")
         mock_get_conn.return_value.get_model.return_value = mock_parent_model
@@ -814,12 +848,14 @@ class TestCreateRelationalRecords:
         """Test handling when model access fails."""
         mock_get_conn.return_value.get_model.side_effect = Exception("Access denied")
 
-        link_df = pl.DataFrame({
-            "external_id": ["p1"],
-            "category_id": ["cat1"],
-            "partner_id": [1],
-            "res.partner.category/id": [11],
-        })
+        link_df = pl.DataFrame(
+            {
+                "external_id": ["p1"],
+                "category_id": ["cat1"],
+                "partner_id": [1],
+                "res.partner.category/id": [11],
+            }
+        )
         owning_df = pl.DataFrame({"external_id": ["p1"], "db_id": [1]})
         related_df = pl.DataFrame({"external_id": ["cat1"], "db_id": [11]})
 

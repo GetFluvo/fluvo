@@ -85,9 +85,7 @@ class TestBackoffDelay:
 
     def test_exponential_backoff_increases(self):
         """Test that delay increases exponentially with attempts."""
-        config = retry.RetryConfig(
-            base_delay=1.0, exponential_base=2.0, jitter=False
-        )
+        config = retry.RetryConfig(base_delay=1.0, exponential_base=2.0, jitter=False)
 
         delay1 = retry.calculate_backoff_delay(1, config)
         delay2 = retry.calculate_backoff_delay(2, config)
