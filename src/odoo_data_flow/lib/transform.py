@@ -71,6 +71,8 @@ class Processor:
         separator: str = ";",
         preprocess: Callable[[pl.DataFrame], pl.DataFrame] = lambda df: df,
         schema_overrides: Optional[dict[str, pl.DataType]] = None,
+        date_formats: Optional[dict[str, str]] = None,
+        datetime_formats: Optional[dict[str, str]] = None,
         **kwargs: Any,
     ) -> None:
         """Initializes the Processor.
@@ -101,6 +103,13 @@ class Processor:
                             types to optimize CSV reading performance. This is
                             the recommended way to provide a schema for
                             offline processing.
+            date_formats: A dictionary mapping column names to strftime format
+                        strings for parsing date columns. Uses Polars'
+                        vectorized str.to_date() for efficient conversion.
+                        Example: {"birth_date": "%d/%m/%Y"}
+            datetime_formats: A dictionary mapping column names to strftime
+                            format strings for parsing datetime columns.
+                            Example: {"created_at": "%d/%m/%Y %H:%M:%S"}
             **kwargs: Catches other arguments, primarily for XML processing.
         """
         self.file_to_write: OrderedDict[str, dict[str, Any]] = OrderedDict()
@@ -145,6 +154,74 @@ class Processor:
             )
 
         self.dataframe = preprocess(self.dataframe)
+
+        # Apply date/datetime format conversions using Polars vectorized operations
+        self.dataframe = self._apply_date_formats(
+            self.dataframe, date_formats, datetime_formats
+        )
+
+    def _apply_date_formats(
+        self,
+        df: pl.DataFrame,
+        date_formats: Optional[dict[str, str]],
+        datetime_formats: Optional[dict[str, str]],
+    ) -> pl.DataFrame:
+        """Apply date and datetime format conversions using Polars expressions.
+
+        This method uses Polars' vectorized str.to_date() and str.to_datetime()
+        functions for efficient parsing of date columns with custom formats.
+
+        Args:
+            df: The DataFrame to process.
+            date_formats: Mapping of column names to strftime format strings
+                        for date parsing. Example: {"birth_date": "%d/%m/%Y"}
+            datetime_formats: Mapping of column names to strftime format strings
+                            for datetime parsing.
+
+        Returns:
+            DataFrame with parsed date/datetime columns.
+        """
+        if not date_formats and not datetime_formats:
+            return df
+
+        expressions: list[pl.Expr] = []
+
+        # Process date columns
+        if date_formats:
+            for col_name, fmt in date_formats.items():
+                if col_name in df.columns:
+                    expressions.append(
+                        pl.col(col_name).str.to_date(fmt, strict=False).alias(col_name)
+                    )
+                else:
+                    log.warning(
+                        f"Date format specified for column '{col_name}' "
+                        "but column not found in DataFrame"
+                    )
+
+        # Process datetime columns
+        if datetime_formats:
+            for col_name, fmt in datetime_formats.items():
+                if col_name in df.columns:
+                    expressions.append(
+                        pl.col(col_name)
+                        .str.to_datetime(fmt, strict=False)
+                        .alias(col_name)
+                    )
+                else:
+                    log.warning(
+                        f"Datetime format specified for column '{col_name}' "
+                        "but column not found in DataFrame"
+                    )
+
+        if expressions:
+            df = df.with_columns(expressions)
+            log.debug(
+                f"Applied date/datetime format conversions to "
+                f"{len(expressions)} column(s)"
+            )
+
+        return df
 
     def _parse_mapping(
         self, mapping: Optional[Mapping[str, Any]]

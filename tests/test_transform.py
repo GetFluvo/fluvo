@@ -624,3 +624,139 @@ def test_create_wrapper_mapper_raises_skipping_error() -> None:
     processor = Processor(mapping=mapping, dataframe=df)
     result_df = processor.process(filename_out="")
     assert result_df["new_col"].is_null().all()
+
+
+# --- Date Format Parsing Tests ---
+
+
+def test_date_formats_european_format() -> None:
+    """Test parsing dates in European DD/MM/YYYY format."""
+    from datetime import date
+
+    df = pl.DataFrame(
+        {
+            "name": ["Alice", "Bob"],
+            "birth_date": ["25/12/1990", "01/06/1985"],
+        }
+    )
+
+    processor = Processor(
+        mapping={},
+        dataframe=df,
+        date_formats={"birth_date": "%d/%m/%Y"},
+    )
+
+    assert processor.dataframe["birth_date"].dtype == pl.Date
+    assert processor.dataframe["birth_date"][0] == date(1990, 12, 25)
+    assert processor.dataframe["birth_date"][1] == date(1985, 6, 1)
+
+
+def test_date_formats_us_format() -> None:
+    """Test parsing dates in US MM-DD-YYYY format."""
+    from datetime import date
+
+    df = pl.DataFrame(
+        {
+            "name": ["Alice"],
+            "start_date": ["12-25-1990"],
+        }
+    )
+
+    processor = Processor(
+        mapping={},
+        dataframe=df,
+        date_formats={"start_date": "%m-%d-%Y"},
+    )
+
+    assert processor.dataframe["start_date"].dtype == pl.Date
+    # December 25, 1990
+    assert processor.dataframe["start_date"][0] == date(1990, 12, 25)
+
+
+def test_datetime_formats() -> None:
+    """Test parsing datetimes with custom format."""
+    df = pl.DataFrame(
+        {
+            "name": ["Alice"],
+            "created_at": ["25/12/2023 14:30:00"],
+        }
+    )
+
+    processor = Processor(
+        mapping={},
+        dataframe=df,
+        datetime_formats={"created_at": "%d/%m/%Y %H:%M:%S"},
+    )
+
+    assert processor.dataframe["created_at"].dtype == pl.Datetime
+
+
+def test_date_formats_multiple_columns() -> None:
+    """Test parsing multiple date columns with different formats."""
+    df = pl.DataFrame(
+        {
+            "name": ["Alice"],
+            "birth_date": ["25/12/1990"],  # European
+            "start_date": ["12-25-2020"],  # US
+        }
+    )
+
+    processor = Processor(
+        mapping={},
+        dataframe=df,
+        date_formats={
+            "birth_date": "%d/%m/%Y",
+            "start_date": "%m-%d-%Y",
+        },
+    )
+
+    assert processor.dataframe["birth_date"].dtype == pl.Date
+    assert processor.dataframe["start_date"].dtype == pl.Date
+
+
+def test_date_formats_missing_column_warns(caplog: pytest.LogCaptureFixture) -> None:
+    """Test that a warning is logged for non-existent columns."""
+    df = pl.DataFrame({"name": ["Alice"]})
+
+    Processor(
+        mapping={},
+        dataframe=df,
+        date_formats={"nonexistent_column": "%d/%m/%Y"},
+    )
+
+    assert "column not found" in caplog.text.lower()
+
+
+def test_date_formats_with_null_values() -> None:
+    """Test that null/empty values are handled gracefully."""
+    df = pl.DataFrame(
+        {
+            "name": ["Alice", "Bob", "Charlie"],
+            "birth_date": ["25/12/1990", None, ""],
+        }
+    )
+
+    processor = Processor(
+        mapping={},
+        dataframe=df,
+        date_formats={"birth_date": "%d/%m/%Y"},
+    )
+
+    assert processor.dataframe["birth_date"].dtype == pl.Date
+    assert processor.dataframe["birth_date"][0] is not None
+    assert processor.dataframe["birth_date"][1] is None
+
+
+def test_no_date_formats_passthrough() -> None:
+    """Test that no conversion happens when date_formats is not provided."""
+    df = pl.DataFrame(
+        {
+            "name": ["Alice"],
+            "some_date": ["25/12/1990"],
+        }
+    )
+
+    processor = Processor(mapping={}, dataframe=df)
+
+    # Without date_formats, column stays as string
+    assert processor.dataframe["some_date"].dtype == pl.String
