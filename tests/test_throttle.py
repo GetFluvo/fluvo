@@ -6,7 +6,7 @@ from odoo_data_flow.lib import throttle
 class TestServerHealth:
     """Tests for ServerHealth enum."""
 
-    def test_health_levels(self):
+    def test_health_levels(self) -> None:
         """Test that health levels are correctly ordered."""
         assert throttle.ServerHealth.HEALTHY.value == 0
         assert throttle.ServerHealth.DEGRADED.value == 1
@@ -24,7 +24,7 @@ class TestServerHealth:
 class TestThrottleConfig:
     """Tests for ThrottleConfig dataclass."""
 
-    def test_default_values(self):
+    def test_default_values(self) -> None:
         """Test default configuration values."""
         config = throttle.ThrottleConfig()
 
@@ -34,7 +34,7 @@ class TestThrottleConfig:
         assert config.healthy_delay == 0.0
         assert config.window_size == 5
 
-    def test_custom_values(self):
+    def test_custom_values(self) -> None:
         """Test custom configuration values."""
         config = throttle.ThrottleConfig(
             healthy_threshold=1.0,
@@ -50,12 +50,12 @@ class TestThrottleConfig:
 class TestThrottleStats:
     """Tests for ThrottleStats dataclass."""
 
-    def test_avg_response_time_no_requests(self):
+    def test_avg_response_time_no_requests(self) -> None:
         """Test average response time with no requests."""
         stats = throttle.ThrottleStats()
         assert stats.avg_response_time == 0.0
 
-    def test_avg_response_time(self):
+    def test_avg_response_time(self) -> None:
         """Test average response time calculation."""
         stats = throttle.ThrottleStats(
             total_requests=10,
@@ -67,7 +67,7 @@ class TestThrottleStats:
 class TestThrottleController:
     """Tests for ThrottleController class."""
 
-    def test_initial_state(self):
+    def test_initial_state(self) -> None:
         """Test initial controller state."""
         controller = throttle.ThrottleController()
 
@@ -75,7 +75,7 @@ class TestThrottleController:
         assert controller.current_delay == 0.0
         assert controller.batch_size_factor == 1.0
 
-    def test_healthy_response(self):
+    def test_healthy_response(self) -> None:
         """Test recording a healthy response."""
         controller = throttle.ThrottleController()
         controller.record_response(1.0)
@@ -83,7 +83,7 @@ class TestThrottleController:
         assert controller.current_health == throttle.ServerHealth.HEALTHY
         assert controller.stats.healthy_requests == 1
 
-    def test_degraded_response(self):
+    def test_degraded_response(self) -> None:
         """Test detecting degraded health."""
         config = throttle.ThrottleConfig(window_size=1)
         controller = throttle.ThrottleController(config)
@@ -92,7 +92,7 @@ class TestThrottleController:
 
         assert controller.current_health == throttle.ServerHealth.DEGRADED
 
-    def test_stressed_response(self):
+    def test_stressed_response(self) -> None:
         """Test detecting stressed health."""
         config = throttle.ThrottleConfig(window_size=1)
         controller = throttle.ThrottleController(config)
@@ -101,7 +101,7 @@ class TestThrottleController:
 
         assert controller.current_health == throttle.ServerHealth.STRESSED
 
-    def test_overloaded_response(self):
+    def test_overloaded_response(self) -> None:
         """Test detecting overloaded health."""
         config = throttle.ThrottleConfig(window_size=1)
         controller = throttle.ThrottleController(config)
@@ -110,7 +110,7 @@ class TestThrottleController:
 
         assert controller.current_health == throttle.ServerHealth.OVERLOADED
 
-    def test_rolling_window(self):
+    def test_rolling_window(self) -> None:
         """Test rolling window for response times."""
         config = throttle.ThrottleConfig(window_size=3)
         controller = throttle.ThrottleController(config)
@@ -123,7 +123,7 @@ class TestThrottleController:
         # Should only keep last 3 values
         assert len(controller.response_times) == 3
 
-    def test_health_recovery(self):
+    def test_health_recovery(self) -> None:
         """Test health recovery with consecutive fast responses."""
         config = throttle.ThrottleConfig(
             window_size=1,
@@ -140,10 +140,10 @@ class TestThrottleController:
         assert controller.current_health == throttle.ServerHealth.DEGRADED
 
         controller.record_response(1.0)  # Second fast response - should recover
-        assert controller.current_health == throttle.ServerHealth.HEALTHY
-        assert controller.stats.health_recoveries == 1
+        assert controller.current_health == throttle.ServerHealth.HEALTHY  # type: ignore[comparison-overlap]
+        assert controller.stats.health_recoveries == 1  # type: ignore[unreachable]
 
-    def test_get_delay(self):
+    def test_get_delay(self) -> None:
         """Test getting delay based on health."""
         config = throttle.ThrottleConfig(
             window_size=1,
@@ -157,7 +157,7 @@ class TestThrottleController:
         controller.record_response(4.0)  # Trigger degraded
         assert controller.get_delay() == 1.0
 
-    def test_get_batch_size(self):
+    def test_get_batch_size(self) -> None:
         """Test getting adjusted batch size."""
         config = throttle.ThrottleConfig(
             window_size=1,
@@ -172,7 +172,7 @@ class TestThrottleController:
         assert controller.get_batch_size(100) == 50
         assert controller.stats.batch_size_reductions == 1
 
-    def test_min_batch_size(self):
+    def test_min_batch_size(self) -> None:
         """Test minimum batch size enforcement."""
         config = throttle.ThrottleConfig(
             window_size=1,
@@ -185,7 +185,7 @@ class TestThrottleController:
         # 10 * 0.1 = 1, but min is 5
         assert controller.get_batch_size(10) == 5
 
-    def test_record_error(self):
+    def test_record_error(self) -> None:
         """Test recording server errors."""
         config = throttle.ThrottleConfig(window_size=1)
         controller = throttle.ThrottleController(config)
@@ -198,7 +198,7 @@ class TestThrottleController:
             throttle.ServerHealth.OVERLOADED,
         )
 
-    def test_get_health_status(self):
+    def test_get_health_status(self) -> None:
         """Test getting health status dict."""
         controller = throttle.ThrottleController()
         controller.record_response(1.0)
@@ -210,7 +210,7 @@ class TestThrottleController:
         assert status["current_delay"] == 0.0
         assert status["batch_size_factor"] == 1.0
 
-    def test_stats_tracking(self):
+    def test_stats_tracking(self) -> None:
         """Test statistics tracking."""
         controller = throttle.ThrottleController()
 
@@ -227,20 +227,20 @@ class TestThrottleController:
 class TestCreateThrottleController:
     """Tests for create_throttle_controller factory."""
 
-    def test_default_controller(self):
+    def test_default_controller(self) -> None:
         """Test creating default controller."""
         controller = throttle.create_throttle_controller()
 
         assert controller.config.healthy_delay == 0.0
 
-    def test_with_base_delay(self):
+    def test_with_base_delay(self) -> None:
         """Test creating controller with base delay."""
         controller = throttle.create_throttle_controller(base_delay=1.0)
 
         assert controller.config.healthy_delay == 1.0
         assert controller.config.degraded_delay == 1.5
 
-    def test_aggressive_mode(self):
+    def test_aggressive_mode(self) -> None:
         """Test creating aggressive controller."""
         controller = throttle.create_throttle_controller(aggressive=True)
 

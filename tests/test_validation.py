@@ -1,7 +1,9 @@
 """Tests for the validation module."""
 
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,14 +12,14 @@ from odoo_data_flow.lib import validation as val
 
 
 @pytest.fixture
-def temp_dir():
+def temp_dir() -> Generator[str, None, None]:
     """Create a temporary directory for test files."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield tmpdir
 
 
 @pytest.fixture
-def sample_csv(temp_dir):
+def sample_csv(temp_dir: str) -> str:
     """Create a sample CSV file for testing."""
     csv_path = Path(temp_dir) / "test_data.csv"
     csv_path.write_text("id;name;state;partner_id/id\n1;Test;draft;base.partner_1\n")
@@ -25,7 +27,7 @@ def sample_csv(temp_dir):
 
 
 @pytest.fixture
-def mock_connection():
+def mock_connection() -> MagicMock:
     """Create a mock Odoo connection."""
     conn = MagicMock()
 
@@ -40,7 +42,7 @@ def mock_connection():
 
 
 @pytest.fixture
-def fields_info():
+def fields_info() -> dict[str, Any]:
     """Sample fields info from fields_get()."""
     return {
         "id": {"type": "integer", "required": False},
@@ -66,7 +68,7 @@ def fields_info():
 class TestValidationResult:
     """Tests for ValidationResult dataclass."""
 
-    def test_validation_result_defaults(self):
+    def test_validation_result_defaults(self) -> None:
         """Test that ValidationResult has sensible defaults."""
         result = val.ValidationResult()
         assert result.total_rows == 0
@@ -76,12 +78,12 @@ class TestValidationResult:
         assert result.missing_references == {}
         assert result.invalid_selections == {}
 
-    def test_is_valid_with_no_errors(self):
+    def test_is_valid_with_no_errors(self) -> None:
         """Test is_valid returns True when no errors."""
         result = val.ValidationResult(total_rows=10, valid_rows=10)
         assert result.is_valid is True
 
-    def test_is_valid_with_errors(self):
+    def test_is_valid_with_errors(self) -> None:
         """Test is_valid returns False when errors exist."""
         result = val.ValidationResult(
             total_rows=10,
@@ -98,7 +100,7 @@ class TestValidationResult:
         )
         assert result.is_valid is False
 
-    def test_error_count(self):
+    def test_error_count(self) -> None:
         """Test error_count property."""
         result = val.ValidationResult(
             errors=[
@@ -108,7 +110,7 @@ class TestValidationResult:
         )
         assert result.error_count == 2
 
-    def test_warning_count(self):
+    def test_warning_count(self) -> None:
         """Test warning_count property."""
         result = val.ValidationResult(
             warnings=[val.ValidationError(1, "a", "", "warn", "msg")]
@@ -119,17 +121,23 @@ class TestValidationResult:
 class TestGetSelectionValues:
     """Tests for _get_selection_values helper."""
 
-    def test_get_selection_values_returns_values(self, fields_info):
+    def test_get_selection_values_returns_values(
+        self, fields_info: dict[str, Any]
+    ) -> None:
         """Test that selection values are extracted correctly."""
         values = val._get_selection_values(fields_info, "state")
         assert values == {"draft", "confirmed", "done"}
 
-    def test_get_selection_values_non_selection_field(self, fields_info):
+    def test_get_selection_values_non_selection_field(
+        self, fields_info: dict[str, Any]
+    ) -> None:
         """Test that non-selection fields return empty set."""
         values = val._get_selection_values(fields_info, "name")
         assert values == set()
 
-    def test_get_selection_values_missing_field(self, fields_info):
+    def test_get_selection_values_missing_field(
+        self, fields_info: dict[str, Any]
+    ) -> None:
         """Test that missing fields return empty set."""
         values = val._get_selection_values(fields_info, "nonexistent")
         assert values == set()
@@ -138,12 +146,12 @@ class TestGetSelectionValues:
 class TestGetRequiredFields:
     """Tests for _get_required_fields helper."""
 
-    def test_get_required_fields(self, fields_info):
+    def test_get_required_fields(self, fields_info: dict[str, Any]) -> None:
         """Test that required fields are identified correctly."""
         required = val._get_required_fields(fields_info)
         assert "name" in required
 
-    def test_readonly_required_fields_excluded(self):
+    def test_readonly_required_fields_excluded(self) -> None:
         """Test that readonly required fields are excluded."""
         fields = {
             "name": {"required": True, "readonly": False},
@@ -157,7 +165,7 @@ class TestGetRequiredFields:
 class TestGetRelationalFields:
     """Tests for _get_relational_fields helper."""
 
-    def test_get_relational_fields(self, fields_info):
+    def test_get_relational_fields(self, fields_info: dict[str, Any]) -> None:
         """Test that relational fields are identified."""
         header = ["id", "name", "partner_id/id"]
         relational = val._get_relational_fields(fields_info, header)
@@ -165,7 +173,7 @@ class TestGetRelationalFields:
         assert relational["partner_id/id"]["type"] == "many2one"
         assert relational["partner_id/id"]["relation"] == "res.partner"
 
-    def test_non_relational_fields_excluded(self, fields_info):
+    def test_non_relational_fields_excluded(self, fields_info: dict[str, Any]) -> None:
         """Test that non-relational fields are excluded."""
         header = ["id", "name", "state"]
         relational = val._get_relational_fields(fields_info, header)
@@ -176,7 +184,9 @@ class TestGetRelationalFields:
 class TestValidateCsvData:
     """Tests for validate_csv_data function."""
 
-    def test_validate_valid_data(self, temp_dir, mock_connection, fields_info):
+    def test_validate_valid_data(
+        self, temp_dir: str, mock_connection: MagicMock, fields_info: dict[str, Any]
+    ) -> None:
         """Test validation of valid CSV data."""
         csv_path = Path(temp_dir) / "valid.csv"
         csv_path.write_text("id;name;state\n1;Product A;draft\n2;Product B;confirmed\n")
@@ -194,8 +204,8 @@ class TestValidateCsvData:
         assert result.error_count == 0
 
     def test_validate_missing_required_field(
-        self, temp_dir, mock_connection, fields_info
-    ):
+        self, temp_dir: str, mock_connection: MagicMock, fields_info: dict[str, Any]
+    ) -> None:
         """Test validation catches missing required fields."""
         csv_path = Path(temp_dir) / "missing_required.csv"
         csv_path.write_text("id;name;state\n1;;draft\n")
@@ -212,7 +222,9 @@ class TestValidateCsvData:
         assert result.errors[0].error_type == "required_field"
         assert result.errors[0].column == "name"
 
-    def test_validate_invalid_selection(self, temp_dir, mock_connection, fields_info):
+    def test_validate_invalid_selection(
+        self, temp_dir: str, mock_connection: MagicMock, fields_info: dict[str, Any]
+    ) -> None:
         """Test validation catches invalid selection values."""
         csv_path = Path(temp_dir) / "invalid_selection.csv"
         csv_path.write_text("id;name;state\n1;Product;invalid_state\n")
@@ -229,7 +241,9 @@ class TestValidateCsvData:
         assert result.errors[0].error_type == "invalid_selection"
         assert "invalid_state" in result.invalid_selections.get("state", set())
 
-    def test_validate_missing_reference(self, temp_dir, fields_info):
+    def test_validate_missing_reference(
+        self, temp_dir: str, fields_info: dict[str, Any]
+    ) -> None:
         """Test validation catches missing references."""
         csv_path = Path(temp_dir) / "missing_ref.csv"
         csv_path.write_text("id;name;partner_id/id\n1;Product;base.nonexistent\n")
@@ -253,7 +267,9 @@ class TestValidateCsvData:
         missing = result.missing_references.get("partner_id/id", set())
         assert "base.nonexistent" in missing
 
-    def test_validate_with_ignore_columns(self, temp_dir, mock_connection, fields_info):
+    def test_validate_with_ignore_columns(
+        self, temp_dir: str, mock_connection: MagicMock, fields_info: dict[str, Any]
+    ) -> None:
         """Test validation ignores specified columns."""
         csv_path = Path(temp_dir) / "with_ignore.csv"
         csv_path.write_text("id;name;state;_INTERNAL\n1;Product;draft;ignore_me\n")
@@ -268,7 +284,9 @@ class TestValidateCsvData:
 
         assert result.is_valid
 
-    def test_validate_file_not_found(self, mock_connection, fields_info):
+    def test_validate_file_not_found(
+        self, mock_connection: MagicMock, fields_info: dict[str, Any]
+    ) -> None:
         """Test validation handles missing files."""
         result = val.validate_csv_data(
             file_path="/nonexistent/file.csv",
@@ -281,8 +299,8 @@ class TestValidateCsvData:
         assert result.errors[0].error_type == "file_not_found"
 
     def test_validate_with_custom_separator(
-        self, temp_dir, mock_connection, fields_info
-    ):
+        self, temp_dir: str, mock_connection: MagicMock, fields_info: dict[str, Any]
+    ) -> None:
         """Test validation with custom CSV separator."""
         csv_path = Path(temp_dir) / "custom_sep.csv"
         csv_path.write_text("id,name,state\n1,Product,draft\n")
@@ -298,8 +316,8 @@ class TestValidateCsvData:
         assert result.is_valid
 
     def test_validate_empty_reference_value(
-        self, temp_dir, mock_connection, fields_info
-    ):
+        self, temp_dir: str, mock_connection: MagicMock, fields_info: dict[str, Any]
+    ) -> None:
         """Test that empty reference values don't cause errors."""
         csv_path = Path(temp_dir) / "empty_ref.csv"
         csv_path.write_text("id;name;partner_id/id\n1;Product;\n")
@@ -317,7 +335,7 @@ class TestValidateCsvData:
 class TestCheckReferenceExists:
     """Tests for _check_reference_exists helper."""
 
-    def test_check_external_id_exists(self):
+    def test_check_external_id_exists(self) -> None:
         """Test checking external ID reference."""
         mock_conn = MagicMock()
         ir_model_data = MagicMock()
@@ -329,7 +347,7 @@ class TestCheckReferenceExists:
         assert exists is True
         mock_conn.get_model.assert_called_with("ir.model.data")
 
-    def test_check_external_id_not_exists(self):
+    def test_check_external_id_not_exists(self) -> None:
         """Test checking non-existent external ID."""
         mock_conn = MagicMock()
         ir_model_data = MagicMock()
@@ -342,7 +360,7 @@ class TestCheckReferenceExists:
 
         assert exists is False
 
-    def test_check_database_id_exists(self):
+    def test_check_database_id_exists(self) -> None:
         """Test checking database ID reference."""
         mock_conn = MagicMock()
         model_obj = MagicMock()
@@ -354,7 +372,7 @@ class TestCheckReferenceExists:
         assert exists is True
         mock_conn.get_model.assert_called_with("res.partner")
 
-    def test_check_invalid_id_format(self):
+    def test_check_invalid_id_format(self) -> None:
         """Test checking invalid ID format returns False."""
         mock_conn = MagicMock()
 
@@ -362,7 +380,7 @@ class TestCheckReferenceExists:
 
         assert exists is False
 
-    def test_check_reference_handles_exception(self):
+    def test_check_reference_handles_exception(self) -> None:
         """Test that exceptions are handled gracefully."""
         mock_conn = MagicMock()
         mock_conn.get_model.side_effect = Exception("Connection error")
@@ -375,7 +393,7 @@ class TestCheckReferenceExists:
 class TestDisplayValidationResults:
     """Tests for display_validation_results function."""
 
-    def test_display_success(self, capsys):
+    def test_display_success(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test displaying successful validation results."""
         result = val.ValidationResult(total_rows=100, valid_rows=100)
 
@@ -385,7 +403,7 @@ class TestDisplayValidationResults:
         assert "Validation Passed" in captured.out
         assert "100" in captured.out
 
-    def test_display_errors(self, capsys):
+    def test_display_errors(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test displaying validation errors."""
         result = val.ValidationResult(
             total_rows=100,
@@ -409,7 +427,7 @@ class TestDryRunCLI:
     """Tests for the --dry-run CLI option."""
 
     @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
-    def test_dry_run_validation(self, mock_get_conn, temp_dir):
+    def test_dry_run_validation(self, mock_get_conn: MagicMock, temp_dir: str) -> None:
         """Test dry-run validation via CLI."""
         from click.testing import CliRunner
 

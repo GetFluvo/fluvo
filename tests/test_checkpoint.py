@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -11,14 +12,14 @@ from odoo_data_flow.lib import checkpoint as ckpt
 
 
 @pytest.fixture
-def temp_dir():
+def temp_dir() -> Generator[str, None, None]:
     """Create a temporary directory for test files."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield tmpdir
 
 
 @pytest.fixture
-def sample_csv(temp_dir):
+def sample_csv(temp_dir: str) -> str:
     """Create a sample CSV file for testing."""
     csv_path = Path(temp_dir) / "test_data.csv"
     csv_path.write_text("id;name\n1;test1\n2;test2\n")
@@ -28,7 +29,7 @@ def sample_csv(temp_dir):
 class TestCheckpointDataStructure:
     """Tests for CheckpointData dataclass."""
 
-    def test_checkpoint_data_defaults(self):
+    def test_checkpoint_data_defaults(self) -> None:
         """Test that CheckpointData has sensible defaults."""
         cp = ckpt.CheckpointData(
             session_id="test123",
@@ -52,19 +53,19 @@ class TestCheckpointDataStructure:
 class TestFileHash:
     """Tests for file hash computation."""
 
-    def test_compute_file_hash_returns_hash(self, sample_csv):
+    def test_compute_file_hash_returns_hash(self, sample_csv: str) -> None:
         """Test that file hash is computed correctly."""
         file_hash = ckpt._compute_file_hash(sample_csv)
         assert len(file_hash) == 16
         assert isinstance(file_hash, str)
 
-    def test_compute_file_hash_consistent(self, sample_csv):
+    def test_compute_file_hash_consistent(self, sample_csv: str) -> None:
         """Test that same file produces same hash."""
         hash1 = ckpt._compute_file_hash(sample_csv)
         hash2 = ckpt._compute_file_hash(sample_csv)
         assert hash1 == hash2
 
-    def test_compute_file_hash_nonexistent_file(self):
+    def test_compute_file_hash_nonexistent_file(self) -> None:
         """Test that nonexistent file returns 'unknown'."""
         file_hash = ckpt._compute_file_hash("/nonexistent/file.csv")
         assert file_hash == "unknown"
@@ -73,26 +74,26 @@ class TestFileHash:
 class TestSessionId:
     """Tests for session ID generation."""
 
-    def test_generate_session_id_consistent(self, sample_csv):
+    def test_generate_session_id_consistent(self, sample_csv: str) -> None:
         """Test that same inputs produce same session ID."""
         id1 = ckpt.generate_session_id(sample_csv, "config.conf", "res.partner")
         id2 = ckpt.generate_session_id(sample_csv, "config.conf", "res.partner")
         assert id1 == id2
         assert len(id1) == 32
 
-    def test_generate_session_id_different_model(self, sample_csv):
+    def test_generate_session_id_different_model(self, sample_csv: str) -> None:
         """Test that different model produces different ID."""
         id1 = ckpt.generate_session_id(sample_csv, "config.conf", "res.partner")
         id2 = ckpt.generate_session_id(sample_csv, "config.conf", "res.users")
         assert id1 != id2
 
-    def test_generate_session_id_different_config(self, sample_csv):
+    def test_generate_session_id_different_config(self, sample_csv: str) -> None:
         """Test that different config produces different ID."""
         id1 = ckpt.generate_session_id(sample_csv, "config1.conf", "res.partner")
         id2 = ckpt.generate_session_id(sample_csv, "config2.conf", "res.partner")
         assert id1 != id2
 
-    def test_generate_session_id_with_dict_config(self, sample_csv):
+    def test_generate_session_id_with_dict_config(self, sample_csv: str) -> None:
         """Test session ID generation with dict config."""
         config = {"host": "localhost", "database": "test"}
         session_id = ckpt.generate_session_id(sample_csv, config, "res.partner")
@@ -102,13 +103,13 @@ class TestSessionId:
 class TestCheckpointPaths:
     """Tests for checkpoint path utilities."""
 
-    def test_get_checkpoint_dir(self, sample_csv):
+    def test_get_checkpoint_dir(self, sample_csv: str) -> None:
         """Test checkpoint directory path."""
         cp_dir = ckpt.get_checkpoint_dir(sample_csv)
         assert cp_dir.name == ".odf_checkpoint"
         assert str(cp_dir.parent) == os.path.dirname(sample_csv)
 
-    def test_get_checkpoint_path(self, sample_csv):
+    def test_get_checkpoint_path(self, sample_csv: str) -> None:
         """Test checkpoint file path."""
         session_id = "abc123"
         cp_path = ckpt.get_checkpoint_path(sample_csv, session_id)
@@ -118,7 +119,7 @@ class TestCheckpointPaths:
 class TestSaveLoadCheckpoint:
     """Tests for checkpoint save/load operations."""
 
-    def test_save_and_load_checkpoint(self, sample_csv):
+    def test_save_and_load_checkpoint(self, sample_csv: str) -> None:
         """Test saving and loading a checkpoint."""
         session_id = ckpt.generate_session_id(sample_csv, "config.conf", "res.partner")
         file_hash = ckpt._compute_file_hash(sample_csv)
@@ -153,12 +154,12 @@ class TestSaveLoadCheckpoint:
         assert loaded.id_map == {"ext_id_1": 1, "ext_id_2": 2}
         assert loaded.pass_1_complete is True
 
-    def test_load_checkpoint_not_found(self, sample_csv):
+    def test_load_checkpoint_not_found(self, sample_csv: str) -> None:
         """Test loading nonexistent checkpoint returns None."""
         loaded = ckpt.load_checkpoint(sample_csv, "config.conf", "res.partner")
         assert loaded is None
 
-    def test_load_checkpoint_file_changed(self, sample_csv):
+    def test_load_checkpoint_file_changed(self, sample_csv: str) -> None:
         """Test that changed file invalidates checkpoint."""
         session_id = ckpt.generate_session_id(sample_csv, "config.conf", "res.partner")
 
@@ -185,7 +186,7 @@ class TestSaveLoadCheckpoint:
 class TestDeleteCheckpoint:
     """Tests for checkpoint deletion."""
 
-    def test_delete_checkpoint(self, sample_csv):
+    def test_delete_checkpoint(self, sample_csv: str) -> None:
         """Test deleting a checkpoint."""
         session_id = ckpt.generate_session_id(sample_csv, "config.conf", "res.partner")
         file_hash = ckpt._compute_file_hash(sample_csv)
@@ -214,7 +215,7 @@ class TestDeleteCheckpoint:
         assert result is True
         assert not cp_path.exists()
 
-    def test_delete_nonexistent_checkpoint(self, sample_csv):
+    def test_delete_nonexistent_checkpoint(self, sample_csv: str) -> None:
         """Test deleting nonexistent checkpoint succeeds."""
         result = ckpt.delete_checkpoint(sample_csv, "nonexistent")
         assert result is True
@@ -223,7 +224,7 @@ class TestDeleteCheckpoint:
 class TestCleanupOldCheckpoints:
     """Tests for checkpoint cleanup."""
 
-    def test_cleanup_old_checkpoints(self, sample_csv):
+    def test_cleanup_old_checkpoints(self, sample_csv: str) -> None:
         """Test cleaning up old checkpoints."""
         # Create checkpoint directory
         cp_dir = ckpt.get_checkpoint_dir(sample_csv)
@@ -243,7 +244,7 @@ class TestCleanupOldCheckpoints:
         assert deleted == 1
         assert not old_cp_path.exists()
 
-    def test_cleanup_preserves_recent_checkpoints(self, sample_csv):
+    def test_cleanup_preserves_recent_checkpoints(self, sample_csv: str) -> None:
         """Test that recent checkpoints are preserved."""
         session_id = ckpt.generate_session_id(sample_csv, "config.conf", "res.partner")
         file_hash = ckpt._compute_file_hash(sample_csv)
