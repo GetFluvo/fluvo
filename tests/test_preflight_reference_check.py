@@ -1,7 +1,9 @@
 """Tests for the pre-flight reference check."""
 
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,14 +12,14 @@ from odoo_data_flow.lib import preflight
 
 
 @pytest.fixture
-def temp_dir():
+def temp_dir() -> Generator[str, None, None]:
     """Create a temporary directory for test files."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield tmpdir
 
 
 @pytest.fixture
-def sample_csv_with_refs(temp_dir):
+def sample_csv_with_refs(temp_dir: str) -> str:
     """Create a sample CSV file with relational references."""
     csv_path = Path(temp_dir) / "test_data.csv"
     csv_path.write_text(
@@ -30,7 +32,7 @@ def sample_csv_with_refs(temp_dir):
 
 
 @pytest.fixture
-def fields_info():
+def fields_info() -> dict[str, Any]:
     """Sample fields info from fields_get()."""
     return {
         "id": {"type": "integer"},
@@ -49,7 +51,9 @@ def fields_info():
 class TestExtractReferencesFromCSV:
     """Tests for _extract_references_from_csv function."""
 
-    def test_extracts_many2one_refs(self, sample_csv_with_refs, fields_info):
+    def test_extracts_many2one_refs(
+        self, sample_csv_with_refs: str, fields_info: dict[str, Any]
+    ) -> None:
         """Test that many2one references are extracted."""
         header = ["id", "name", "partner_id/id", "tag_ids/id"]
         refs = preflight._extract_references_from_csv(
@@ -61,7 +65,9 @@ class TestExtractReferencesFromCSV:
         assert "base.partner_1" in refs["res.partner"]["partner_id/id"]
         assert "base.partner_2" in refs["res.partner"]["partner_id/id"]
 
-    def test_extracts_many2many_refs(self, sample_csv_with_refs, fields_info):
+    def test_extracts_many2many_refs(
+        self, sample_csv_with_refs: str, fields_info: dict[str, Any]
+    ) -> None:
         """Test that many2many references are extracted and split."""
         header = ["id", "name", "partner_id/id", "tag_ids/id"]
         refs = preflight._extract_references_from_csv(
@@ -73,7 +79,9 @@ class TestExtractReferencesFromCSV:
         assert "base.tag_1" in refs["res.tag"]["tag_ids/id"]
         assert "base.tag_2" in refs["res.tag"]["tag_ids/id"]
 
-    def test_ignores_non_relational_columns(self, temp_dir, fields_info):
+    def test_ignores_non_relational_columns(
+        self, temp_dir: str, fields_info: dict[str, Any]
+    ) -> None:
         """Test that non-relational columns are not included."""
         csv_path = Path(temp_dir) / "test.csv"
         csv_path.write_text("id;name\n1;Test\n")
@@ -86,7 +94,9 @@ class TestExtractReferencesFromCSV:
         # No relational columns, so empty result
         assert not any(refs.values())
 
-    def test_handles_empty_values(self, temp_dir, fields_info):
+    def test_handles_empty_values(
+        self, temp_dir: str, fields_info: dict[str, Any]
+    ) -> None:
         """Test that empty values are skipped."""
         csv_path = Path(temp_dir) / "test.csv"
         csv_path.write_text("id;name;partner_id/id\n1;Test;\n")
@@ -100,7 +110,9 @@ class TestExtractReferencesFromCSV:
         # Empty values should not be added
         assert len(refs["res.partner"]["partner_id/id"]) == 0
 
-    def test_respects_ignore_list(self, sample_csv_with_refs, fields_info):
+    def test_respects_ignore_list(
+        self, sample_csv_with_refs: str, fields_info: dict[str, Any]
+    ) -> None:
         """Test that ignored columns are not processed."""
         header = ["id", "name", "partner_id/id", "tag_ids/id"]
         refs = preflight._extract_references_from_csv(
@@ -118,7 +130,7 @@ class TestExtractReferencesFromCSV:
 class TestCheckReferencesExist:
     """Tests for _check_references_exist function."""
 
-    def test_all_refs_exist(self):
+    def test_all_refs_exist(self) -> None:
         """Test when all references exist."""
         mock_conn = MagicMock()
         ir_model_data = MagicMock()
@@ -137,7 +149,7 @@ class TestCheckReferencesExist:
         missing = preflight._check_references_exist(mock_conn, refs)
         assert not missing
 
-    def test_some_refs_missing(self):
+    def test_some_refs_missing(self) -> None:
         """Test when some references are missing."""
         mock_conn = MagicMock()
         ir_model_data = MagicMock()
@@ -157,7 +169,7 @@ class TestCheckReferencesExist:
         assert "res.partner" in missing
         assert "base.missing" in missing["res.partner"]["partner_id/id"]
 
-    def test_handles_database_ids(self):
+    def test_handles_database_ids(self) -> None:
         """Test checking database IDs."""
         mock_conn = MagicMock()
         model_obj = MagicMock()
@@ -174,7 +186,7 @@ class TestCheckReferencesExist:
         assert "res.partner" in missing
         assert "999" in missing["res.partner"]["partner_id"]
 
-    def test_handles_invalid_refs(self):
+    def test_handles_invalid_refs(self) -> None:
         """Test that invalid reference formats are marked as missing."""
         mock_conn = MagicMock()
         mock_conn.get_model.return_value = MagicMock()
@@ -196,7 +208,9 @@ class TestReferenceCheck:
     @patch("odoo_data_flow.lib.preflight._get_csv_header")
     @patch("odoo_data_flow.lib.preflight._get_odoo_fields")
     @patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config")
-    def test_skip_mode_returns_true(self, mock_conn, mock_fields, mock_header):
+    def test_skip_mode_returns_true(
+        self, mock_conn: Any, mock_fields: Any, mock_header: Any
+    ) -> None:
         """Test that skip mode immediately returns True."""
         from odoo_data_flow.enums import PreflightMode
 
@@ -217,8 +231,13 @@ class TestReferenceCheck:
     @patch("odoo_data_flow.lib.preflight._extract_references_from_csv")
     @patch("odoo_data_flow.lib.preflight._check_references_exist")
     def test_all_refs_valid_returns_true(
-        self, mock_check, mock_extract, mock_conn, mock_fields, mock_header
-    ):
+        self,
+        mock_check: Any,
+        mock_extract: Any,
+        mock_conn: Any,
+        mock_fields: Any,
+        mock_header: Any,
+    ) -> None:
         """Test that valid references return True."""
         from odoo_data_flow.enums import PreflightMode
 
@@ -249,13 +268,13 @@ class TestReferenceCheck:
     @patch("odoo_data_flow.lib.preflight._display_missing_references")
     def test_missing_refs_fail_mode(
         self,
-        mock_display,
-        mock_check,
-        mock_extract,
-        mock_conn,
-        mock_fields,
-        mock_header,
-    ):
+        mock_display: Any,
+        mock_check: Any,
+        mock_extract: Any,
+        mock_conn: Any,
+        mock_fields: Any,
+        mock_header: Any,
+    ) -> None:
         """Test that missing refs with fail mode returns False."""
         from odoo_data_flow.enums import PreflightMode
 
@@ -285,13 +304,13 @@ class TestReferenceCheck:
     @patch("odoo_data_flow.lib.preflight._display_missing_references")
     def test_missing_refs_warn_mode(
         self,
-        mock_display,
-        mock_check,
-        mock_extract,
-        mock_conn,
-        mock_fields,
-        mock_header,
-    ):
+        mock_display: Any,
+        mock_check: Any,
+        mock_extract: Any,
+        mock_conn: Any,
+        mock_fields: Any,
+        mock_header: Any,
+    ) -> None:
         """Test that missing refs with warn mode returns True."""
         from odoo_data_flow.enums import PreflightMode
 
@@ -313,7 +332,7 @@ class TestReferenceCheck:
         assert result is True
         mock_display.assert_called_once()
 
-    def test_fail_mode_skipped(self):
+    def test_fail_mode_skipped(self) -> None:
         """Test that reference check is skipped in FAIL_MODE."""
         from odoo_data_flow.enums import PreflightMode
 

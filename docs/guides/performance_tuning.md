@@ -284,6 +284,76 @@ A common source of import failures, especially with large or complex data, is th
 
 > **Tip:** If your imports are failing with "timeout" or "connection closed" errors, the first thing you should try is reducing the `--size` value (e.g., from `1000` down to `200` or `100`).
 
+---
+
+## Adaptive Throttling (`--adaptive-throttle`)
+
+For long-running imports or when working with servers under variable load, the `--adaptive-throttle` option provides intelligent, automatic performance tuning.
+
+- **CLI Option**: `--adaptive-throttle`
+- **Default**: Disabled
+
+### What It Does
+
+When enabled, the import client monitors server response times and automatically adjusts both:
+
+1. **Delays between batches** - Adds pauses when the server is slow
+2. **Batch sizes** - Dynamically splits batches when the server is stressed
+
+### Health States and Behavior
+
+The throttle controller categorizes server health into four states based on response times:
+
+| Health State | Response Time | Batch Size | Delay |
+|-------------|---------------|------------|-------|
+| **Healthy** | < 2s | 100% | 0s |
+| **Degraded** | 2-5s | 75% | 0.5s |
+| **Stressed** | 5-10s | 50% | 2s |
+| **Overloaded** | > 10s | 25% | 5s |
+
+### How Batch Scaling Works
+
+When the server health degrades, the throttle controller automatically splits batches:
+
+```
+Original batch size: 100 records
+Server health: STRESSED (50% multiplier)
+Actual batch size: 50 records (split into 2 sub-batches)
+```
+
+The controller logs these adjustments:
+
+```
+INFO: Adaptive batch scaling: reducing batch size from 100 to 50 (server health: STRESSED)
+INFO: Adaptive batch scaling: restored to full batch size 100 (server health: HEALTHY)
+```
+
+### When to Use It
+
+- **Long imports** (1000+ records) where server load may vary
+- **Shared servers** where other users/processes compete for resources
+- **Production environments** where you want to avoid overloading the server
+- **Unreliable networks** where timeouts are common
+
+### Example
+
+```bash
+# Enable adaptive throttling for a large import
+odoo-data-flow import \
+    --connection-file conf/connection.conf \
+    --file data/products.csv \
+    --model product.product \
+    --size 100 \
+    --adaptive-throttle
+```
+
+```{admonition} Note
+:class: note
+
+Adaptive throttling is conservative by default. It prioritizes stability over speed, making it ideal for production imports where reliability is more important than raw performance.
+```
+
+---
 
 ## Mapper Performance
 
