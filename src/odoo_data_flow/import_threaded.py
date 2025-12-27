@@ -1625,6 +1625,9 @@ def _run_threaded_pass(  # noqa: C901
     futures = set()
     batch_count = 0
     throttle_ctrl = thread_state.get("throttle_controller")
+    original_batch_size = thread_state.get("original_batch_size", 0)
+    last_logged_batch_size: int | None = None
+
     for num, data in batches:
         if rpc_thread.abort_flag:
             break
@@ -1643,13 +1646,45 @@ def _run_threaded_pass(  # noqa: C901
             if total_delay > 0:
                 time.sleep(total_delay)
 
-        args = (
-            [thread_state, data, num]
-            if target_func.__name__ == "_execute_write_batch"
-            else [thread_state, data, thread_state.get("batch_header"), num]
-        )
-        futures.add(rpc_thread.spawn_thread(target_func, args))
-        batch_count += 1
+        # Dynamic batch size scaling based on server health
+        # If throttle controller recommends smaller batches, split the current batch
+        sub_batches: list[Any] = [data]
+        if throttle_ctrl and original_batch_size > 0:
+            recommended_size = throttle_ctrl.get_batch_size(original_batch_size)
+            current_batch_len = len(data) if isinstance(data, list) else 1
+            if recommended_size < current_batch_len:
+                # Split the batch into smaller sub-batches
+                sub_batches = list(batch(data, recommended_size))
+                if last_logged_batch_size != recommended_size:
+                    log.info(
+                        f"Adaptive batch scaling: reducing batch size from "
+                        f"{current_batch_len} to {recommended_size} "
+                        f"(server health: {throttle_ctrl.current_health.name})"
+                    )
+                    last_logged_batch_size = recommended_size
+            elif (
+                last_logged_batch_size is not None
+                and recommended_size >= original_batch_size
+            ):
+                # Log when we've recovered to full batch size
+                log.info(
+                    f"Adaptive batch scaling: restored to full batch size "
+                    f"{original_batch_size} (server health: HEALTHY)"
+                )
+                last_logged_batch_size = None
+
+        for sub_idx, sub_data in enumerate(sub_batches):
+            if rpc_thread.abort_flag:  # Can be set by other threads
+                break  # type: ignore[unreachable]
+            # Use sub-batch number for logging if we split
+            sub_num = f"{num}.{sub_idx + 1}" if len(sub_batches) > 1 else num
+            args = (
+                [thread_state, sub_data, sub_num]
+                if target_func.__name__ == "_execute_write_batch"
+                else [thread_state, sub_data, thread_state.get("batch_header"), sub_num]
+            )
+            futures.add(rpc_thread.spawn_thread(target_func, args))
+            batch_count += 1
 
     aggregated: dict[str, Any] = {
         "id_map": {},
@@ -1839,6 +1874,7 @@ def _orchestrate_pass_1(
         "progress": progress,
         "ignore_list": pass_1_ignore_list,
         "throttle_controller": throttle_controller,
+        "original_batch_size": batch_size,
     }
 
     results, aborted = _run_threaded_pass(
@@ -2006,6 +2042,7 @@ def _orchestrate_pass_2(
     fail_handle: Optional[TextIO],
     max_connection: int,
     batch_size: int,
+    throttle_controller: Optional[throttle_lib.ThrottleController] = None,
 ) -> tuple[bool, int]:
     """Orchestrates the multi-threaded Pass 2 (write).
 
@@ -2028,6 +2065,8 @@ def _orchestrate_pass_2(
         fail_handle (Optional[TextIO]): The file handle for the fail file.
         max_connection (int): The number of parallel worker threads to use.
         batch_size (int): The number of records per write batch.
+        throttle_controller: Optional controller for adaptive throttling based
+            on server response times.
 
     Returns:
         bool: True if the pass completed without any critical (abort-level)
@@ -2075,6 +2114,8 @@ def _orchestrate_pass_2(
         "model": model_obj,
         "progress": progress,
         "context": context,
+        "throttle_controller": throttle_controller,
+        "original_batch_size": batch_size,
     }
     pass_2_results, aborted = _run_threaded_pass(
         rpc_pass_2,
@@ -2464,6 +2505,7 @@ def import_data(  # noqa: C901
                         fail_handle,
                         max_connection,
                         batch_size,
+                        throttle_controller,
                     )
 
         finally:

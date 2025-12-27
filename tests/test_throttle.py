@@ -246,3 +246,74 @@ class TestCreateThrottleController:
 
         assert controller.config.healthy_threshold == 1.0
         assert controller.config.overloaded_batch_multiplier == 0.1
+
+
+class TestBatchScaling:
+    """Tests for dynamic batch size scaling."""
+
+    def test_healthy_returns_full_batch_size(self) -> None:
+        """Test that healthy state returns full batch size."""
+        controller = throttle.ThrottleController()
+        controller.record_response(1.0)  # Healthy response
+
+        assert controller.get_batch_size(100) == 100
+
+    def test_degraded_reduces_batch_size(self) -> None:
+        """Test that degraded state reduces batch size to 75%."""
+        config = throttle.ThrottleConfig(window_size=1)
+        controller = throttle.ThrottleController(config)
+
+        controller.record_response(4.0)  # Degraded response
+
+        assert controller.get_batch_size(100) == 75
+
+    def test_stressed_reduces_batch_size(self) -> None:
+        """Test that stressed state reduces batch size to 50%."""
+        config = throttle.ThrottleConfig(window_size=1)
+        controller = throttle.ThrottleController(config)
+
+        controller.record_response(7.0)  # Stressed response
+
+        assert controller.get_batch_size(100) == 50
+
+    def test_overloaded_reduces_batch_size(self) -> None:
+        """Test that overloaded state reduces batch size to 25%."""
+        config = throttle.ThrottleConfig(window_size=1)
+        controller = throttle.ThrottleController(config)
+
+        controller.record_response(15.0)  # Overloaded response
+
+        assert controller.get_batch_size(100) == 25
+
+    def test_min_batch_size_enforced(self) -> None:
+        """Test that minimum batch size is enforced."""
+        config = throttle.ThrottleConfig(
+            window_size=1,
+            overloaded_batch_multiplier=0.1,
+            min_batch_size=10,
+        )
+        controller = throttle.ThrottleController(config)
+
+        controller.record_response(15.0)  # Overloaded
+
+        # 20 * 0.1 = 2, but min is 10
+        assert controller.get_batch_size(20) == 10
+
+    def test_batch_size_recovery(self) -> None:
+        """Test that batch size recovers when health improves."""
+        config = throttle.ThrottleConfig(
+            window_size=1,
+            recovery_requests=2,
+        )
+        controller = throttle.ThrottleController(config)
+
+        # Get into degraded state
+        controller.record_response(4.0)
+        assert controller.get_batch_size(100) == 75
+
+        # Recover with fast responses
+        controller.record_response(1.0)
+        controller.record_response(1.0)
+
+        # Should be back to full size
+        assert controller.get_batch_size(100) == 100
