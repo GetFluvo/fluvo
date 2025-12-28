@@ -1079,8 +1079,8 @@ def _execute_load_batch(  # noqa: C901
 
     # Pre-calculate ignore filter indices ONCE before the loop (optimization).
     # These values don't change during batch processing, so calculate upfront.
-    indices_to_keep: list[int] | None = None
-    filtered_header: list[str] | None = None
+    indices_to_keep: Optional[list[int]] = None
+    filtered_header: Optional[list[str]] = None
     max_index_needed = 0
 
     if ignore_list:
@@ -1626,7 +1626,7 @@ def _run_threaded_pass(  # noqa: C901
     batch_count = 0
     throttle_ctrl = thread_state.get("throttle_controller")
     original_batch_size = thread_state.get("original_batch_size", 0)
-    last_logged_batch_size: int | None = None
+    last_logged_batch_size: Optional[int] = None
 
     for num, data in batches:
         if rpc_thread.abort_flag:

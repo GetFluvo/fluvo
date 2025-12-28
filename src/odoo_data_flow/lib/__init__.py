@@ -2,6 +2,8 @@
 
 from . import (
     checker,
+    clean,
+    clean_expr,
     conf_lib,
     internal,
     mapper,
@@ -12,6 +14,8 @@ from . import (
 
 __all__ = [
     "checker",
+    "clean",
+    "clean_expr",
     "conf_lib",
     "internal",
     "mapper",
