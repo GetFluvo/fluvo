@@ -549,3 +549,181 @@ sales_order_mapping = {
     'warehouse_id/id': mapper.m2o_map('wh_', 'Warehouse', postprocess=remember_value('current_warehouse_id')),
     'order_line': mapper.cond('SKU', mapper.record(order_line_mapping))
 }
+```
+
+---
+
+## Data Cleaning
+
+When importing data from external sources, values often need sanitization before they can be used in Odoo. The library provides two complementary cleaning modules for this purpose.
+
+### Choosing the Right Module
+
+| Module | Use Case | Performance |
+|--------|----------|-------------|
+| `clean_expr` | Polars expressions, large datasets | 10-100x faster |
+| `clean` | Legacy mapper integration, stateful operations | Flexible |
+
+### Polars-Native Cleaning (`clean_expr`)
+
+The `clean_expr` module returns Polars expressions for vectorized operations. Use this with the `expr` module for maximum performance.
+
+```python
+from odoo_data_flow.lib import expr, clean_expr
+
+mapping = {
+    "phone": clean_expr.phone("Phone"),           # Keep digits + leading +
+    "email": clean_expr.email("Email"),           # Lowercase, strip noise
+    "website": clean_expr.url("Website"),         # Ensure https, fix www
+    "vat": clean_expr.vat("VAT"),                 # Clean VAT number
+    "name": clean_expr.name_clean("ContactName"), # Strip titles/suffixes
+}
+```
+
+### Row-by-Row Cleaning (`clean`)
+
+The `clean` module returns callables for use with the mapper's `postprocess` parameter. Use this for stateful operations or with existing mapper-based code.
+
+```python
+from odoo_data_flow.lib import mapper, clean
+
+mapping = {
+    "phone": mapper.val("Phone", postprocess=clean.phone()),
+    "email": mapper.val("Email", postprocess=clean.email()),
+    "website": mapper.val("Website", postprocess=clean.url()),
+    "vat": mapper.val("VAT", postprocess=clean.vat()),
+}
+```
+
+### Available Cleaners
+
+#### Phone Cleaners
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `phone()` | Keep digits and leading + | `"+31 (6) 12-34"` → `"+31612345678"` |
+| `phone_digits()` | Keep only digits | `"+31 6 12"` → `"31612"` |
+| `phone_normalize(country)` | Country-specific rules | `phone_normalize("NL")("0612")` → `"+31612"` |
+
+#### Email Cleaners
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `email()` | Lowercase, strip, remove noise | `"John@Example.COM (John)"` → `"john@example.com"` |
+| `email_domain()` | Extract domain | `"user@example.com"` → `"example.com"` |
+
+#### URL Cleaners
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `url()` | All-in-one: https, fix www | `"wwwexample.com"` → `"https://www.example.com"` |
+| `url_https()` | Convert http to https | `"http://..."` → `"https://..."` |
+| `url_fix_www()` | Fix missing dot after www | `"wwwtest.com"` → `"www.test.com"` |
+
+#### VAT Cleaners
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `vat()` | Keep letters, digits, hyphen | `"NL 123.456.789.B01"` → `"NL123456789B01"` |
+| `vat_or_exempt(exempt_values, marker)` | Handle exempt cases | See below |
+
+```python
+# Mark VAT-exempt values with "/" prefix for Odoo bypass
+clean.vat_or_exempt(
+    exempt_values=["no vat", "church", "non-profit"],
+    marker="/"
+)("no vat")  # Returns "/no vat"
+```
+
+#### Name Cleaners
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `name_clean()` | Strip titles, normalize space | `"Mr.  John   Doe"` → `"John Doe"` |
+| `name_strip_title()` | Remove Mr., Mrs., Dr., etc. | `"Dr. Jane Smith"` → `"Jane Smith"` |
+| `name_filter_common()` | Filter placeholder names | `"Test User"` → `None` |
+
+#### String Cleaners
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `strip()` | Remove leading/trailing whitespace | `"  hello  "` → `"hello"` |
+| `normalize_space()` | Collapse multiple spaces | `"hello   world"` → `"hello world"` |
+| `lower()` / `upper()` / `title()` | Case conversion | Standard behavior |
+| `truncate(max_len)` | Limit string length | `truncate(5)("hello world")` → `"hello"` |
+| `default(value)` | Default if empty/None | `default("N/A")(None)` → `"N/A"` |
+
+#### Zip Code Cleaners
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `zip_code()` | Remove spaces | `"1234 AB"` → `"1234AB"` |
+| `zip_strip_prefix()` | Remove country prefix | `"NL-1234AB"` → `"1234AB"` |
+
+#### Numeric Cleaners
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `digits()` | Keep only digits | `"abc123def"` → `"123"` |
+| `numeric(decimal, thousands)` | Parse decimal number | `numeric(",", ".")("1.234,56")` → `"1234.56"` |
+
+### Chaining Cleaners
+
+Use `pipe()` to chain multiple cleaners:
+
+```python
+from odoo_data_flow.lib import clean
+
+# Chain cleaners left-to-right
+mapping = {
+    "code": mapper.val("Code", postprocess=clean.pipe(
+        clean.strip(),
+        clean.upper(),
+        clean.truncate(10),
+    )),
+}
+```
+
+### Stateful Cleaners
+
+Some cleaners share data between fields. For example, deriving a website from an email domain:
+
+```python
+from odoo_data_flow.lib import mapper, clean
+
+mapping = {
+    # email() stores the domain in shared state
+    "email": mapper.val("Email", postprocess=clean.email()),
+    # website_from_email() reads from state if website is empty
+    "website": mapper.val("Website", postprocess=clean.website_from_email()),
+}
+
+# Input:  {"Email": "john@acme.com", "Website": ""}
+# Output: {"email": "john@acme.com", "website": "https://www.acme.com"}
+```
+
+Common email providers (gmail.com, yahoo.com, etc.) are automatically filtered out.
+
+### Extending Constants
+
+All default constants can be extended:
+
+```python
+from odoo_data_flow.lib import clean
+
+# Add your own email providers to exclude
+clean.COMMON_EMAIL_PROVIDERS.add("yourcompany.com")
+
+# Add placeholder names to filter
+clean.COMMON_FILTER_NAMES.add("internal")
+
+# Or override per-call
+clean.name_filter_common(filter_names={"test", "demo", "acme"})
+```
+
+Available constants:
+- `COMMON_EMAIL_PROVIDERS`: Email domains to exclude from website derivation
+- `COMMON_FILTER_NAMES`: Placeholder names to filter out
+- `TITLES`: Titles to strip (Mr., Mrs., Dr., etc.)
+- `VAT_EXEMPT_VALUES`: Values indicating VAT exemption
+- `PHONE_COUNTRY_RULES`: Country-specific phone normalization rules
