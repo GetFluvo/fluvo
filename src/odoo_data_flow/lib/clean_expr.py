@@ -481,7 +481,12 @@ def phone_normalize(
 
 
 def email(field: str) -> pl.Expr:
-    """Clean email: strip, lowercase, remove trailing noise like "(Name)".
+    """Clean email: strip, lowercase, remove noise and invalid prefixes.
+
+    Handles common issues:
+    - Removes "mailto:" prefix
+    - Handles colons as separators (extracts email after last colon before @)
+    - Removes trailing noise like "(Name)"
 
     Args:
         field: Source column name.
@@ -489,9 +494,28 @@ def email(field: str) -> pl.Expr:
     Returns:
         Polars expression.
     """
-    col = pl.col(field).cast(pl.String)
+    col = pl.col(field).cast(pl.String).str.strip_chars()
+
+    # Remove mailto: prefix (case insensitive)
+    without_mailto = col.str.replace(r"(?i)^mailto:", "")
+
+    # If there's a colon and @, extract the email part
+    # This handles cases like "label:user@example.com" or multiple colons
+    # Use regex to extract email pattern after any colon
+    has_colon_and_at = without_mailto.str.contains(":") & without_mailto.str.contains(
+        "@"
+    )
+    # Extract first email-like pattern (anything with @ that's not before a colon)
+    extracted = without_mailto.str.extract(r"(?:^|:)\s*([^:@\s]+@[^:\s]+)", 1)
+
+    cleaned = (
+        pl.when(has_colon_and_at & extracted.is_not_null())
+        .then(extracted)
+        .otherwise(without_mailto)
+    )
+
     return (
-        col.str.strip_chars()
+        cleaned.str.strip_chars()
         .str.replace(r"\s*\([^)]*\)\s*$", "")  # Remove (Name) suffix
         .str.strip_chars()
         .str.to_lowercase()

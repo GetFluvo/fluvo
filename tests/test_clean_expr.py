@@ -180,6 +180,31 @@ class TestEmailCleaners:
         result = apply_expr(clean_expr.email("col"), "")
         assert result == ""
 
+    def test_email_mailto_prefix(self) -> None:
+        """Test email removes mailto: prefix."""
+        result = apply_expr(clean_expr.email("col"), "mailto:john@example.com")
+        assert result == "john@example.com"
+
+    def test_email_mailto_prefix_uppercase(self) -> None:
+        """Test email removes MAILTO: prefix (case insensitive)."""
+        result = apply_expr(clean_expr.email("col"), "MAILTO:john@example.com")
+        assert result == "john@example.com"
+
+    def test_email_colon_separator(self) -> None:
+        """Test email handles colon as separator."""
+        result = apply_expr(clean_expr.email("col"), "label:john@example.com")
+        assert result == "john@example.com"
+
+    def test_email_multiple_colons(self) -> None:
+        """Test email handles multiple colons."""
+        result = apply_expr(clean_expr.email("col"), "Work:Sales:john@example.com")
+        assert result == "john@example.com"
+
+    def test_email_trailing_colon(self) -> None:
+        """Test email handles trailing colon."""
+        result = apply_expr(clean_expr.email("col"), "john@example.com:")
+        assert result == "john@example.com"
+
     def test_email_domain(self) -> None:
         """Test email_domain extraction."""
         result = apply_expr(clean_expr.email_domain("col"), "user@example.com")

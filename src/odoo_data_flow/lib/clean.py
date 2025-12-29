@@ -99,6 +99,7 @@ StatefulCleaner = Callable[..., Any]  # Can take 1 or 2 args
 _PHONE_PATTERN = re.compile(r"[^\d]")
 _PHONE_PLUS_PATTERN = re.compile(r"[^\d+]")
 _EMAIL_NOISE_PATTERN = re.compile(r"\s*\([^)]*\)\s*$")
+_EMAIL_MAILTO_PATTERN = re.compile(r"^mailto:", re.IGNORECASE)
 _MULTI_SPACE_PATTERN = re.compile(r"\s+")
 _URL_WWW_FIX = re.compile(r"^(https?://)?www([^.\s])")
 _URL_SCHEME_PATTERN = re.compile(r"^https?://")
@@ -580,7 +581,12 @@ def phone_clean(
 
 
 def email() -> Callable[..., Any]:
-    """Clean email: strip, lowercase, remove trailing noise.
+    """Clean email: strip, lowercase, remove noise and invalid prefixes.
+
+    Handles common issues:
+    - Removes "mailto:" prefix
+    - Handles colons as separators (takes first email)
+    - Removes trailing noise like "(John)"
 
     Also stores domain in state for use by website_from_email().
     Can be called with 1 arg (value) or 2 args (value, state).
@@ -589,6 +595,21 @@ def email() -> Callable[..., Any]:
     def clean(value: Any, state: Optional[dict[str, Any]] = None) -> Any:
         if not value or not isinstance(value, str):
             return value
+
+        value = value.strip()
+
+        # Remove mailto: prefix
+        value = _EMAIL_MAILTO_PATTERN.sub("", value)
+
+        # Handle colons as separators (take first email-like part)
+        if ":" in value and "@" in value:
+            # Split by colon and find first part containing @
+            for part in value.split(":"):
+                part = part.strip()
+                if "@" in part:
+                    value = part
+                    break
+
         # Remove trailing noise like "(John)"
         value = _EMAIL_NOISE_PATTERN.sub("", value)
         value = value.strip().lower()
