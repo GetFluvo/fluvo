@@ -733,11 +733,12 @@ The `zip_code()` cleaner:
 - Removes all spaces and commas: `"1234, AB"` → `"1234AB"`
 - Filters out invalid values starting with `e-` (returns `None`): `"e-12345"` → `None`
 
-#### City Cleaners
+#### City & Street Cleaners
 
 | Function | Description | Example |
 |----------|-------------|---------|
 | `city()` | Clean city name with title case | `"amsterdam (NH)"` → `"Amsterdam"` |
+| `street()` | Clean street address (preserves case) | `"123 Main St (Apt 4)"` → `"123 Main St"` |
 
 The `city()` cleaner:
 - Strips whitespace and normalizes to title case: `"amsterdam"` → `"Amsterdam"`
@@ -745,6 +746,14 @@ The `city()` cleaner:
 - Removes trailing postal codes: `"Amsterdam 1012 AB"` → `"Amsterdam"`
 - Removes leading/trailing punctuation: `",Amsterdam."` → `"Amsterdam"`
 - Collapses multiple spaces: `"New   York"` → `"New York"`
+- Filters out invalid values starting with `e-` (returns `None`)
+
+The `street()` cleaner:
+- Strips whitespace: `"  123 Main St  "` → `"123 Main St"`
+- Removes parenthetical notes: `"123 Main St (Apt 4)"` → `"123 Main St"`
+- Removes leading/trailing punctuation: `",123 Main St."` → `"123 Main St"`
+- Collapses multiple spaces: `"123   Main   St"` → `"123 Main St"`
+- Preserves original case (unlike `city()`)
 - Filters out invalid values starting with `e-` (returns `None`)
 
 #### Numeric Cleaners

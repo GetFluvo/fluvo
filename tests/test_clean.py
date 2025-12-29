@@ -398,6 +398,42 @@ class TestCityCleaners:
         assert clean.city()("los angeles") == "Los Angeles"
 
 
+class TestStreetCleaners:
+    """Tests for street cleaner functions."""
+
+    def test_street_basic(self) -> None:
+        """Test basic street cleaning."""
+        assert clean.street()("  123 Main Street  ") == "123 Main Street"
+
+    def test_street_removes_parenthetical(self) -> None:
+        """Test street removes parenthetical notes."""
+        assert clean.street()("123 Main St (Apt 4)") == "123 Main St"
+
+    def test_street_removes_punctuation(self) -> None:
+        """Test street removes leading/trailing punctuation."""
+        assert clean.street()(",123 Main St,") == "123 Main St"
+        assert clean.street()("123 Main St.") == "123 Main St"
+
+    def test_street_normalizes_spaces(self) -> None:
+        """Test street normalizes multiple spaces."""
+        assert clean.street()("123   Main   Street") == "123 Main Street"
+
+    def test_street_preserves_case(self) -> None:
+        """Test street preserves original case."""
+        assert clean.street()("123 MAIN STREET") == "123 MAIN STREET"
+        assert clean.street()("123 main street") == "123 main street"
+
+    def test_street_filters_e_prefix(self) -> None:
+        """Test street filters out values starting with e-."""
+        assert clean.street()("e-mail") is None
+        assert clean.street()("E-commerce") is None
+
+    def test_street_empty(self) -> None:
+        """Test street returns None for empty values."""
+        assert clean.street()("") is None
+        assert clean.street()(None) is None
+
+
 class TestNameCleaners:
     """Tests for name cleaner functions."""
 

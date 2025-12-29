@@ -364,6 +364,40 @@ class TestCityCleaners:
         assert result == "New York"
 
 
+class TestStreetCleaners:
+    """Tests for street cleaner functions."""
+
+    def test_street_basic(self) -> None:
+        """Test basic street cleaning."""
+        result = apply_expr(clean_expr.street("col"), "  123 Main Street  ")
+        assert result == "123 Main Street"
+
+    def test_street_removes_parenthetical(self) -> None:
+        """Test street removes parenthetical notes."""
+        result = apply_expr(clean_expr.street("col"), "123 Main St (Apt 4)")
+        assert result == "123 Main St"
+
+    def test_street_removes_punctuation(self) -> None:
+        """Test street removes leading/trailing punctuation."""
+        result = apply_expr(clean_expr.street("col"), ",123 Main St,")
+        assert result == "123 Main St"
+
+    def test_street_normalizes_spaces(self) -> None:
+        """Test street normalizes multiple spaces."""
+        result = apply_expr(clean_expr.street("col"), "123   Main   Street")
+        assert result == "123 Main Street"
+
+    def test_street_preserves_case(self) -> None:
+        """Test street preserves original case."""
+        result = apply_expr(clean_expr.street("col"), "123 MAIN STREET")
+        assert result == "123 MAIN STREET"
+
+    def test_street_filters_e_prefix(self) -> None:
+        """Test street filters out values starting with e-."""
+        result = apply_expr(clean_expr.street("col"), "e-mail")
+        assert result is None
+
+
 class TestNameCleaners:
     """Tests for name cleaner functions."""
 

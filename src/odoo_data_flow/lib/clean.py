@@ -1050,6 +1050,40 @@ def city() -> Cleaner:
     return clean
 
 
+def street() -> Cleaner:
+    """Clean street address: normalize spacing, remove noise.
+
+    Performs the following cleaning:
+    - Strip whitespace
+    - Remove parenthetical notes
+    - Remove leading/trailing punctuation (commas, periods)
+    - Normalize multiple spaces
+    - Filter out invalid values (e.g., starting with "e-")
+
+    Note: Does NOT change case, as street addresses often have specific
+    formatting (house numbers, abbreviations like "Ave.", "St.", etc.).
+    """
+
+    def clean(value: Any) -> Any:
+        if value is None or not isinstance(value, str):
+            return value
+        value = value.strip()
+        if not value:
+            return None
+        # Filter out invalid values starting with "e-"
+        if value.lower().startswith("e-"):
+            return None
+        # Remove parenthetical notes
+        value = re.sub(r"\s*\([^)]*\)\s*", " ", value)
+        # Remove leading/trailing punctuation
+        value = value.strip(" ,.")
+        # Normalize multiple spaces
+        value = re.sub(r"\s+", " ", value)
+        return value if value else None
+
+    return clean
+
+
 # =============================================================================
 # ADDRESS CLEANERS (City/Postal Separation & Country Detection)
 # =============================================================================

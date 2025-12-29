@@ -918,6 +918,49 @@ def city(field: str) -> pl.Expr:
     )
 
 
+def street(field: str) -> pl.Expr:
+    """Clean street address: normalize spacing, remove noise.
+
+    Performs the following cleaning:
+    - Strip whitespace
+    - Remove parenthetical notes
+    - Remove leading/trailing punctuation (commas, periods)
+    - Normalize multiple spaces
+    - Filter out invalid values (e.g., starting with "e-")
+
+    Note: Does NOT change case, as street addresses often have specific
+    formatting (house numbers, abbreviations like "Ave.", "St.", etc.).
+
+    Args:
+        field: Source column name.
+
+    Returns:
+        Polars expression.
+    """
+    col = pl.col(field).cast(pl.String).str.strip_chars()
+
+    # Filter out values starting with "e-"
+    is_invalid = col.str.to_lowercase().str.starts_with("e-")
+
+    # Clean the value
+    cleaned = (
+        col
+        # Remove parenthetical notes
+        .str.replace_all(r"\s*\([^)]*\)\s*", " ")
+        # Remove leading/trailing punctuation
+        .str.strip_chars(" ,.")
+        # Normalize multiple spaces
+        .str.replace_all(r"\s+", " ")
+    )
+
+    # Return null for invalid or empty values
+    return (
+        pl.when(is_invalid | (cleaned.str.len_chars() == 0))
+        .then(pl.lit(None))
+        .otherwise(cleaned)
+    )
+
+
 # =============================================================================
 # ADDRESS CLEANERS (City/Postal Separation)
 # =============================================================================
