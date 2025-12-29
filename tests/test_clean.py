@@ -2,8 +2,6 @@
 
 from typing import Any
 
-import pytest
-
 from odoo_data_flow.lib import clean
 
 
@@ -154,6 +152,26 @@ class TestPhoneCleaners:
         """Test phone normalization with unknown country falls back to basic."""
         assert clean.phone_normalize("XX")("+1234567890") == "+1234567890"
 
+    def test_phone_normalize_country_code_without_plus(self) -> None:
+        """Test phone normalization when number starts with country code."""
+        assert clean.phone_normalize("NL")("31612345678") == "+31612345678"
+
+    def test_phone_normalize_00_prefix(self) -> None:
+        """Test phone normalization with 00 international dialing prefix."""
+        assert clean.phone_normalize("NL")("0031612345678") == "+31612345678"
+
+    def test_phone_normalize_00_prefix_with_spaces(self) -> None:
+        """Test phone normalization with 00 prefix and spaces."""
+        assert clean.phone_normalize("NL")("00 31 6 12345678") == "+31612345678"
+
+    def test_phone_normalize_be_country_code(self) -> None:
+        """Test phone normalization for Belgium with raw country code."""
+        assert clean.phone_normalize("BE")("32412345678") == "+32412345678"
+
+    def test_phone_normalize_be_00_prefix(self) -> None:
+        """Test phone normalization for Belgium with 00 prefix."""
+        assert clean.phone_normalize("BE")("0032412345678") == "+32412345678"
+
     def test_phone_clean_with_country(self) -> None:
         """Test phone_clean all-in-one cleaner."""
         assert clean.phone_clean("NL")("  06 12 34 56 78  ") == "+31612345678"
@@ -200,7 +218,10 @@ class TestEmailCleaners:
     def test_website_from_email_preserves_existing(self) -> None:
         """Test website_from_email preserves existing website."""
         state = {"_email_domain": "example.com"}
-        assert clean.website_from_email()("https://other.com", state) == "https://other.com"
+        assert (
+            clean.website_from_email()("https://other.com", state)
+            == "https://other.com"
+        )
 
     def test_website_from_email_filters_providers(self) -> None:
         """Test website_from_email filters common providers."""

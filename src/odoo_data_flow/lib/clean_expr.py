@@ -406,11 +406,7 @@ def phone_digits(field: str) -> pl.Expr:
     """
     col = pl.col(field).cast(pl.String).str.strip_chars()
     digits = col.str.replace_all(r"[^\d]", "")
-    return (
-        pl.when(col.is_null() | (col == ""))
-        .then(pl.lit(None))
-        .otherwise(digits)
-    )
+    return pl.when(col.is_null() | (col == "")).then(pl.lit(None)).otherwise(digits)
 
 
 def phone_normalize(
@@ -420,8 +416,11 @@ def phone_normalize(
 ) -> pl.Expr:
     """Normalize phone number for specific country.
 
-    Converts national format to international format.
-    E.g., for NL: "0612345678" -> "+31612345678", "06 12 34 56 78" -> "+31612345678"
+    Converts various formats to international format with + prefix:
+    - National format: "0612345678" -> "+31612345678"
+    - Country code without +: "31612345678" -> "+31612345678"
+    - International dialing (00): "0031612345678" -> "+31612345678"
+    - Already international: "+31612345678" -> "+31612345678"
 
     Args:
         field: Source column name.
@@ -443,10 +442,15 @@ def phone_normalize(
     col = pl.col(field).cast(pl.String).str.strip_chars()
     digits = col.str.replace_all(r"[^\d+]", "")
 
-    # Already international format
+    # Check various formats
     has_plus = digits.str.starts_with("+")
+    starts_00_country = digits.str.starts_with("00" + country_code)
+    starts_country = digits.str.starts_with(country_code)
 
-    # Starts with national prefix (e.g., "0" for NL)
+    # For 00 prefix: remove "00" and add "+"
+    digits_after_00 = digits.str.slice(2)
+
+    # For national prefix: remove it
     if national_prefix:
         starts_national = digits.str.starts_with(national_prefix)
         national_digits = digits.str.slice(len(national_prefix))
@@ -458,10 +462,16 @@ def phone_normalize(
         pl.when(col.is_null() | (col == ""))
         .then(pl.lit(None))
         .when(has_plus)
-        .then(digits)  # Already international
+        .then(digits)  # Already international with +
+        .when(starts_00_country)
+        .then(pl.concat_str([pl.lit("+"), digits_after_00]))  # 0031... -> +31...
+        .when(starts_country)
+        .then(pl.concat_str([pl.lit("+"), digits]))  # 31... -> +31...
         .when(starts_national)
-        .then(pl.concat_str([pl.lit(f"+{country_code}"), national_digits]))
-        .otherwise(pl.concat_str([pl.lit(f"+{country_code}"), digits]))
+        .then(
+            pl.concat_str([pl.lit(f"+{country_code}"), national_digits])
+        )  # 06... -> +316...
+        .otherwise(pl.concat_str([pl.lit(f"+{country_code}"), digits]))  # Fallback
     )
 
 
@@ -539,7 +549,9 @@ def url(field: str) -> pl.Expr:
 
     # Add https:// if no scheme
     with_scheme = (
-        pl.when(has_scheme).then(fixed).otherwise(pl.concat_str([pl.lit("https://"), fixed]))
+        pl.when(has_scheme)
+        .then(fixed)
+        .otherwise(pl.concat_str([pl.lit("https://"), fixed]))
     )
 
     # Convert http:// to https://
@@ -623,7 +635,11 @@ def vat(field: str) -> pl.Expr:
     return (
         pl.when(col.is_null() | (col.str.strip_chars() == ""))
         .then(pl.lit(None))
-        .otherwise(col.str.strip_chars().str.replace_all(r"[^A-Za-z0-9-]", "").str.to_uppercase())
+        .otherwise(
+            col.str.strip_chars()
+            .str.replace_all(r"[^A-Za-z0-9-]", "")
+            .str.to_uppercase()
+        )
     )
 
 
@@ -654,7 +670,9 @@ def vat_or_exempt(
     lower_col = col.str.strip_chars().str.to_lowercase()
 
     is_exempt = lower_col.is_in(exempt_list)
-    cleaned_vat = col.str.strip_chars().str.replace_all(r"[^A-Za-z0-9-]", "").str.to_uppercase()
+    cleaned_vat = (
+        col.str.strip_chars().str.replace_all(r"[^A-Za-z0-9-]", "").str.to_uppercase()
+    )
 
     return (
         pl.when(col.is_null() | (col.str.strip_chars() == ""))
@@ -785,7 +803,11 @@ def name_filter_common(field: str, filter_names: Optional[set[str]] = None) -> p
     col = pl.col(field).cast(pl.String)
     lower_col = col.str.strip_chars().str.to_lowercase()
 
-    return pl.when(lower_col.is_in(names_list)).then(pl.lit(None)).otherwise(col.str.strip_chars())
+    return (
+        pl.when(lower_col.is_in(names_list))
+        .then(pl.lit(None))
+        .otherwise(col.str.strip_chars())
+    )
 
 
 def name_clean(

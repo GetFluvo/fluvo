@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 
 __all__ = [
     # Composition
@@ -505,8 +505,11 @@ def phone_normalize(
 ) -> Cleaner:
     """Normalize phone number for specific country.
 
-    Converts national format to international format.
-    E.g., for NL: "0612345678" -> "+31612345678"
+    Converts various formats to international format with + prefix:
+    - National format: "0612345678" -> "+31612345678"
+    - Country code without +: "31612345678" -> "+31612345678"
+    - International dialing (00): "0031612345678" -> "+31612345678"
+    - Already international: "+31612345678" -> "+31612345678"
 
     Args:
         country: Country code (e.g., "NL", "BE", "DE").
@@ -534,14 +537,23 @@ def phone_normalize(
         # Remove all non-digits except +
         cleaned = _PHONE_PLUS_PATTERN.sub("", value)
 
-        # Already international format
+        # Already international format with +
         if cleaned.startswith("+"):
             return cleaned
 
-        # Remove national prefix and add country code
-        if national_prefix and cleaned.startswith(national_prefix):
-            cleaned = cleaned[len(national_prefix) :]
+        # International dialing format: 00 + country code (e.g., 0031...)
+        if cleaned.startswith("00" + country_code):
+            return "+" + cleaned[2:]
 
+        # Starts with country code directly (e.g., 31612345678)
+        if cleaned.startswith(country_code):
+            return "+" + cleaned
+
+        # National format: starts with national prefix (e.g., 0612345678)
+        if national_prefix and cleaned.startswith(national_prefix):
+            return f"+{country_code}{cleaned[len(national_prefix) :]}"
+
+        # Fallback: assume it's a local number, add country code
         return f"+{country_code}{cleaned}"
 
     return clean
@@ -811,7 +823,9 @@ def name_strip_title(titles: Optional[set[str]] = None) -> Cleaner:
         titles: Set of titles to remove.
     """
     titles_set = titles or TITLES
-    pattern = re.compile("^(" + "|".join(re.escape(t) for t in titles_set) + r")\s+", re.IGNORECASE)
+    pattern = re.compile(
+        "^(" + "|".join(re.escape(t) for t in titles_set) + r")\s+", re.IGNORECASE
+    )
 
     def clean(value: Any) -> Any:
         if not value or not isinstance(value, str):

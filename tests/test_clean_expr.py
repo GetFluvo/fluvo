@@ -3,7 +3,6 @@
 from typing import Any
 
 import polars as pl
-import pytest
 
 from odoo_data_flow.lib import clean_expr
 
@@ -133,9 +132,34 @@ class TestPhoneCleaners:
         assert result == "+32412345678"
 
     def test_phone_normalize_unknown_country(self) -> None:
-        """Test phone normalization with unknown country falls back to basic cleaning."""
+        """Test phone normalization with unknown country falls back."""
         result = apply_expr(clean_expr.phone_normalize("col", "XX"), "+1234567890")
         assert result == "+1234567890"
+
+    def test_phone_normalize_country_code_without_plus(self) -> None:
+        """Test phone normalization when number starts with country code."""
+        result = apply_expr(clean_expr.phone_normalize("col", "NL"), "31612345678")
+        assert result == "+31612345678"
+
+    def test_phone_normalize_00_prefix(self) -> None:
+        """Test phone normalization with 00 international dialing prefix."""
+        result = apply_expr(clean_expr.phone_normalize("col", "NL"), "0031612345678")
+        assert result == "+31612345678"
+
+    def test_phone_normalize_00_prefix_with_spaces(self) -> None:
+        """Test phone normalization with 00 prefix and spaces."""
+        result = apply_expr(clean_expr.phone_normalize("col", "NL"), "00 31 6 12345678")
+        assert result == "+31612345678"
+
+    def test_phone_normalize_be_country_code(self) -> None:
+        """Test phone normalization for Belgium with raw country code."""
+        result = apply_expr(clean_expr.phone_normalize("col", "BE"), "32412345678")
+        assert result == "+32412345678"
+
+    def test_phone_normalize_be_00_prefix(self) -> None:
+        """Test phone normalization for Belgium with 00 prefix."""
+        result = apply_expr(clean_expr.phone_normalize("col", "BE"), "0032412345678")
+        assert result == "+32412345678"
 
 
 class TestEmailCleaners:
@@ -401,7 +425,9 @@ class TestDataFrameIntegration:
         """Test chaining cleaners using Polars method chaining."""
         df = pl.DataFrame({"text": ["  HELLO WORLD  "]})
 
-        # You can't directly chain clean_expr functions, but you can compose Polars expressions
-        result = df.select(pl.col("text").str.strip_chars().str.to_lowercase().alias("result"))
+        # Chain using native Polars expression methods
+        result = df.select(
+            pl.col("text").str.strip_chars().str.to_lowercase().alias("result")
+        )
 
         assert result["result"][0] == "hello world"
