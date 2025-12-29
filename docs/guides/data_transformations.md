@@ -643,6 +643,75 @@ clean.vat_or_exempt(
 | `name_strip_title()` | Remove Mr., Mrs., Dr., etc. | `"Dr. Jane Smith"` → `"Jane Smith"` |
 | `name_filter_common()` | Filter placeholder names | `"Test User"` → `None` |
 
+#### Company Suffix Cleaners
+
+Normalize business entity suffixes to their canonical forms. Handles variations across multiple countries.
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `company_suffix()` | Normalize legal suffix | `"Acme BV"` → `"Acme B.V."` |
+
+**Supported countries and their canonical forms:**
+
+| Country | Variations | Canonical |
+|---------|------------|-----------|
+| NL | BV, Bv, bv, B.V | B.V. |
+| NL | NV, nv | N.V. |
+| DE | gmbh, GMBH, GmbH | GmbH |
+| DE | AG, ag | AG |
+| BE | BVBA, bvba | B.V.B.A. |
+| FR | SARL, sarl, S.A.R.L | S.A.R.L. |
+| FR | SAS, sas | S.A.S. |
+| UK | Ltd, LTD, ltd, Limited | Ltd. |
+| UK | PLC, plc | PLC |
+| US | Inc, INC, Incorporated | Inc. |
+| US | LLC, llc | LLC |
+| IT | SPA, spa | S.p.A. |
+| ES | SL, sl | S.L. |
+| DK/NO | AS, as | A/S |
+| SE | AB, ab | AB |
+
+**Usage with mapper (row-by-row):**
+
+```python
+from odoo_data_flow.lib import mapper, clean
+
+mapping = {
+    "name": mapper.val("CompanyName", postprocess=clean.company_suffix()),
+}
+
+# Input:  {"CompanyName": "Acme BV"}
+# Output: {"name": "Acme B.V."}
+
+# Input:  {"CompanyName": "Test gmbh"}
+# Output: {"name": "Test GmbH"}
+
+# Input:  {"CompanyName": "Corp Limited"}
+# Output: {"name": "Corp Ltd."}
+```
+
+**Usage with Polars expressions:**
+
+```python
+from odoo_data_flow.lib import clean_expr
+
+mapping = {
+    "name": clean_expr.company_suffix("CompanyName"),
+}
+```
+
+**Custom suffix mapping:**
+
+```python
+# Override with your own suffixes
+custom_suffixes = {"xyz": "X.Y.Z.", "abc": "A.B.C."}
+clean.company_suffix(suffixes=custom_suffixes)
+
+# Or extend the default mapping
+from odoo_data_flow.lib import clean
+clean.COMPANY_SUFFIX_CANONICAL["myco"] = "MyCo."
+```
+
 #### String Cleaners
 
 | Function | Description | Example |
@@ -727,3 +796,4 @@ Available constants:
 - `TITLES`: Titles to strip (Mr., Mrs., Dr., etc.)
 - `VAT_EXEMPT_VALUES`: Values indicating VAT exemption
 - `PHONE_COUNTRY_RULES`: Country-specific phone normalization rules
+- `COMPANY_SUFFIX_CANONICAL`: Business entity suffix mappings (BV → B.V., etc.)
