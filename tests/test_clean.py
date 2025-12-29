@@ -682,3 +682,140 @@ class TestAddressConstantsExtensibility:
         assert len(clean.MAJOR_CITIES) == original_size + 1
         # Clean up
         del clean.MAJOR_CITIES["test_city_xyz"]
+
+
+class TestCompanySuffix:
+    """Tests for company name suffix normalization."""
+
+    def test_normalize_dutch_bv(self) -> None:
+        """Test normalizing Dutch BV variations."""
+        cleaner = clean.company_suffix()
+        assert cleaner("Acme BV") == "Acme B.V."
+        assert cleaner("Acme Bv") == "Acme B.V."
+        assert cleaner("Acme bv") == "Acme B.V."
+        assert cleaner("Acme B.V.") == "Acme B.V."
+        assert cleaner("Acme B.V") == "Acme B.V."
+
+    def test_normalize_dutch_nv(self) -> None:
+        """Test normalizing Dutch NV variations."""
+        cleaner = clean.company_suffix()
+        assert cleaner("Company NV") == "Company N.V."
+        assert cleaner("Company N.V.") == "Company N.V."
+
+    def test_normalize_german_gmbh(self) -> None:
+        """Test normalizing German GmbH variations."""
+        cleaner = clean.company_suffix()
+        assert cleaner("Test gmbh") == "Test GmbH"
+        assert cleaner("Test GMBH") == "Test GmbH"
+        assert cleaner("Test GmbH") == "Test GmbH"
+
+    def test_normalize_uk_ltd(self) -> None:
+        """Test normalizing UK Ltd variations."""
+        cleaner = clean.company_suffix()
+        assert cleaner("Company Ltd") == "Company Ltd."
+        assert cleaner("Company ltd") == "Company Ltd."
+        assert cleaner("Company LTD") == "Company Ltd."
+        assert cleaner("Company Ltd.") == "Company Ltd."
+
+    def test_normalize_uk_limited(self) -> None:
+        """Test normalizing UK Limited to Ltd."""
+        cleaner = clean.company_suffix()
+        assert cleaner("Smith & Sons Limited") == "Smith & Sons Ltd."
+        assert cleaner("Smith & Sons limited") == "Smith & Sons Ltd."
+
+    def test_normalize_us_inc(self) -> None:
+        """Test normalizing US Inc variations."""
+        cleaner = clean.company_suffix()
+        assert cleaner("Corp Inc") == "Corp Inc."
+        assert cleaner("Corp INC") == "Corp Inc."
+        assert cleaner("Corp Inc.") == "Corp Inc."
+
+    def test_normalize_us_llc(self) -> None:
+        """Test normalizing US LLC."""
+        cleaner = clean.company_suffix()
+        assert cleaner("Company LLC") == "Company LLC"
+        assert cleaner("Company llc") == "Company LLC"
+
+    def test_normalize_french_sarl(self) -> None:
+        """Test normalizing French SARL variations."""
+        cleaner = clean.company_suffix()
+        assert cleaner("Company SARL") == "Company S.A.R.L."
+        assert cleaner("Company S.A.R.L.") == "Company S.A.R.L."
+
+    def test_normalize_belgian_bvba(self) -> None:
+        """Test normalizing Belgian BVBA."""
+        cleaner = clean.company_suffix()
+        assert cleaner("Company BVBA") == "Company B.V.B.A."
+        assert cleaner("Company bvba") == "Company B.V.B.A."
+
+    def test_normalize_italian_spa(self) -> None:
+        """Test normalizing Italian S.p.A."""
+        cleaner = clean.company_suffix()
+        assert cleaner("Company SPA") == "Company S.p.A."
+        assert cleaner("Company spa") == "Company S.p.A."
+
+    def test_normalize_scandinavian_ab(self) -> None:
+        """Test normalizing Swedish AB."""
+        cleaner = clean.company_suffix()
+        assert cleaner("Company AB") == "Company AB"
+        assert cleaner("Company ab") == "Company AB"
+
+    def test_normalize_danish_as(self) -> None:
+        """Test normalizing Danish A/S."""
+        cleaner = clean.company_suffix()
+        assert cleaner("Company AS") == "Company A/S"
+        assert cleaner("Company as") == "Company A/S"
+
+    def test_no_suffix_unchanged(self) -> None:
+        """Test company name without suffix is unchanged."""
+        cleaner = clean.company_suffix()
+        assert cleaner("Regular Company Name") == "Regular Company Name"
+
+    def test_suffix_with_trailing_spaces(self) -> None:
+        """Test handling trailing spaces."""
+        cleaner = clean.company_suffix()
+        assert cleaner("Acme BV  ") == "Acme B.V."
+
+    def test_empty_value(self) -> None:
+        """Test empty/None values."""
+        cleaner = clean.company_suffix()
+        assert cleaner(None) is None
+        assert cleaner("") is None
+        assert cleaner("  ") is None
+
+    def test_custom_suffixes(self) -> None:
+        """Test with custom suffix mapping."""
+        custom_suffixes = {"xyz": "X.Y.Z."}
+        cleaner = clean.company_suffix(suffixes=custom_suffixes)
+        assert cleaner("Company XYZ") == "Company X.Y.Z."
+        assert cleaner("Company xyz") == "Company X.Y.Z."
+
+    def test_preserves_company_name(self) -> None:
+        """Test that company name part is preserved."""
+        cleaner = clean.company_suffix()
+        assert cleaner("B&V Trading BV") == "B&V Trading B.V."
+        assert cleaner("Test-Company GmbH") == "Test-Company GmbH"
+
+
+class TestCompanySuffixConstant:
+    """Tests for COMPANY_SUFFIX_CANONICAL constant."""
+
+    def test_constant_is_dict(self) -> None:
+        """Test COMPANY_SUFFIX_CANONICAL is a dict."""
+        assert isinstance(clean.COMPANY_SUFFIX_CANONICAL, dict)
+
+    def test_contains_common_suffixes(self) -> None:
+        """Test constant contains expected suffixes."""
+        assert "bv" in clean.COMPANY_SUFFIX_CANONICAL
+        assert "nv" in clean.COMPANY_SUFFIX_CANONICAL
+        assert "gmbh" in clean.COMPANY_SUFFIX_CANONICAL
+        assert "ltd" in clean.COMPANY_SUFFIX_CANONICAL
+        assert "llc" in clean.COMPANY_SUFFIX_CANONICAL
+
+    def test_can_extend_suffixes(self) -> None:
+        """Test that COMPANY_SUFFIX_CANONICAL can be extended."""
+        original_size = len(clean.COMPANY_SUFFIX_CANONICAL)
+        clean.COMPANY_SUFFIX_CANONICAL["testsuffix"] = "TEST"
+        assert len(clean.COMPANY_SUFFIX_CANONICAL) == original_size + 1
+        # Clean up
+        del clean.COMPANY_SUFFIX_CANONICAL["testsuffix"]

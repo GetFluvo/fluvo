@@ -92,6 +92,9 @@ __all__ = [
     "PHONE_PREFIX_TO_COUNTRY",
     "POSTAL_PATTERNS",
     "MAJOR_CITIES",
+    # Company cleaners
+    "company_suffix",
+    "COMPANY_SUFFIX_CANONICAL",
 ]
 
 # Type alias for cleaner functions
@@ -474,6 +477,91 @@ MAJOR_CITIES: dict[str, str] = {
     "budapest": "HU",
     "athens": "GR",
     "αθήνα": "GR",
+}
+
+# Company legal suffix canonical forms
+# Key: normalized form (lowercase, no dots, no spaces)
+# Value: canonical form with proper punctuation
+# Note: When the same abbreviation is used in multiple countries with different
+# canonical forms, we use the most internationally common form.
+COMPANY_SUFFIX_CANONICAL: dict[str, str] = {
+    # Netherlands
+    "bv": "B.V.",
+    "nv": "N.V.",
+    "vof": "V.O.F.",
+    "cv": "C.V.",
+    "cvoa": "C.V.o.A.",
+    # Belgium
+    "bvba": "B.V.B.A.",
+    "sprl": "S.P.R.L.",
+    "cvba": "C.V.B.A.",
+    "scrl": "S.C.R.L.",
+    "vzvw": "V.Z.W.",  # non-profit
+    "asbl": "A.S.B.L.",  # non-profit (French)
+    # Germany
+    "gmbh": "GmbH",
+    "ag": "AG",
+    "kg": "KG",
+    "ohg": "OHG",
+    "gbr": "GbR",
+    "ug": "UG",
+    "gmbhcokg": "GmbH & Co. KG",
+    "kgaa": "KGaA",
+    "ev": "e.V.",  # registered association
+    # Austria (same as Germany plus)
+    "gesmbh": "GesmbH",
+    # France / International
+    "sa": "S.A.",
+    "sarl": "S.A.R.L.",  # French form (most common internationally)
+    "sas": "S.A.S.",  # French form
+    "snc": "S.N.C.",  # French form
+    "sasu": "S.A.S.U.",
+    "eurl": "E.U.R.L.",
+    "sci": "S.C.I.",
+    "scp": "S.C.P.",
+    # UK
+    "ltd": "Ltd.",
+    "limited": "Ltd.",
+    "plc": "PLC",
+    "llp": "LLP",
+    "cic": "CIC",
+    # US
+    "inc": "Inc.",
+    "incorporated": "Inc.",
+    "llc": "LLC",
+    "corp": "Corp.",
+    "corporation": "Corp.",
+    "pllc": "PLLC",
+    "lp": "LP",
+    # Italy
+    "spa": "S.p.A.",
+    "srl": "S.r.l.",  # Italian form
+    "sapa": "S.a.p.a.",
+    # Spain
+    "sl": "S.L.",
+    "slne": "S.L.N.E.",
+    "sau": "S.A.U.",
+    "slu": "S.L.U.",
+    # Portugal
+    "lda": "Lda.",
+    "unipessoallda": "Unipessoal Lda.",
+    # Scandinavia
+    "as": "A/S",  # Denmark/Norway (most common)
+    "asa": "ASA",  # Norway (public)
+    "ab": "AB",  # Sweden
+    "aps": "ApS",  # Denmark
+    "oy": "Oy",  # Finland
+    "oyj": "Oyj",  # Finland (public)
+    # Switzerland
+    "sagl": "Sagl",  # Italian Switzerland
+    # Poland
+    "spzoo": "sp. z o.o.",
+    "zoo": "z o.o.",
+    # Czech Republic
+    "sro": "s.r.o.",
+    # Other
+    "se": "SE",  # European Company
+    "scop": "SCOP",  # French cooperative
 }
 
 
@@ -1392,6 +1480,111 @@ def name_clean(
         name_strip_title(titles),
         name_strip_suffix(suffixes),
     )
+
+
+# =============================================================================
+# COMPANY NAME CLEANERS
+# =============================================================================
+
+
+def _normalize_company_suffix(suffix: str) -> str:
+    """Normalize suffix for lookup: lowercase, no dots, no spaces."""
+    return suffix.lower().replace(".", "").replace(" ", "")
+
+
+def _build_suffix_pattern(normalized: str) -> str:
+    """Build regex pattern for suffix that matches with/without dots/spaces.
+
+    E.g., "bv" -> "[Bb]\\.?\\s*[Vv]"
+    E.g., "gmbh" -> "[Gg]\\.?\\s*[Mm]\\.?\\s*[Bb]\\.?\\s*[Hh]"
+    """
+    parts = []
+    for char in normalized:
+        if char.isalpha():
+            parts.append(f"[{char.upper()}{char.lower()}]")
+        elif char == " ":
+            continue  # Skip spaces, we'll add optional space matching
+        else:
+            parts.append(re.escape(char))
+    # Join with optional dot and optional space between each character
+    return r"\.?\s*".join(parts)
+
+
+def company_suffix(
+    suffixes: Optional[dict[str, str]] = None,
+) -> Cleaner:
+    """Normalize company legal suffix (e.g., "BV" → "B.V.", "gmbh" → "GmbH").
+
+    Handles common variations:
+    - Without dots: "BV", "NV", "GmbH"
+    - With dots: "B.V.", "N.V."
+    - Mixed case: "Bv", "bv", "BV"
+    - With spaces: "B V" -> "B.V."
+
+    Examples:
+        >>> company_suffix()("Acme BV")
+        'Acme B.V.'
+        >>> company_suffix()("Example Bv")
+        'Example B.V.'
+        >>> company_suffix()("Test gmbh")
+        'Test GmbH'
+        >>> company_suffix()("Company B.V.")
+        'Company B.V.'
+        >>> company_suffix()("Corp Inc")
+        'Corp Inc.'
+        >>> company_suffix()("Smith & Sons Limited")
+        'Smith & Sons Ltd.'
+
+    Args:
+        suffixes: Custom mapping from normalized suffix to canonical form.
+                  Uses COMPANY_SUFFIX_CANONICAL if not set.
+    """
+    suffix_map = suffixes or COMPANY_SUFFIX_CANONICAL
+
+    # Build regex patterns for all known suffixes
+    # Sort by length (longest first) to match longer patterns first
+    sorted_suffixes = sorted(suffix_map.keys(), key=len, reverse=True)
+
+    # Build individual patterns
+    patterns = []
+    for normalized in sorted_suffixes:
+        pattern = _build_suffix_pattern(normalized)
+        patterns.append(f"({pattern})")
+
+    # Build final pattern: match suffix at end of string, preceded by space
+    # Also allow optional trailing dot
+    combined_pattern = "|".join(patterns)
+    full_pattern = re.compile(
+        r"(\s+)(" + combined_pattern + r")\.?\s*$",
+        re.IGNORECASE,
+    )
+
+    def clean(value: Any) -> Any:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return value
+
+        value = value.strip()
+        if not value:
+            return None
+
+        match = full_pattern.search(value)
+        if match:
+            # Get the space before suffix and the matched suffix
+            space = match.group(1)
+            matched_suffix = match.group(2)
+
+            # Normalize the matched suffix for lookup
+            normalized = _normalize_company_suffix(matched_suffix)
+            if normalized in suffix_map:
+                canonical = suffix_map[normalized]
+                # Replace the suffix with canonical form (keep single space)
+                return value[: match.start()] + " " + canonical
+
+        return value
+
+    return clean
 
 
 # =============================================================================

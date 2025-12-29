@@ -548,3 +548,94 @@ class TestPostalPatternsConstant:
         assert "DE" in clean_expr.POSTAL_PATTERNS
         assert "GB" in clean_expr.POSTAL_PATTERNS
         assert "US" in clean_expr.POSTAL_PATTERNS
+
+
+class TestCompanySuffix:
+    """Tests for company suffix normalization (Polars version)."""
+
+    def test_normalize_dutch_bv(self) -> None:
+        """Test normalizing Dutch BV variations."""
+        assert apply_expr(clean_expr.company_suffix("col"), "Acme BV") == "Acme B.V."
+        assert apply_expr(clean_expr.company_suffix("col"), "Acme Bv") == "Acme B.V."
+        assert apply_expr(clean_expr.company_suffix("col"), "Acme bv") == "Acme B.V."
+
+    def test_normalize_dutch_nv(self) -> None:
+        """Test normalizing Dutch NV variations."""
+        assert apply_expr(clean_expr.company_suffix("col"), "Company NV") == "Company N.V."
+
+    def test_normalize_german_gmbh(self) -> None:
+        """Test normalizing German GmbH variations."""
+        assert apply_expr(clean_expr.company_suffix("col"), "Test gmbh") == "Test GmbH"
+        assert apply_expr(clean_expr.company_suffix("col"), "Test GMBH") == "Test GmbH"
+        assert apply_expr(clean_expr.company_suffix("col"), "Test GmbH") == "Test GmbH"
+
+    def test_normalize_uk_ltd(self) -> None:
+        """Test normalizing UK Ltd variations."""
+        assert apply_expr(clean_expr.company_suffix("col"), "Company Ltd") == "Company Ltd."
+        assert apply_expr(clean_expr.company_suffix("col"), "Company ltd") == "Company Ltd."
+        assert apply_expr(clean_expr.company_suffix("col"), "Company LTD") == "Company Ltd."
+
+    def test_normalize_uk_limited(self) -> None:
+        """Test normalizing UK Limited to Ltd."""
+        result = apply_expr(clean_expr.company_suffix("col"), "Smith & Sons Limited")
+        assert result == "Smith & Sons Ltd."
+
+    def test_normalize_us_llc(self) -> None:
+        """Test normalizing US LLC."""
+        assert apply_expr(clean_expr.company_suffix("col"), "Company LLC") == "Company LLC"
+        assert apply_expr(clean_expr.company_suffix("col"), "Company llc") == "Company LLC"
+
+    def test_normalize_french_sarl(self) -> None:
+        """Test normalizing French SARL."""
+        result = apply_expr(clean_expr.company_suffix("col"), "Company SARL")
+        assert result == "Company S.A.R.L."
+
+    def test_normalize_belgian_bvba(self) -> None:
+        """Test normalizing Belgian BVBA."""
+        result = apply_expr(clean_expr.company_suffix("col"), "Company BVBA")
+        assert result == "Company B.V.B.A."
+
+    def test_no_suffix_unchanged(self) -> None:
+        """Test company name without suffix is unchanged."""
+        result = apply_expr(clean_expr.company_suffix("col"), "Regular Company Name")
+        assert result == "Regular Company Name"
+
+    def test_empty_value(self) -> None:
+        """Test empty values return None."""
+        assert apply_expr(clean_expr.company_suffix("col"), "") is None
+        assert apply_expr(clean_expr.company_suffix("col"), None) is None
+
+    def test_dataframe_batch_processing(self) -> None:
+        """Test processing multiple company names in a DataFrame."""
+        df = pl.DataFrame(
+            {
+                "company": [
+                    "Acme BV",
+                    "Test GmbH",
+                    "Corp Ltd",
+                    "Regular Company",
+                ]
+            }
+        )
+
+        result = df.select(clean_expr.company_suffix("company").alias("normalized"))
+
+        assert result["normalized"][0] == "Acme B.V."
+        assert result["normalized"][1] == "Test GmbH"
+        assert result["normalized"][2] == "Corp Ltd."
+        assert result["normalized"][3] == "Regular Company"
+
+
+class TestCompanySuffixConstant:
+    """Tests for COMPANY_SUFFIX_CANONICAL constant (Polars module)."""
+
+    def test_constant_is_dict(self) -> None:
+        """Test COMPANY_SUFFIX_CANONICAL is a dict."""
+        assert isinstance(clean_expr.COMPANY_SUFFIX_CANONICAL, dict)
+
+    def test_contains_common_suffixes(self) -> None:
+        """Test constant contains expected suffixes."""
+        assert "bv" in clean_expr.COMPANY_SUFFIX_CANONICAL
+        assert "gmbh" in clean_expr.COMPANY_SUFFIX_CANONICAL
+        assert "ltd" in clean_expr.COMPANY_SUFFIX_CANONICAL
+        assert "llc" in clean_expr.COMPANY_SUFFIX_CANONICAL

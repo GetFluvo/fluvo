@@ -70,6 +70,8 @@ __all__ = [
     "digits",
     "numeric",
     "integer",
+    # Company cleaners
+    "company_suffix",
     # Constants (extensible)
     "COMMON_EMAIL_PROVIDERS",
     "COMMON_FILTER_NAMES",
@@ -78,6 +80,7 @@ __all__ = [
     "VAT_EXEMPT_VALUES",
     "PHONE_COUNTRY_RULES",
     "POSTAL_PATTERNS",
+    "COMPANY_SUFFIX_CANONICAL",
 ]
 
 # =============================================================================
@@ -220,6 +223,89 @@ POSTAL_PATTERNS: dict[str, tuple[str, str]] = {
     "DK": (r"\d{4}", "prefix"),
     "FI": (r"\d{5}", "prefix"),
     "PL": (r"\d{2}-\d{3}", "prefix"),
+}
+
+# Company legal suffix canonical forms
+# Key: normalized form (lowercase, no dots, no spaces)
+# Value: canonical form with proper punctuation
+COMPANY_SUFFIX_CANONICAL: dict[str, str] = {
+    # Netherlands
+    "bv": "B.V.",
+    "nv": "N.V.",
+    "vof": "V.O.F.",
+    "cv": "C.V.",
+    "cvoa": "C.V.o.A.",
+    # Belgium
+    "bvba": "B.V.B.A.",
+    "sprl": "S.P.R.L.",
+    "cvba": "C.V.B.A.",
+    "scrl": "S.C.R.L.",
+    "vzvw": "V.Z.W.",
+    "asbl": "A.S.B.L.",
+    # Germany
+    "gmbh": "GmbH",
+    "ag": "AG",
+    "kg": "KG",
+    "ohg": "OHG",
+    "gbr": "GbR",
+    "ug": "UG",
+    "gmbhcokg": "GmbH & Co. KG",
+    "kgaa": "KGaA",
+    "ev": "e.V.",
+    # Austria
+    "gesmbh": "GesmbH",
+    # France / International
+    "sa": "S.A.",
+    "sarl": "S.A.R.L.",
+    "sas": "S.A.S.",
+    "snc": "S.N.C.",
+    "sasu": "S.A.S.U.",
+    "eurl": "E.U.R.L.",
+    "sci": "S.C.I.",
+    "scp": "S.C.P.",
+    # UK
+    "ltd": "Ltd.",
+    "limited": "Ltd.",
+    "plc": "PLC",
+    "llp": "LLP",
+    "cic": "CIC",
+    # US
+    "inc": "Inc.",
+    "incorporated": "Inc.",
+    "llc": "LLC",
+    "corp": "Corp.",
+    "corporation": "Corp.",
+    "pllc": "PLLC",
+    "lp": "LP",
+    # Italy
+    "spa": "S.p.A.",
+    "srl": "S.r.l.",
+    "sapa": "S.a.p.a.",
+    # Spain
+    "sl": "S.L.",
+    "slne": "S.L.N.E.",
+    "sau": "S.A.U.",
+    "slu": "S.L.U.",
+    # Portugal
+    "lda": "Lda.",
+    "unipessoallda": "Unipessoal Lda.",
+    # Scandinavia
+    "as": "A/S",
+    "asa": "ASA",
+    "ab": "AB",
+    "aps": "ApS",
+    "oy": "Oy",
+    "oyj": "Oyj",
+    # Switzerland
+    "sagl": "Sagl",
+    # Poland
+    "spzoo": "sp. z o.o.",
+    "zoo": "z o.o.",
+    # Czech Republic
+    "sro": "s.r.o.",
+    # Other
+    "se": "SE",
+    "scop": "SCOP",
 }
 
 
@@ -1043,3 +1129,70 @@ def integer(field: str) -> pl.Expr:
     col = pl.col(field).cast(pl.String).str.strip_chars()
     # Remove everything after decimal point
     return col.str.replace(r"[.,]\d*$", "")
+
+
+# =============================================================================
+# COMPANY NAME CLEANERS
+# =============================================================================
+
+
+def company_suffix(
+    field: str,
+    suffixes: Optional[dict[str, str]] = None,
+) -> pl.Expr:
+    """Normalize company legal suffix (e.g., "BV" → "B.V.", "gmbh" → "GmbH").
+
+    Handles common variations:
+    - Without dots: "BV", "NV", "GmbH"
+    - With dots: "B.V.", "N.V."
+    - Mixed case: "Bv", "bv", "BV"
+
+    Note: This function uses a series of chained replacements for the most common
+    suffixes. For complex suffix patterns, consider using the row-by-row
+    `clean.company_suffix()` which uses regex for more flexible matching.
+
+    Args:
+        field: Source column name.
+        suffixes: Custom mapping from normalized suffix to canonical form.
+                  Uses COMPANY_SUFFIX_CANONICAL if not set.
+
+    Returns:
+        Polars expression.
+    """
+    suffix_map = suffixes or COMPANY_SUFFIX_CANONICAL
+
+    col = pl.col(field).cast(pl.String).str.strip_chars()
+
+    # Build a chain of replacements for the most common suffixes
+    # We use case-insensitive regex patterns for each suffix
+    # Format: match suffix at end of string (with optional preceding space)
+
+    # Start with the original column
+    result = col
+
+    # Apply replacements for each suffix (sorted by length, longest first)
+    # to ensure we match longer patterns before shorter ones
+    sorted_suffixes = sorted(suffix_map.keys(), key=len, reverse=True)
+
+    for normalized in sorted_suffixes:
+        canonical = suffix_map[normalized]
+
+        # Build pattern to match this suffix with optional dots between letters
+        # E.g., "bv" matches "BV", "B.V.", "Bv", etc.
+        pattern_parts = []
+        for char in normalized:
+            if char.isalpha():
+                pattern_parts.append(f"[{char.upper()}{char.lower()}]")
+            else:
+                pattern_parts.append(char)
+
+        # Join with optional dots and spaces
+        suffix_pattern = r"\.?\s*".join(pattern_parts)
+
+        # Match at end of string, preceded by whitespace
+        full_pattern = rf"(\s+){suffix_pattern}\.?\s*$"
+
+        # Replace with canonical form
+        result = result.str.replace(full_pattern, f" {canonical}")
+
+    return pl.when(col.is_null() | (col == "")).then(pl.lit(None)).otherwise(result)
