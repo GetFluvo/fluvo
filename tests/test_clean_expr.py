@@ -304,6 +304,16 @@ class TestZipCleaners:
         result = apply_expr(clean_expr.zip_code("col"), "1234 AB")
         assert result == "1234AB"
 
+    def test_zip_code_removes_commas(self) -> None:
+        """Test zip code removes commas."""
+        result = apply_expr(clean_expr.zip_code("col"), "1234,AB")
+        assert result == "1234AB"
+
+    def test_zip_code_filters_e_prefix(self) -> None:
+        """Test zip code filters out values starting with e-."""
+        result = apply_expr(clean_expr.zip_code("col"), "e-mail")
+        assert result is None
+
     def test_zip_strip_prefix(self) -> None:
         """Test zip_strip_prefix removes country prefix."""
         result = apply_expr(clean_expr.zip_strip_prefix("col"), "NL-1234AB")

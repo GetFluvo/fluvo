@@ -834,7 +834,9 @@ def vat_or_exempt(
 
 
 def zip_code(field: str) -> pl.Expr:
-    """Clean zip code: strip and remove spaces.
+    """Clean zip code: strip, remove spaces and commas.
+
+    Also filters out invalid values starting with "e-" (e.g., email artifacts).
 
     Args:
         field: Source column name.
@@ -842,7 +844,13 @@ def zip_code(field: str) -> pl.Expr:
     Returns:
         Polars expression.
     """
-    return pl.col(field).cast(pl.String).str.strip_chars().str.replace_all(r"\s+", "")
+    col = pl.col(field).cast(pl.String).str.strip_chars()
+    # Filter out values starting with "e-", remove spaces and commas
+    return (
+        pl.when(col.str.to_lowercase().str.starts_with("e-"))
+        .then(pl.lit(None))
+        .otherwise(col.str.replace_all(r"[\s,]+", ""))
+    )
 
 
 def zip_strip_prefix(field: str) -> pl.Expr:

@@ -978,12 +978,20 @@ def vat_clean() -> Cleaner:
 
 
 def zip_code() -> Cleaner:
-    """Clean zip code: strip and remove spaces."""
+    """Clean zip code: strip, remove spaces and commas.
+
+    Also filters out invalid values starting with "e-" (e.g., email artifacts).
+    """
 
     def clean(value: Any) -> Any:
         if not value or not isinstance(value, str):
             return value
-        return _MULTI_SPACE_PATTERN.sub("", value.strip())
+        value = value.strip()
+        # Filter out invalid values starting with "e-"
+        if value.lower().startswith("e-"):
+            return None
+        # Remove spaces and commas
+        return re.sub(r"[\s,]+", "", value)
 
     return clean
 

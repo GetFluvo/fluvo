@@ -338,6 +338,17 @@ class TestZipCleaners:
         """Test basic zip code cleaning."""
         assert clean.zip_code()("1234 AB") == "1234AB"
 
+    def test_zip_code_removes_commas(self) -> None:
+        """Test zip code removes commas."""
+        assert clean.zip_code()("1234,AB") == "1234AB"
+        assert clean.zip_code()("12, 34") == "1234"
+
+    def test_zip_code_filters_e_prefix(self) -> None:
+        """Test zip code filters out values starting with e-."""
+        assert clean.zip_code()("e-mail") is None
+        assert clean.zip_code()("E-12345") is None
+        assert clean.zip_code()("e-") is None
+
     def test_zip_strip_prefix(self) -> None:
         """Test zip_strip_prefix removes country prefix."""
         assert clean.zip_strip_prefix()("NL-1234AB") == "1234AB"
