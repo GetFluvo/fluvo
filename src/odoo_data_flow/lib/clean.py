@@ -1008,6 +1008,49 @@ def zip_strip_prefix() -> Cleaner:
 
 
 # =============================================================================
+# CITY CLEANERS
+# =============================================================================
+
+
+def city() -> Cleaner:
+    """Clean city name: normalize case, remove noise.
+
+    Performs the following cleaning:
+    - Strip whitespace
+    - Remove parenthetical notes like "(Noord-Holland)"
+    - Remove trailing numbers/postal codes
+    - Remove leading/trailing punctuation (commas, periods)
+    - Normalize to title case
+    - Collapse multiple spaces
+    - Filter out invalid values (e.g., starting with "e-")
+    """
+
+    def clean(value: Any) -> Any:
+        if value is None or not isinstance(value, str):
+            return value
+        value = value.strip()
+        if not value:
+            return None
+        # Filter out invalid values starting with "e-"
+        if value.lower().startswith("e-"):
+            return None
+        # Remove parenthetical notes like "(Noord-Holland)"
+        value = re.sub(r"\s*\([^)]*\)\s*", " ", value)
+        # Remove trailing numbers/postal codes
+        value = re.sub(r"\s+[\d][\d\s\-A-Z]*$", "", value)
+        # Remove leading/trailing punctuation
+        value = value.strip(" ,.")
+        # Normalize multiple spaces
+        value = re.sub(r"\s+", " ", value)
+        # Title case
+        if value:
+            return value.title()
+        return None
+
+    return clean
+
+
+# =============================================================================
 # ADDRESS CLEANERS (City/Postal Separation & Country Detection)
 # =============================================================================
 

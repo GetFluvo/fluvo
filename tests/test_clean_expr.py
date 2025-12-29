@@ -325,6 +325,45 @@ class TestZipCleaners:
         assert result == "1000"
 
 
+class TestCityCleaners:
+    """Tests for city cleaner functions."""
+
+    def test_city_basic(self) -> None:
+        """Test basic city cleaning."""
+        result = apply_expr(clean_expr.city("col"), "amsterdam")
+        assert result == "Amsterdam"
+
+    def test_city_removes_parenthetical(self) -> None:
+        """Test city removes parenthetical notes."""
+        result = apply_expr(clean_expr.city("col"), "Amsterdam (Noord-Holland)")
+        assert result == "Amsterdam"
+
+    def test_city_removes_trailing_postal(self) -> None:
+        """Test city removes trailing postal codes."""
+        result = apply_expr(clean_expr.city("col"), "Amsterdam 1012 AB")
+        assert result == "Amsterdam"
+
+    def test_city_removes_punctuation(self) -> None:
+        """Test city removes leading/trailing punctuation."""
+        result = apply_expr(clean_expr.city("col"), ",Amsterdam,")
+        assert result == "Amsterdam"
+
+    def test_city_normalizes_spaces(self) -> None:
+        """Test city normalizes multiple spaces."""
+        result = apply_expr(clean_expr.city("col"), "New   York")
+        assert result == "New York"
+
+    def test_city_filters_e_prefix(self) -> None:
+        """Test city filters out values starting with e-."""
+        result = apply_expr(clean_expr.city("col"), "e-mail")
+        assert result is None
+
+    def test_city_title_case(self) -> None:
+        """Test city converts to title case."""
+        result = apply_expr(clean_expr.city("col"), "NEW YORK")
+        assert result == "New York"
+
+
 class TestNameCleaners:
     """Tests for name cleaner functions."""
 

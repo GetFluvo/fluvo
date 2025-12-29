@@ -358,6 +358,46 @@ class TestZipCleaners:
         assert clean.zip_strip_prefix()("BE 1000") == "1000"
 
 
+class TestCityCleaners:
+    """Tests for city cleaner functions."""
+
+    def test_city_basic(self) -> None:
+        """Test basic city cleaning."""
+        assert clean.city()("amsterdam") == "Amsterdam"
+
+    def test_city_removes_parenthetical(self) -> None:
+        """Test city removes parenthetical notes."""
+        assert clean.city()("Amsterdam (Noord-Holland)") == "Amsterdam"
+
+    def test_city_removes_trailing_postal(self) -> None:
+        """Test city removes trailing postal codes."""
+        assert clean.city()("Amsterdam 1012 AB") == "Amsterdam"
+
+    def test_city_removes_punctuation(self) -> None:
+        """Test city removes leading/trailing punctuation."""
+        assert clean.city()(",Amsterdam,") == "Amsterdam"
+        assert clean.city()("Amsterdam.") == "Amsterdam"
+
+    def test_city_normalizes_spaces(self) -> None:
+        """Test city normalizes multiple spaces."""
+        assert clean.city()("New   York") == "New York"
+
+    def test_city_filters_e_prefix(self) -> None:
+        """Test city filters out values starting with e-."""
+        assert clean.city()("e-mail") is None
+        assert clean.city()("E-commerce") is None
+
+    def test_city_empty(self) -> None:
+        """Test city returns None for empty values."""
+        assert clean.city()("") is None
+        assert clean.city()(None) is None
+
+    def test_city_title_case(self) -> None:
+        """Test city converts to title case."""
+        assert clean.city()("NEW YORK") == "New York"
+        assert clean.city()("los angeles") == "Los Angeles"
+
+
 class TestNameCleaners:
     """Tests for name cleaner functions."""
 

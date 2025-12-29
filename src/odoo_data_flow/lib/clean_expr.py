@@ -868,6 +868,57 @@ def zip_strip_prefix(field: str) -> pl.Expr:
 
 
 # =============================================================================
+# CITY CLEANERS
+# =============================================================================
+
+
+def city(field: str) -> pl.Expr:
+    """Clean city name: normalize case, remove noise.
+
+    Performs the following cleaning:
+    - Strip whitespace
+    - Remove parenthetical notes like "(Noord-Holland)"
+    - Remove trailing numbers/postal codes
+    - Remove leading/trailing punctuation (commas, periods)
+    - Normalize to title case
+    - Collapse multiple spaces
+    - Filter out invalid values (e.g., starting with "e-")
+
+    Args:
+        field: Source column name.
+
+    Returns:
+        Polars expression.
+    """
+    col = pl.col(field).cast(pl.String).str.strip_chars()
+
+    # Filter out values starting with "e-"
+    is_invalid = col.str.to_lowercase().str.starts_with("e-")
+
+    # Clean the value
+    cleaned = (
+        col
+        # Remove parenthetical notes like "(Noord-Holland)"
+        .str.replace_all(r"\s*\([^)]*\)\s*", " ")
+        # Remove trailing numbers/postal codes
+        .str.replace(r"\s+[\d][\d\s\-A-Z]*$", "")
+        # Remove leading/trailing punctuation
+        .str.strip_chars(" ,.")
+        # Normalize multiple spaces
+        .str.replace_all(r"\s+", " ")
+        # Title case
+        .str.to_titlecase()
+    )
+
+    # Return null for invalid or empty values
+    return (
+        pl.when(is_invalid | (cleaned.str.len_chars() == 0))
+        .then(pl.lit(None))
+        .otherwise(cleaned)
+    )
+
+
+# =============================================================================
 # ADDRESS CLEANERS (City/Postal Separation)
 # =============================================================================
 
