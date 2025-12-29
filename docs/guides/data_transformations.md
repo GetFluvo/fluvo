@@ -797,3 +797,113 @@ Available constants:
 - `VAT_EXEMPT_VALUES`: Values indicating VAT exemption
 - `PHONE_COUNTRY_RULES`: Country-specific phone normalization rules
 - `COMPANY_SUFFIX_CANONICAL`: Business entity suffix mappings (BV → B.V., etc.)
+
+---
+
+## GeoNames Integration
+
+The `geonames` module provides utilities to download, cache, and query [GeoNames](https://www.geonames.org/) data for geographic lookups. This is useful for city-to-country mapping, postal code validation, and coordinate lookups.
+
+### Why GeoNames?
+
+Instead of hardcoding city/country mappings in the library (which become stale), you can use GeoNames data:
+- **Comprehensive**: 25,000+ cities with population > 15,000
+- **Up-to-date**: Data is downloaded from the official source
+- **Cached**: Downloaded once, reused across environments
+- **Full data**: Includes coordinates, population, timezone, alternate names
+
+### Basic Usage
+
+```python
+from odoo_data_flow.lib import geonames, clean
+
+# Load cities (downloads and caches on first use)
+cities = geonames.get_cities_lookup()
+
+# Use with detect_country
+clean.detect_country(city="Amsterdam", cities=cities)  # Returns: 'NL'
+clean.detect_country(city="Den Haag", cities=cities)   # Returns: 'NL' (alternate name)
+clean.detect_country(city="Париж", cities=cities)      # Returns: 'FR' (Russian alternate)
+```
+
+### Available Datasets
+
+| Dataset | Cities | Size | Use Case |
+|---------|--------|------|----------|
+| `cities15000` | ~25k | ~5MB | Most imports (default) |
+| `cities5000` | ~50k | ~10MB | More coverage |
+| `cities1000` | ~150k | ~35MB | Comprehensive |
+| `cities500` | ~200k | ~50MB | Maximum coverage |
+
+### Loading City Data
+
+```python
+import polars as pl
+from odoo_data_flow.lib import geonames
+
+# Load as Polars DataFrame for analysis
+df = geonames.load_cities(dataset="cities15000", min_population=100000)
+
+# Available columns: name, asciiname, alternatenames, latitude, longitude,
+# country_code, population, timezone, and more
+
+# Filter to specific country
+dutch_cities = df.filter(pl.col("country_code") == "NL")
+
+# Get coordinates
+geonames.get_city_coordinates("Paris", country="FR")
+# Returns: (48.85341, 2.3488)
+```
+
+### Postal Code Lookups
+
+```python
+from odoo_data_flow.lib import geonames
+
+# Load postal codes for specific countries
+lookup = geonames.get_postal_lookup(["NL", "BE", "DE"])
+
+# Lookup place name by postal code
+lookup["NL"]["1012AB"]  # Returns: 'Amsterdam'
+lookup["BE"]["1000"]    # Returns: 'Bruxelles'
+```
+
+### Caching
+
+Data is automatically cached in `~/.cache/odoo-data-flow/geonames/`:
+
+```python
+from odoo_data_flow.lib import geonames
+
+# Check cache directory
+cache_dir = geonames.get_cache_dir()
+
+# Force re-download
+geonames.download_dataset("cities15000", force=True)
+```
+
+### Integration Example
+
+Combining GeoNames with `detect_country` for smart country detection:
+
+```python
+from odoo_data_flow.lib import geonames, clean, mapper
+
+# Load city lookup once at the start
+cities = geonames.get_cities_lookup()
+
+def detect_partner_country(row, state):
+    """Detect country from available fields."""
+    return clean.detect_country(
+        phone=row.get("Phone"),
+        postal=row.get("Zip"),
+        city=row.get("City"),
+        cities=cities,  # Pass the GeoNames lookup
+    )
+
+mapping = {
+    "name": mapper.val("Name"),
+    "country_id/id": mapper.val("Country", postprocess=lambda v, s:
+        f"base.{detect_partner_country(s, s).lower()}" if detect_partner_country(s, s) else ""
+    ),
+}
