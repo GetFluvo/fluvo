@@ -633,24 +633,33 @@ class TestCountryDetection:
         result = clean.detect_country(postal="SW1A 1AA")
         assert result == "GB"
 
-    def test_detect_country_from_city(self) -> None:
-        """Test detecting country from city name."""
-        result = clean.detect_country(city="Amsterdam")
+    def test_detect_country_from_city_with_custom_cities(self) -> None:
+        """Test detecting country from city name with custom cities dict."""
+        cities = {"amsterdam": "NL", "paris": "FR"}
+        result = clean.detect_country(city="Amsterdam", cities=cities)
         assert result == "NL"
 
     def test_detect_country_from_city_case_insensitive(self) -> None:
         """Test city detection is case insensitive."""
-        result = clean.detect_country(city="PARIS")
+        cities = {"paris": "FR"}
+        result = clean.detect_country(city="PARIS", cities=cities)
         assert result == "FR"
 
     def test_detect_country_combined(self) -> None:
         """Test combined detection uses phone priority."""
-        result = clean.detect_country(phone="+33 1 234", postal="75001", city="Paris")
+        cities = {"paris": "FR"}
+        result = clean.detect_country(phone="+33 1 234", postal="75001", city="Paris", cities=cities)
         assert result == "FR"
 
     def test_detect_country_no_match(self) -> None:
-        """Test returns None when no match."""
-        result = clean.detect_country(city="Unknown City")
+        """Test returns None when no match (no cities dict provided)."""
+        result = clean.detect_country(city="Amsterdam")
+        assert result is None
+
+    def test_detect_country_city_not_in_dict(self) -> None:
+        """Test returns None when city not in provided dict."""
+        cities = {"paris": "FR"}
+        result = clean.detect_country(city="Unknown City", cities=cities)
         assert result is None
 
     def test_detect_country_phone_fallback_to_postal(self) -> None:
@@ -669,19 +678,6 @@ class TestAddressConstantsExtensibility:
     def test_phone_prefix_to_country_is_dict(self) -> None:
         """Test PHONE_PREFIX_TO_COUNTRY is a dict."""
         assert isinstance(clean.PHONE_PREFIX_TO_COUNTRY, dict)
-
-    def test_major_cities_is_dict(self) -> None:
-        """Test MAJOR_CITIES is a dict."""
-        assert isinstance(clean.MAJOR_CITIES, dict)
-
-    def test_can_extend_major_cities(self) -> None:
-        """Test that MAJOR_CITIES can be extended."""
-        # Add a custom city
-        original_size = len(clean.MAJOR_CITIES)
-        clean.MAJOR_CITIES["test_city_xyz"] = "XX"
-        assert len(clean.MAJOR_CITIES) == original_size + 1
-        # Clean up
-        del clean.MAJOR_CITIES["test_city_xyz"]
 
 
 class TestCompanySuffix:

@@ -91,7 +91,6 @@ __all__ = [
     "PHONE_COUNTRY_RULES",
     "PHONE_PREFIX_TO_COUNTRY",
     "POSTAL_PATTERNS",
-    "MAJOR_CITIES",
     # Company cleaners
     "company_suffix",
     "COMPANY_SUFFIX_CANONICAL",
@@ -299,184 +298,6 @@ POSTAL_PATTERNS: dict[str, tuple[str, str]] = {
     "FI": (r"\d{5}", "prefix"),
     # Poland: 5 digits with hyphen (12-345) - prefix position
     "PL": (r"\d{2}-\d{3}", "prefix"),
-}
-
-# Major cities to country mapping (for country detection from city name)
-MAJOR_CITIES: dict[str, str] = {
-    # Netherlands
-    "amsterdam": "NL",
-    "rotterdam": "NL",
-    "den haag": "NL",
-    "the hague": "NL",
-    "utrecht": "NL",
-    "eindhoven": "NL",
-    "groningen": "NL",
-    "tilburg": "NL",
-    "almere": "NL",
-    "breda": "NL",
-    "nijmegen": "NL",
-    "arnhem": "NL",
-    "maastricht": "NL",
-    # Belgium
-    "brussels": "BE",
-    "brussel": "BE",
-    "bruxelles": "BE",
-    "antwerp": "BE",
-    "antwerpen": "BE",
-    "ghent": "BE",
-    "gent": "BE",
-    "charleroi": "BE",
-    "liege": "BE",
-    "luik": "BE",
-    "bruges": "BE",
-    "brugge": "BE",
-    # Germany
-    "berlin": "DE",
-    "munich": "DE",
-    "münchen": "DE",
-    "hamburg": "DE",
-    "frankfurt": "DE",
-    "cologne": "DE",
-    "köln": "DE",
-    "düsseldorf": "DE",
-    "stuttgart": "DE",
-    "dortmund": "DE",
-    "essen": "DE",
-    "leipzig": "DE",
-    "bremen": "DE",
-    "dresden": "DE",
-    "hanover": "DE",
-    "hannover": "DE",
-    "nuremberg": "DE",
-    "nürnberg": "DE",
-    # France
-    "paris": "FR",
-    "marseille": "FR",
-    "lyon": "FR",
-    "toulouse": "FR",
-    "nice": "FR",
-    "nantes": "FR",
-    "strasbourg": "FR",
-    "montpellier": "FR",
-    "bordeaux": "FR",
-    "lille": "FR",
-    "rennes": "FR",
-    # UK
-    "london": "GB",
-    "birmingham": "GB",
-    "manchester": "GB",
-    "glasgow": "GB",
-    "liverpool": "GB",
-    "leeds": "GB",
-    "sheffield": "GB",
-    "edinburgh": "GB",
-    "bristol": "GB",
-    "cardiff": "GB",
-    "belfast": "GB",
-    "newcastle": "GB",
-    "nottingham": "GB",
-    # Spain
-    "madrid": "ES",
-    "barcelona": "ES",
-    "valencia": "ES",
-    "seville": "ES",
-    "sevilla": "ES",
-    "zaragoza": "ES",
-    "malaga": "ES",
-    "málaga": "ES",
-    "murcia": "ES",
-    "bilbao": "ES",
-    # Italy
-    "rome": "IT",
-    "roma": "IT",
-    "milan": "IT",
-    "milano": "IT",
-    "naples": "IT",
-    "napoli": "IT",
-    "turin": "IT",
-    "torino": "IT",
-    "palermo": "IT",
-    "genoa": "IT",
-    "genova": "IT",
-    "bologna": "IT",
-    "florence": "IT",
-    "firenze": "IT",
-    "venice": "IT",
-    "venezia": "IT",
-    # Portugal
-    "lisbon": "PT",
-    "lisboa": "PT",
-    "porto": "PT",
-    "figueira da foz": "PT",
-    # Iceland
-    "reykjavik": "IS",
-    "reykjavík": "IS",
-    # Austria
-    "vienna": "AT",
-    "wien": "AT",
-    "graz": "AT",
-    "linz": "AT",
-    "salzburg": "AT",
-    "innsbruck": "AT",
-    # Switzerland
-    "zurich": "CH",
-    "zürich": "CH",
-    "geneva": "CH",
-    "genève": "CH",
-    "basel": "CH",
-    "bern": "CH",
-    "lausanne": "CH",
-    # US
-    "new york": "US",
-    "los angeles": "US",
-    "chicago": "US",
-    "houston": "US",
-    "phoenix": "US",
-    "philadelphia": "US",
-    "san antonio": "US",
-    "san diego": "US",
-    "dallas": "US",
-    "san jose": "US",
-    "austin": "US",
-    "jacksonville": "US",
-    "san francisco": "US",
-    "seattle": "US",
-    "denver": "US",
-    "boston": "US",
-    "washington": "US",
-    "miami": "US",
-    "atlanta": "US",
-    # Canada
-    "toronto": "CA",
-    "montreal": "CA",
-    "montréal": "CA",
-    "vancouver": "CA",
-    "calgary": "CA",
-    "edmonton": "CA",
-    "ottawa": "CA",
-    "winnipeg": "CA",
-    "quebec city": "CA",
-    # Scandinavia
-    "stockholm": "SE",
-    "gothenburg": "SE",
-    "malmö": "SE",
-    "copenhagen": "DK",
-    "københavn": "DK",
-    "oslo": "NO",
-    "bergen": "NO",
-    "helsinki": "FI",
-    # Other
-    "dublin": "IE",
-    "luxembourg": "LU",
-    "warsaw": "PL",
-    "warszawa": "PL",
-    "krakow": "PL",
-    "kraków": "PL",
-    "prague": "CZ",
-    "praha": "CZ",
-    "budapest": "HU",
-    "athens": "GR",
-    "αθήνα": "GR",
 }
 
 # Company legal suffix canonical forms
@@ -1295,9 +1116,16 @@ def detect_country(
     Uses multiple signals to infer the country when it's missing:
     - Phone number international prefix (+31 → NL)
     - Postal code pattern matching (1012 AB → NL)
-    - City name lookup (Amsterdam → NL)
+    - City name lookup (requires providing a cities dict)
 
     Priority: phone > postal > city (phone is most reliable)
+
+    Note:
+        City-based detection requires you to provide a `cities` dict mapping
+        lowercase city names to country codes. This library intentionally does
+        not include hardcoded city data to avoid maintenance burden. Consider
+        populating this from external sources like GeoNames, or from your
+        Odoo database (res.city joined with res.country).
 
     Args:
         phone: Phone number (e.g., "+31 6 12345678")
@@ -1305,7 +1133,9 @@ def detect_country(
         city: City name (e.g., "Amsterdam")
         phone_prefixes: Custom phone prefix mapping. Uses PHONE_PREFIX_TO_COUNTRY.
         postal_patterns: Custom postal patterns. Uses POSTAL_PATTERNS.
-        cities: Custom city mapping. Uses MAJOR_CITIES.
+        cities: City to country mapping (e.g., {"amsterdam": "NL", "paris": "FR"}).
+                Must be lowercase keys. Not provided by default - populate from
+                external data source like GeoNames or Odoo's res.city model.
 
     Returns:
         ISO country code (e.g., "NL") or None if not detected.
@@ -1315,14 +1145,14 @@ def detect_country(
         'NL'
         >>> detect_country(postal="1012 AB")
         'NL'
-        >>> detect_country(city="Amsterdam")
+        >>> # City lookup requires providing cities dict
+        >>> cities = {"amsterdam": "NL", "paris": "FR"}
+        >>> detect_country(city="Amsterdam", cities=cities)
         'NL'
-        >>> detect_country(phone="+33 1 234", postal="75001", city="Paris")
-        'FR'
     """
     prefixes = phone_prefixes or PHONE_PREFIX_TO_COUNTRY
     patterns = postal_patterns or POSTAL_PATTERNS
-    city_map = cities or MAJOR_CITIES
+    city_map = cities or {}
 
     # 1. Try phone number (most reliable)
     if phone and isinstance(phone, str):
