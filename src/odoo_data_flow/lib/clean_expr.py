@@ -56,6 +56,9 @@ __all__ = [
     # Zip cleaners
     "zip_code",
     "zip_strip_prefix",
+    # Address cleaners
+    "city_from_combined",
+    "postal_from_combined",
     # Name cleaners
     "name_strip_title",
     "name_strip_suffix",
@@ -74,6 +77,7 @@ __all__ = [
     "SUFFIXES",
     "VAT_EXEMPT_VALUES",
     "PHONE_COUNTRY_RULES",
+    "POSTAL_PATTERNS",
 ]
 
 # =============================================================================
@@ -180,11 +184,42 @@ PHONE_COUNTRY_RULES: dict[str, dict[str, str]] = {
     "DE": {"country_code": "49", "mobile_prefix": "1", "national_prefix": "0"},
     "FR": {"country_code": "33", "mobile_prefix": "6", "national_prefix": "0"},
     "UK": {"country_code": "44", "mobile_prefix": "7", "national_prefix": "0"},
+    "GB": {"country_code": "44", "mobile_prefix": "7", "national_prefix": "0"},
     "ES": {"country_code": "34", "mobile_prefix": "6", "national_prefix": ""},
     "IT": {"country_code": "39", "mobile_prefix": "3", "national_prefix": ""},
     "AT": {"country_code": "43", "mobile_prefix": "6", "national_prefix": "0"},
     "CH": {"country_code": "41", "mobile_prefix": "7", "national_prefix": "0"},
     "LU": {"country_code": "352", "mobile_prefix": "6", "national_prefix": ""},
+    "PT": {"country_code": "351", "mobile_prefix": "9", "national_prefix": ""},
+    "IS": {"country_code": "354", "mobile_prefix": "", "national_prefix": ""},
+    "US": {"country_code": "1", "mobile_prefix": "", "national_prefix": "1"},
+    "CA": {"country_code": "1", "mobile_prefix": "", "national_prefix": "1"},
+}
+
+# Postal code patterns by country
+# Format: (regex_pattern, position) where position is "prefix" or "suffix"
+POSTAL_PATTERNS: dict[str, tuple[str, str]] = {
+    "NL": (r"\d{4}\s?[A-Z]{2}", "suffix"),
+    "BE": (r"\d{4}", "prefix"),
+    "DE": (r"\d{5}", "prefix"),
+    "FR": (r"\d{5}", "prefix"),
+    "GB": (r"[A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2}", "suffix"),
+    "UK": (r"[A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2}", "suffix"),
+    "US": (r"\d{5}(?:-\d{4})?", "suffix"),
+    "PT": (r"\d{4}-\d{3}", "prefix"),
+    "IS": (r"\d{3}", "prefix"),
+    "ES": (r"\d{5}", "prefix"),
+    "IT": (r"\d{5}", "prefix"),
+    "AT": (r"\d{4}", "prefix"),
+    "CH": (r"\d{4}", "prefix"),
+    "LU": (r"(?:L-)?\d{4}", "prefix"),
+    "CA": (r"[A-Z]\d[A-Z]\s?\d[A-Z]\d", "suffix"),
+    "IE": (r"[A-Z]\d{2}\s?[A-Z0-9]{4}", "suffix"),
+    "SE": (r"\d{3}\s?\d{2}", "prefix"),
+    "NO": (r"\d{4}", "prefix"),
+    "DK": (r"\d{4}", "prefix"),
+    "FI": (r"\d{5}", "prefix"),
+    "PL": (r"\d{2}-\d{3}", "prefix"),
 }
 
 
@@ -736,6 +771,87 @@ def zip_strip_prefix(field: str) -> pl.Expr:
     col = pl.col(field).cast(pl.String).str.strip_chars()
     # Remove patterns like "NL-", "BE-", "DE-" at start
     return col.str.replace(r"^[A-Z]{2,3}[-\s]?", "")
+
+
+# =============================================================================
+# ADDRESS CLEANERS (City/Postal Separation)
+# =============================================================================
+
+
+def city_from_combined(
+    field: str,
+    country: str,
+    patterns: Optional[dict[str, tuple[str, str]]] = None,
+) -> pl.Expr:
+    """Extract city name from a combined city+postal field.
+
+    Handles formats like:
+    - "75001 Paris" (FR: postal prefix) → "Paris"
+    - "Amsterdam 1012 AB" (NL: postal suffix) → "Amsterdam"
+    - "London SW1A 1AA" (GB: postal suffix) → "London"
+
+    Args:
+        field: Source column name.
+        country: Country code (e.g., "NL", "FR", "GB") to determine pattern.
+        patterns: Optional custom patterns dict. Uses POSTAL_PATTERNS if not set.
+
+    Returns:
+        Polars expression returning the city part.
+    """
+    patterns_dict = patterns or POSTAL_PATTERNS
+    country_upper = country.upper()
+
+    if country_upper not in patterns_dict:
+        # No pattern available, return as-is
+        return pl.col(field).cast(pl.String).str.strip_chars()
+
+    pattern_str, position = patterns_dict[country_upper]
+    col = pl.col(field).cast(pl.String).str.strip_chars()
+
+    if position == "prefix":
+        # Postal at start: "75001 Paris" → extract everything after postal
+        # Use replace to remove the postal and leading spaces
+        return col.str.replace(f"(?i)^{pattern_str}\\s*", "").str.strip_chars()
+    else:
+        # Postal at end: "Amsterdam 1012 AB" → extract everything before postal
+        return col.str.replace(f"(?i)\\s*{pattern_str}$", "").str.strip_chars()
+
+
+def postal_from_combined(
+    field: str,
+    country: str,
+    patterns: Optional[dict[str, tuple[str, str]]] = None,
+) -> pl.Expr:
+    """Extract postal code from a combined city+postal field.
+
+    Handles formats like:
+    - "75001 Paris" (FR: postal prefix) → "75001"
+    - "Amsterdam 1012 AB" (NL: postal suffix) → "1012 AB"
+    - "London SW1A 1AA" (GB: postal suffix) → "SW1A 1AA"
+
+    Args:
+        field: Source column name.
+        country: Country code (e.g., "NL", "FR", "GB") to determine pattern.
+        patterns: Optional custom patterns dict. Uses POSTAL_PATTERNS if not set.
+
+    Returns:
+        Polars expression returning the postal code part.
+    """
+    patterns_dict = patterns or POSTAL_PATTERNS
+    country_upper = country.upper()
+
+    if country_upper not in patterns_dict:
+        # No pattern available, return empty string
+        return pl.lit("")
+
+    pattern_str, _ = patterns_dict[country_upper]
+    col = pl.col(field).cast(pl.String).str.strip_chars()
+
+    # Extract the postal code using the pattern
+    # Use extract with capturing group
+    extracted = col.str.extract(f"(?i)({pattern_str})", 1)
+
+    return pl.when(extracted.is_not_null()).then(extracted).otherwise(pl.lit(""))
 
 
 # =============================================================================

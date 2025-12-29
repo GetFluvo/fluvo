@@ -533,3 +533,152 @@ class TestMapperIntegration:
         result = website_cleaner("", state)
 
         assert result == "https://www.example.com"
+
+
+class TestAddressCleaners:
+    """Tests for address cleaner functions (city/postal separation)."""
+
+    def test_separate_city_postal_french_prefix(self) -> None:
+        """Test separating French-style postal (prefix)."""
+        city, postal = clean.separate_city_postal("FR")("75001 Paris")
+        assert city == "Paris"
+        assert postal == "75001"
+
+    def test_separate_city_postal_dutch_suffix(self) -> None:
+        """Test separating Dutch-style postal (suffix)."""
+        city, postal = clean.separate_city_postal("NL")("Amsterdam 1012 AB")
+        assert city == "Amsterdam"
+        assert postal == "1012 AB"
+
+    def test_separate_city_postal_uk_suffix(self) -> None:
+        """Test separating UK-style postal (alphanumeric suffix)."""
+        city, postal = clean.separate_city_postal("GB")("London SW1A 1AA")
+        assert city == "London"
+        assert postal == "SW1A 1AA"
+
+    def test_separate_city_postal_portuguese(self) -> None:
+        """Test separating Portuguese hyphenated postal."""
+        city, postal = clean.separate_city_postal("PT")("3080-055 Figueira Da Foz")
+        assert city == "Figueira Da Foz"
+        assert postal == "3080-055"
+
+    def test_separate_city_postal_icelandic(self) -> None:
+        """Test separating Icelandic 3-digit postal."""
+        city, postal = clean.separate_city_postal("IS")("104 Reykjavík")
+        assert city == "Reykjavík"
+        assert postal == "104"
+
+    def test_separate_city_postal_german(self) -> None:
+        """Test separating German 5-digit postal."""
+        city, postal = clean.separate_city_postal("DE")("10115 Berlin")
+        assert city == "Berlin"
+        assert postal == "10115"
+
+    def test_separate_city_postal_us_suffix(self) -> None:
+        """Test separating US 5-digit postal (suffix)."""
+        city, postal = clean.separate_city_postal("US")("New York 10001")
+        assert city == "New York"
+        assert postal == "10001"
+
+    def test_separate_city_postal_no_match(self) -> None:
+        """Test when no postal pattern matches."""
+        city, postal = clean.separate_city_postal("NL")("Some City")
+        assert city == "Some City"
+        assert postal == ""
+
+    def test_separate_city_postal_auto_detect(self) -> None:
+        """Test auto-detection of postal pattern without country hint."""
+        # Dutch pattern is distinctive
+        city, postal = clean.separate_city_postal()("Amsterdam 1012 AB")
+        assert city == "Amsterdam"
+        assert postal == "1012 AB"
+
+    def test_separate_city_postal_empty(self) -> None:
+        """Test with empty value."""
+        city, postal = clean.separate_city_postal("NL")("")
+        assert city == ""
+        assert postal == ""
+
+
+class TestCountryDetection:
+    """Tests for country detection functions."""
+
+    def test_detect_country_from_phone_nl(self) -> None:
+        """Test detecting NL from phone number."""
+        result = clean.detect_country(phone="+31 6 12345678")
+        assert result == "NL"
+
+    def test_detect_country_from_phone_fr(self) -> None:
+        """Test detecting FR from phone number."""
+        result = clean.detect_country(phone="+33 1 23456789")
+        assert result == "FR"
+
+    def test_detect_country_from_phone_pt(self) -> None:
+        """Test detecting PT from 3-digit prefix."""
+        result = clean.detect_country(phone="+351 912345678")
+        assert result == "PT"
+
+    def test_detect_country_from_postal_nl(self) -> None:
+        """Test detecting NL from postal code."""
+        result = clean.detect_country(postal="1012 AB")
+        assert result == "NL"
+
+    def test_detect_country_from_postal_pt(self) -> None:
+        """Test detecting PT from hyphenated postal."""
+        result = clean.detect_country(postal="3080-055")
+        assert result == "PT"
+
+    def test_detect_country_from_postal_uk(self) -> None:
+        """Test detecting GB from UK postal."""
+        result = clean.detect_country(postal="SW1A 1AA")
+        assert result == "GB"
+
+    def test_detect_country_from_city(self) -> None:
+        """Test detecting country from city name."""
+        result = clean.detect_country(city="Amsterdam")
+        assert result == "NL"
+
+    def test_detect_country_from_city_case_insensitive(self) -> None:
+        """Test city detection is case insensitive."""
+        result = clean.detect_country(city="PARIS")
+        assert result == "FR"
+
+    def test_detect_country_combined(self) -> None:
+        """Test combined detection uses phone priority."""
+        result = clean.detect_country(phone="+33 1 234", postal="75001", city="Paris")
+        assert result == "FR"
+
+    def test_detect_country_no_match(self) -> None:
+        """Test returns None when no match."""
+        result = clean.detect_country(city="Unknown City")
+        assert result is None
+
+    def test_detect_country_phone_fallback_to_postal(self) -> None:
+        """Test falls back to postal when phone has no prefix."""
+        result = clean.detect_country(phone="0612345678", postal="1012 AB")
+        assert result == "NL"
+
+
+class TestAddressConstantsExtensibility:
+    """Tests for address-related constants extensibility."""
+
+    def test_postal_patterns_is_dict(self) -> None:
+        """Test POSTAL_PATTERNS is a dict."""
+        assert isinstance(clean.POSTAL_PATTERNS, dict)
+
+    def test_phone_prefix_to_country_is_dict(self) -> None:
+        """Test PHONE_PREFIX_TO_COUNTRY is a dict."""
+        assert isinstance(clean.PHONE_PREFIX_TO_COUNTRY, dict)
+
+    def test_major_cities_is_dict(self) -> None:
+        """Test MAJOR_CITIES is a dict."""
+        assert isinstance(clean.MAJOR_CITIES, dict)
+
+    def test_can_extend_major_cities(self) -> None:
+        """Test that MAJOR_CITIES can be extended."""
+        # Add a custom city
+        original_size = len(clean.MAJOR_CITIES)
+        clean.MAJOR_CITIES["test_city_xyz"] = "XX"
+        assert len(clean.MAJOR_CITIES) == original_size + 1
+        # Clean up
+        del clean.MAJOR_CITIES["test_city_xyz"]

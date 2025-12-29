@@ -456,3 +456,95 @@ class TestDataFrameIntegration:
         )
 
         assert result["result"][0] == "hello world"
+
+
+class TestAddressCleaners:
+    """Tests for address cleaner functions (city/postal separation)."""
+
+    def test_city_from_combined_french(self) -> None:
+        """Test extracting city from French-style combined field."""
+        result = apply_expr(clean_expr.city_from_combined("col", "FR"), "75001 Paris")
+        assert result == "Paris"
+
+    def test_city_from_combined_dutch(self) -> None:
+        """Test extracting city from Dutch-style combined field."""
+        result = apply_expr(
+            clean_expr.city_from_combined("col", "NL"), "Amsterdam 1012 AB"
+        )
+        assert result == "Amsterdam"
+
+    def test_city_from_combined_uk(self) -> None:
+        """Test extracting city from UK-style combined field."""
+        result = apply_expr(
+            clean_expr.city_from_combined("col", "GB"), "London SW1A 1AA"
+        )
+        assert result == "London"
+
+    def test_city_from_combined_german(self) -> None:
+        """Test extracting city from German-style combined field."""
+        result = apply_expr(clean_expr.city_from_combined("col", "DE"), "10115 Berlin")
+        assert result == "Berlin"
+
+    def test_postal_from_combined_french(self) -> None:
+        """Test extracting postal from French-style combined field."""
+        result = apply_expr(clean_expr.postal_from_combined("col", "FR"), "75001 Paris")
+        assert result == "75001"
+
+    def test_postal_from_combined_dutch(self) -> None:
+        """Test extracting postal from Dutch-style combined field."""
+        result = apply_expr(
+            clean_expr.postal_from_combined("col", "NL"), "Amsterdam 1012 AB"
+        )
+        assert result == "1012 AB"
+
+    def test_postal_from_combined_uk(self) -> None:
+        """Test extracting postal from UK-style combined field."""
+        result = apply_expr(
+            clean_expr.postal_from_combined("col", "GB"), "London SW1A 1AA"
+        )
+        assert result == "SW1A 1AA"
+
+    def test_postal_from_combined_no_match(self) -> None:
+        """Test extracting postal when no match returns empty."""
+        result = apply_expr(clean_expr.postal_from_combined("col", "NL"), "Some City")
+        assert result == ""
+
+    def test_city_from_combined_unknown_country(self) -> None:
+        """Test with unknown country returns original."""
+        result = apply_expr(clean_expr.city_from_combined("col", "XX"), "Some Value")
+        assert result == "Some Value"
+
+    def test_dataframe_city_postal_separation(self) -> None:
+        """Test separating city and postal on a DataFrame."""
+        df = pl.DataFrame(
+            {
+                "combined": ["75001 Paris", "10115 Berlin", "Amsterdam 1012 AB"],
+                "country": ["FR", "DE", "NL"],
+            }
+        )
+
+        # For each row, use the country to select the pattern
+        # This is a simplified test - in practice you'd use when/then/otherwise
+        result_fr = df.filter(pl.col("country") == "FR").select(
+            clean_expr.city_from_combined("combined", "FR").alias("city"),
+            clean_expr.postal_from_combined("combined", "FR").alias("postal"),
+        )
+
+        assert result_fr["city"][0] == "Paris"
+        assert result_fr["postal"][0] == "75001"
+
+
+class TestPostalPatternsConstant:
+    """Tests for POSTAL_PATTERNS constant."""
+
+    def test_postal_patterns_is_dict(self) -> None:
+        """Test POSTAL_PATTERNS is available and is a dict."""
+        assert isinstance(clean_expr.POSTAL_PATTERNS, dict)
+
+    def test_postal_patterns_has_common_countries(self) -> None:
+        """Test POSTAL_PATTERNS has common countries."""
+        assert "NL" in clean_expr.POSTAL_PATTERNS
+        assert "FR" in clean_expr.POSTAL_PATTERNS
+        assert "DE" in clean_expr.POSTAL_PATTERNS
+        assert "GB" in clean_expr.POSTAL_PATTERNS
+        assert "US" in clean_expr.POSTAL_PATTERNS

@@ -65,6 +65,9 @@ __all__ = [
     # Zip cleaners
     "zip_code",
     "zip_strip_prefix",
+    # Address cleaners
+    "separate_city_postal",
+    "detect_country",
     # Name cleaners
     "name_strip_title",
     "name_strip_suffix",
@@ -86,6 +89,9 @@ __all__ = [
     "SUFFIXES",
     "VAT_EXEMPT_VALUES",
     "PHONE_COUNTRY_RULES",
+    "PHONE_PREFIX_TO_COUNTRY",
+    "POSTAL_PATTERNS",
+    "MAJOR_CITIES",
 ]
 
 # Type alias for cleaner functions
@@ -211,11 +217,263 @@ PHONE_COUNTRY_RULES: dict[str, dict[str, str]] = {
     "DE": {"country_code": "49", "mobile_prefix": "1", "national_prefix": "0"},
     "FR": {"country_code": "33", "mobile_prefix": "6", "national_prefix": "0"},
     "UK": {"country_code": "44", "mobile_prefix": "7", "national_prefix": "0"},
+    "GB": {"country_code": "44", "mobile_prefix": "7", "national_prefix": "0"},
     "ES": {"country_code": "34", "mobile_prefix": "6", "national_prefix": ""},
     "IT": {"country_code": "39", "mobile_prefix": "3", "national_prefix": ""},
     "AT": {"country_code": "43", "mobile_prefix": "6", "national_prefix": "0"},
     "CH": {"country_code": "41", "mobile_prefix": "7", "national_prefix": "0"},
     "LU": {"country_code": "352", "mobile_prefix": "6", "national_prefix": ""},
+    "PT": {"country_code": "351", "mobile_prefix": "9", "national_prefix": ""},
+    "IS": {"country_code": "354", "mobile_prefix": "", "national_prefix": ""},
+    "US": {"country_code": "1", "mobile_prefix": "", "national_prefix": "1"},
+    "CA": {"country_code": "1", "mobile_prefix": "", "national_prefix": "1"},
+}
+
+# Phone prefix to country code mapping (for country detection)
+PHONE_PREFIX_TO_COUNTRY: dict[str, str] = {
+    "31": "NL",
+    "32": "BE",
+    "33": "FR",
+    "34": "ES",
+    "39": "IT",
+    "41": "CH",
+    "43": "AT",
+    "44": "GB",
+    "45": "DK",
+    "46": "SE",
+    "47": "NO",
+    "48": "PL",
+    "49": "DE",
+    "351": "PT",
+    "352": "LU",
+    "353": "IE",
+    "354": "IS",
+    "358": "FI",
+    "1": "US",  # Also CA, but default to US
+}
+
+# Postal code patterns by country
+# Format: (regex_pattern, position) where position is "prefix" or "suffix"
+POSTAL_PATTERNS: dict[str, tuple[str, str]] = {
+    # Netherlands: 1234 AB (4 digits + space + 2 letters) - suffix position
+    "NL": (r"\d{4}\s?[A-Z]{2}", "suffix"),
+    # Belgium: 4 digits - prefix position
+    "BE": (r"\d{4}", "prefix"),
+    # Germany: 5 digits - prefix position
+    "DE": (r"\d{5}", "prefix"),
+    # France: 5 digits - prefix position
+    "FR": (r"\d{5}", "prefix"),
+    # UK: Complex alphanumeric - suffix position
+    "GB": (r"[A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2}", "suffix"),
+    "UK": (r"[A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2}", "suffix"),
+    # US: 5 digits or 5+4 format - suffix position
+    "US": (r"\d{5}(?:-\d{4})?", "suffix"),
+    # Portugal: 4 digits + hyphen + 3 digits - prefix position
+    "PT": (r"\d{4}-\d{3}", "prefix"),
+    # Iceland: 3 digits - prefix position
+    "IS": (r"\d{3}", "prefix"),
+    # Spain: 5 digits - prefix position
+    "ES": (r"\d{5}", "prefix"),
+    # Italy: 5 digits - prefix position
+    "IT": (r"\d{5}", "prefix"),
+    # Austria: 4 digits - prefix position
+    "AT": (r"\d{4}", "prefix"),
+    # Switzerland: 4 digits - prefix position
+    "CH": (r"\d{4}", "prefix"),
+    # Luxembourg: 4 digits - prefix position (L- prefix optional)
+    "LU": (r"(?:L-)?\d{4}", "prefix"),
+    # Canada: A1A 1A1 format - suffix position
+    "CA": (r"[A-Z]\d[A-Z]\s?\d[A-Z]\d", "suffix"),
+    # Ireland: Eircode format - suffix position
+    "IE": (r"[A-Z]\d{2}\s?[A-Z0-9]{4}", "suffix"),
+    # Sweden: 5 digits (often with space: 123 45) - prefix position
+    "SE": (r"\d{3}\s?\d{2}", "prefix"),
+    # Norway: 4 digits - prefix position
+    "NO": (r"\d{4}", "prefix"),
+    # Denmark: 4 digits - prefix position
+    "DK": (r"\d{4}", "prefix"),
+    # Finland: 5 digits - prefix position
+    "FI": (r"\d{5}", "prefix"),
+    # Poland: 5 digits with hyphen (12-345) - prefix position
+    "PL": (r"\d{2}-\d{3}", "prefix"),
+}
+
+# Major cities to country mapping (for country detection from city name)
+MAJOR_CITIES: dict[str, str] = {
+    # Netherlands
+    "amsterdam": "NL",
+    "rotterdam": "NL",
+    "den haag": "NL",
+    "the hague": "NL",
+    "utrecht": "NL",
+    "eindhoven": "NL",
+    "groningen": "NL",
+    "tilburg": "NL",
+    "almere": "NL",
+    "breda": "NL",
+    "nijmegen": "NL",
+    "arnhem": "NL",
+    "maastricht": "NL",
+    # Belgium
+    "brussels": "BE",
+    "brussel": "BE",
+    "bruxelles": "BE",
+    "antwerp": "BE",
+    "antwerpen": "BE",
+    "ghent": "BE",
+    "gent": "BE",
+    "charleroi": "BE",
+    "liege": "BE",
+    "luik": "BE",
+    "bruges": "BE",
+    "brugge": "BE",
+    # Germany
+    "berlin": "DE",
+    "munich": "DE",
+    "münchen": "DE",
+    "hamburg": "DE",
+    "frankfurt": "DE",
+    "cologne": "DE",
+    "köln": "DE",
+    "düsseldorf": "DE",
+    "stuttgart": "DE",
+    "dortmund": "DE",
+    "essen": "DE",
+    "leipzig": "DE",
+    "bremen": "DE",
+    "dresden": "DE",
+    "hanover": "DE",
+    "hannover": "DE",
+    "nuremberg": "DE",
+    "nürnberg": "DE",
+    # France
+    "paris": "FR",
+    "marseille": "FR",
+    "lyon": "FR",
+    "toulouse": "FR",
+    "nice": "FR",
+    "nantes": "FR",
+    "strasbourg": "FR",
+    "montpellier": "FR",
+    "bordeaux": "FR",
+    "lille": "FR",
+    "rennes": "FR",
+    # UK
+    "london": "GB",
+    "birmingham": "GB",
+    "manchester": "GB",
+    "glasgow": "GB",
+    "liverpool": "GB",
+    "leeds": "GB",
+    "sheffield": "GB",
+    "edinburgh": "GB",
+    "bristol": "GB",
+    "cardiff": "GB",
+    "belfast": "GB",
+    "newcastle": "GB",
+    "nottingham": "GB",
+    # Spain
+    "madrid": "ES",
+    "barcelona": "ES",
+    "valencia": "ES",
+    "seville": "ES",
+    "sevilla": "ES",
+    "zaragoza": "ES",
+    "malaga": "ES",
+    "málaga": "ES",
+    "murcia": "ES",
+    "bilbao": "ES",
+    # Italy
+    "rome": "IT",
+    "roma": "IT",
+    "milan": "IT",
+    "milano": "IT",
+    "naples": "IT",
+    "napoli": "IT",
+    "turin": "IT",
+    "torino": "IT",
+    "palermo": "IT",
+    "genoa": "IT",
+    "genova": "IT",
+    "bologna": "IT",
+    "florence": "IT",
+    "firenze": "IT",
+    "venice": "IT",
+    "venezia": "IT",
+    # Portugal
+    "lisbon": "PT",
+    "lisboa": "PT",
+    "porto": "PT",
+    "figueira da foz": "PT",
+    # Iceland
+    "reykjavik": "IS",
+    "reykjavík": "IS",
+    # Austria
+    "vienna": "AT",
+    "wien": "AT",
+    "graz": "AT",
+    "linz": "AT",
+    "salzburg": "AT",
+    "innsbruck": "AT",
+    # Switzerland
+    "zurich": "CH",
+    "zürich": "CH",
+    "geneva": "CH",
+    "genève": "CH",
+    "basel": "CH",
+    "bern": "CH",
+    "lausanne": "CH",
+    # US
+    "new york": "US",
+    "los angeles": "US",
+    "chicago": "US",
+    "houston": "US",
+    "phoenix": "US",
+    "philadelphia": "US",
+    "san antonio": "US",
+    "san diego": "US",
+    "dallas": "US",
+    "san jose": "US",
+    "austin": "US",
+    "jacksonville": "US",
+    "san francisco": "US",
+    "seattle": "US",
+    "denver": "US",
+    "boston": "US",
+    "washington": "US",
+    "miami": "US",
+    "atlanta": "US",
+    # Canada
+    "toronto": "CA",
+    "montreal": "CA",
+    "montréal": "CA",
+    "vancouver": "CA",
+    "calgary": "CA",
+    "edmonton": "CA",
+    "ottawa": "CA",
+    "winnipeg": "CA",
+    "quebec city": "CA",
+    # Scandinavia
+    "stockholm": "SE",
+    "gothenburg": "SE",
+    "malmö": "SE",
+    "copenhagen": "DK",
+    "københavn": "DK",
+    "oslo": "NO",
+    "bergen": "NO",
+    "helsinki": "FI",
+    # Other
+    "dublin": "IE",
+    "luxembourg": "LU",
+    "warsaw": "PL",
+    "warszawa": "PL",
+    "krakow": "PL",
+    "kraków": "PL",
+    "prague": "CZ",
+    "praha": "CZ",
+    "budapest": "HU",
+    "athens": "GR",
+    "αθήνα": "GR",
 }
 
 
@@ -830,6 +1088,207 @@ def zip_strip_prefix() -> Cleaner:
         return _ZIP_PREFIX_PATTERN.sub("", value.strip())
 
     return clean
+
+
+# =============================================================================
+# ADDRESS CLEANERS (City/Postal Separation & Country Detection)
+# =============================================================================
+
+
+def separate_city_postal(
+    country: Optional[str] = None,
+    patterns: Optional[dict[str, tuple[str, str]]] = None,
+) -> Callable[[Any], tuple[str, str]]:
+    """Separate city and postal code from a combined field.
+
+    Handles common formats where city and postal code are stored together:
+    - "75001 Paris" (French: postal prefix)
+    - "Amsterdam 1012 AB" (Dutch: postal suffix)
+    - "London SW1A 1AA" (UK: alphanumeric suffix)
+    - "3080-055 Figueira Da Foz" (Portuguese: hyphenated postal)
+
+    Args:
+        country: Optional country code hint (e.g., "NL", "FR", "GB").
+                 If provided, uses that country's postal pattern.
+                 If not provided, tries to auto-detect from common patterns.
+        patterns: Optional custom patterns dict. Uses POSTAL_PATTERNS if not set.
+
+    Returns:
+        A cleaner that returns (city, postal_code) tuple.
+        If no postal found, returns (original_value, "").
+    """
+    patterns_dict = patterns or POSTAL_PATTERNS
+
+    # Pre-compile patterns for performance
+    compiled_patterns: list[tuple[str, re.Pattern[str], str]] = []
+
+    if country and country.upper() in patterns_dict:
+        # Use specific country pattern
+        pattern_str, position = patterns_dict[country.upper()]
+        compiled_patterns.append(
+            (country.upper(), re.compile(pattern_str, re.IGNORECASE), position)
+        )
+    else:
+        # Try all patterns (ordered by specificity)
+        # More specific patterns first (PT, NL, GB, CA, IE, PL)
+        priority_order = [
+            "PT",
+            "NL",
+            "GB",
+            "UK",
+            "CA",
+            "IE",
+            "PL",
+            "US",
+            "DE",
+            "FR",
+            "IT",
+            "ES",
+            "SE",
+            "FI",
+            "BE",
+            "AT",
+            "CH",
+            "LU",
+            "NO",
+            "DK",
+            "IS",
+        ]
+        for cc in priority_order:
+            if cc in patterns_dict:
+                pattern_str, position = patterns_dict[cc]
+                compiled_patterns.append(
+                    (cc, re.compile(pattern_str, re.IGNORECASE), position)
+                )
+
+    def clean(value: Any) -> tuple[str, str]:
+        if not value or not isinstance(value, str):
+            return (str(value) if value else "", "")
+
+        value = value.strip()
+        if not value:
+            return ("", "")
+
+        # Try each pattern
+        for _country_code, pattern, position in compiled_patterns:
+            match = pattern.search(value.upper())
+            if match:
+                postal = match.group(0)
+                # Get original case postal from the value
+                start, end = match.start(), match.end()
+                # Map positions back to original (non-uppercased) string
+                original_postal = value[start:end]
+
+                if position == "prefix":
+                    # Postal at start: "75001 Paris"
+                    city = value[end:].strip()
+                else:
+                    # Postal at end: "Amsterdam 1012 AB"
+                    city = value[:start].strip()
+
+                return (city, original_postal.strip())
+
+        # No pattern matched - return original as city, empty postal
+        return (value, "")
+
+    return clean
+
+
+def detect_country(
+    phone: Optional[str] = None,
+    postal: Optional[str] = None,
+    city: Optional[str] = None,
+    phone_prefixes: Optional[dict[str, str]] = None,
+    postal_patterns: Optional[dict[str, tuple[str, str]]] = None,
+    cities: Optional[dict[str, str]] = None,
+) -> Optional[str]:
+    """Detect country code from available hints (phone, postal code, city).
+
+    Uses multiple signals to infer the country when it's missing:
+    - Phone number international prefix (+31 → NL)
+    - Postal code pattern matching (1012 AB → NL)
+    - City name lookup (Amsterdam → NL)
+
+    Priority: phone > postal > city (phone is most reliable)
+
+    Args:
+        phone: Phone number (e.g., "+31 6 12345678")
+        postal: Postal code (e.g., "1012 AB")
+        city: City name (e.g., "Amsterdam")
+        phone_prefixes: Custom phone prefix mapping. Uses PHONE_PREFIX_TO_COUNTRY.
+        postal_patterns: Custom postal patterns. Uses POSTAL_PATTERNS.
+        cities: Custom city mapping. Uses MAJOR_CITIES.
+
+    Returns:
+        ISO country code (e.g., "NL") or None if not detected.
+
+    Example:
+        >>> detect_country(phone="+31 6 12345678")
+        'NL'
+        >>> detect_country(postal="1012 AB")
+        'NL'
+        >>> detect_country(city="Amsterdam")
+        'NL'
+        >>> detect_country(phone="+33 1 234", postal="75001", city="Paris")
+        'FR'
+    """
+    prefixes = phone_prefixes or PHONE_PREFIX_TO_COUNTRY
+    patterns = postal_patterns or POSTAL_PATTERNS
+    city_map = cities or MAJOR_CITIES
+
+    # 1. Try phone number (most reliable)
+    if phone and isinstance(phone, str):
+        # Clean phone number
+        cleaned = re.sub(r"[^\d+]", "", phone.strip())
+        if cleaned.startswith("+"):
+            digits = cleaned[1:]
+            # Try 3-digit prefixes first (e.g., 351, 352, 353, 354, 358)
+            for prefix_len in [3, 2, 1]:
+                prefix = digits[:prefix_len]
+                if prefix in prefixes:
+                    return prefixes[prefix]
+
+    # 2. Try postal code pattern
+    if postal and isinstance(postal, str):
+        postal_upper = postal.strip().upper()
+        # Check each pattern (ordered by specificity)
+        priority_order = [
+            "PT",
+            "NL",
+            "GB",
+            "UK",
+            "CA",
+            "IE",
+            "PL",
+            "US",
+            "DE",
+            "FR",
+            "IT",
+            "ES",
+            "SE",
+            "FI",
+            "BE",
+            "AT",
+            "CH",
+            "LU",
+            "NO",
+            "DK",
+            "IS",
+        ]
+        for cc in priority_order:
+            if cc in patterns:
+                pattern_str, _ = patterns[cc]
+                if re.fullmatch(pattern_str, postal_upper, re.IGNORECASE):
+                    # Normalize UK to GB
+                    return "GB" if cc == "UK" else cc
+
+    # 3. Try city name lookup
+    if city and isinstance(city, str):
+        city_lower = city.strip().lower()
+        if city_lower in city_map:
+            return city_map[city_lower]
+
+    return None
 
 
 # =============================================================================
