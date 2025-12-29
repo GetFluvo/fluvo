@@ -726,8 +726,12 @@ clean.COMPANY_SUFFIX_CANONICAL["myco"] = "MyCo."
 
 | Function | Description | Example |
 |----------|-------------|---------|
-| `zip_code()` | Remove spaces | `"1234 AB"` → `"1234AB"` |
+| `zip_code()` | Remove spaces and commas, filter `e-` prefix | `"1234 AB"` → `"1234AB"`, `"e-mail"` → `None` |
 | `zip_strip_prefix()` | Remove country prefix | `"NL-1234AB"` → `"1234AB"` |
+
+The `zip_code()` cleaner:
+- Removes all spaces and commas: `"1234, AB"` → `"1234AB"`
+- Filters out invalid values starting with `e-` (returns `None`): `"e-12345"` → `None`
 
 #### Numeric Cleaners
 
