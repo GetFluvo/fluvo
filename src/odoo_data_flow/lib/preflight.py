@@ -352,6 +352,9 @@ def _validate_header(
         clean_field = field.split("/")[
             0
         ]  # Handle external ID fields like 'parent_id/id'
+        # Skip 'id' field - it's always mandatory for imports as external ID
+        if clean_field == "id":
+            continue
         if clean_field in odoo_fields:
             field_info = odoo_fields[clean_field]
             is_readonly = field_info.get("readonly", False)

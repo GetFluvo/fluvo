@@ -792,6 +792,8 @@ class TestValidateHeader:
         assert call_args[0][0] == "ReadOnly Fields Detected"
         assert "display_name" in call_args[0][1]
         assert "non-stored" in call_args[0][1]
+        # 'id' field should NOT be in the warning (it's mandatory for imports)
+        assert "'id'" not in call_args[0][1]
 
     def test_validate_header_warns_about_multiple_readonly_fields(
         self, mock_show_warning_panel: MagicMock
@@ -818,3 +820,5 @@ class TestValidateHeader:
         assert "commercial_company_name" in call_args[0][1]
         assert "non-stored" in call_args[0][1]
         assert "1 non-stored readonly" in call_args[0][1]
+        # 'id' field should NOT be in the warning (it's mandatory for imports)
+        assert "'id'" not in call_args[0][1]
