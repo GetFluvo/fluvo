@@ -672,7 +672,7 @@ def _create_relational_records(
 
     if failed_records_to_report:
         writer.write_relational_failures_to_csv(
-            model, field, original_filename, failed_records_to_report
+            model, field, original_filename, failed_records_to_report, config
         )
 
     failed_updates = len(failed_records_to_report)
@@ -779,7 +779,7 @@ def run_write_o2m_tuple_import(
 
     if failed_records_to_report:
         writer.write_relational_failures_to_csv(
-            model, field, original_filename, failed_records_to_report
+            model, field, original_filename, failed_records_to_report, config
         )
 
     log.info(

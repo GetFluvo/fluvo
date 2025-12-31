@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from odoo_data_flow.importer import (
     _count_lines,
+    _get_env_from_config,
     _get_fail_filename,
     _infer_model_from_filename,
     run_import,
@@ -36,6 +37,144 @@ class TestFilenameUtils:
         assert "res_partner" in filename
         assert "failed" in filename
         assert any(char.isdigit() for char in filename)
+
+
+class TestEnvFromConfig:
+    """Tests for environment name extraction from config files."""
+
+    def test_get_env_from_config_with_connection_suffix(self) -> None:
+        """Test extracting env name from config with _connection suffix."""
+        assert _get_env_from_config("test_connection.conf") == "test"
+        assert _get_env_from_config("uat_connection.conf") == "uat"
+        assert _get_env_from_config("prod_connection.conf") == "prod"
+
+    def test_get_env_from_config_without_suffix(self) -> None:
+        """Test extracting env name from config without suffix."""
+        assert _get_env_from_config("test.conf") == "test"
+        assert _get_env_from_config("uat.conf") == "uat"
+
+    def test_get_env_from_config_with_path(self) -> None:
+        """Test extracting env name from full path."""
+        assert _get_env_from_config("/path/to/test_connection.conf") == "test"
+        assert _get_env_from_config("configs/uat.conf") == "uat"
+
+    def test_get_env_from_config_dict(self) -> None:
+        """Test extracting env name from config dict."""
+        assert _get_env_from_config({"_config_file": "test_connection.conf"}) == "test"
+        assert _get_env_from_config({"_config_file": "uat.conf"}) == "uat"
+
+    def test_get_env_from_config_dict_without_file(self) -> None:
+        """Test that config dict without _config_file returns None."""
+        assert _get_env_from_config({"hostname": "localhost"}) is None
+
+    def test_get_env_from_config_none(self) -> None:
+        """Test that None config returns None."""
+        assert _get_env_from_config(None) is None
+
+
+class TestFailFilePath:
+    """Tests for fail file path resolution with environment-specific folders."""
+
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    @patch("odoo_data_flow.importer._run_preflight_checks")
+    def test_fail_file_uses_env_folder(
+        self,
+        mock_preflight: MagicMock,
+        mock_import_data: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that fail file is placed in environment-specific folder."""
+        # Create data directory with source file
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True)
+        source_file = data_dir / "res_partner.csv"
+        source_file.write_text("id,name\n1,Test\n")
+
+        mock_preflight.return_value = True
+        mock_import_data.return_value = (True, {"total_records": 1})
+
+        # Run import with uat_connection.conf - should place fail file in data/uat/
+        run_import(
+            config="uat_connection.conf",
+            filename=str(source_file),
+            model="res.partner",
+            deferred_fields=None,
+            auto_defer=False,
+            unique_id_field=None,
+            no_preflight_checks=False,
+            headless=False,
+            worker=1,
+            batch_size=10,
+            skip=0,
+            fail=False,
+            separator=";",
+            ignore=None,
+            context="{}",
+            encoding="utf-8",
+            o2m=False,
+            groupby=None,
+        )
+
+        # Verify the fail_file path is in the uat subfolder
+        call_args = mock_import_data.call_args
+        fail_file_arg = call_args.kwargs.get("fail_file") or call_args[1].get(
+            "fail_file"
+        )
+        assert fail_file_arg is not None
+        fail_path = Path(fail_file_arg)
+        assert fail_path.is_absolute()
+        # Should be in data/uat/ folder
+        assert fail_path.parent == data_dir / "uat"
+        assert fail_path.name == "res_partner_fail.csv"
+
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    @patch("odoo_data_flow.importer._run_preflight_checks")
+    def test_fail_file_no_env_uses_same_dir(
+        self,
+        mock_preflight: MagicMock,
+        mock_import_data: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that fail file stays in same dir when no env can be extracted."""
+        # Create data directory with source file
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True)
+        source_file = data_dir / "res_partner.csv"
+        source_file.write_text("id,name\n1,Test\n")
+
+        mock_preflight.return_value = True
+        mock_import_data.return_value = (True, {"total_records": 1})
+
+        # Run import with config dict without _config_file
+        run_import(
+            config={"hostname": "localhost", "database": "db", "login": "a", "password": "b"},
+            filename=str(source_file),
+            model="res.partner",
+            deferred_fields=None,
+            auto_defer=False,
+            unique_id_field=None,
+            no_preflight_checks=False,
+            headless=False,
+            worker=1,
+            batch_size=10,
+            skip=0,
+            fail=False,
+            separator=";",
+            ignore=None,
+            context="{}",
+            encoding="utf-8",
+            o2m=False,
+            groupby=None,
+        )
+
+        # Verify the fail_file path is in same directory as input file
+        call_args = mock_import_data.call_args
+        fail_file_arg = call_args.kwargs.get("fail_file") or call_args[1].get(
+            "fail_file"
+        )
+        assert fail_file_arg is not None
+        fail_path = Path(fail_file_arg)
+        assert fail_path.parent == data_dir
 
 
 class TestRunImport:
@@ -226,15 +365,18 @@ def test_run_import_fail_mode(
     mock_import_data: MagicMock,
     tmp_path: Path,
 ) -> None:
-    """Test the fail mode logic."""
+    """Test the fail mode logic with environment-specific folders."""
     source_file = tmp_path / "source.csv"
     source_file.touch()
-    fail_file = tmp_path / "res_partner_fail.csv"
+    # Create fail file in environment-specific folder (uat from uat_connection.conf)
+    env_dir = tmp_path / "uat"
+    env_dir.mkdir(parents=True)
+    fail_file = env_dir / "res_partner_fail.csv"
     fail_file.write_text("id,name\n1,test")
     mock_import_data.return_value = (True, {"total_records": 1})
 
     run_import(
-        config="dummy.conf",
+        config="uat_connection.conf",
         filename=str(source_file),
         model="res.partner",
         fail=True,
@@ -355,7 +497,10 @@ def test_run_import_fail_mode_with_strategies(
     """Test that relational strategies are skipped in fail mode."""
     source_file = tmp_path / "source.csv"
     source_file.touch()
-    fail_file = tmp_path / "res_partner_fail.csv"
+    # Create fail file in environment-specific folder (test from test_connection.conf)
+    env_dir = tmp_path / "test"
+    env_dir.mkdir(parents=True)
+    fail_file = env_dir / "res_partner_fail.csv"
     fail_file.write_text("id,name\n1,test")
 
     def preflight_side_effect(*_args: Any, **kwargs: Any) -> bool:
@@ -368,7 +513,7 @@ def test_run_import_fail_mode_with_strategies(
     mock_import_data.return_value = (True, {"total_records": 1, "id_map": {"1": 1}})
 
     run_import(
-        config="dummy.conf",
+        config="test_connection.conf",
         filename=str(source_file),
         model="res.partner",
         fail=True,

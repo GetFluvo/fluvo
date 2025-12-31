@@ -66,6 +66,38 @@ def _get_fail_filename(model: str, is_fail_run: bool) -> str:
     return f"{model_filename}_fail.csv"
 
 
+def _get_env_from_config(config: Union[str, dict[str, Any]]) -> Optional[str]:
+    """Extracts the environment name from a config file path.
+
+    Supports patterns like:
+    - test_connection.conf -> test
+    - uat.conf -> uat
+    - prod_connection.conf -> prod
+
+    Args:
+        config: Either a config file path (str) or a config dict.
+
+    Returns:
+        The environment name, or None if it cannot be determined.
+    """
+    if isinstance(config, dict):
+        # Config dict may have _config_file key
+        config_file = config.get("_config_file", "")
+    else:
+        config_file = config
+
+    if not config_file:
+        return None
+
+    # Get the filename without extension
+    basename = Path(config_file).stem
+
+    # Remove common suffixes like _connection, _conn
+    env_name = re.sub(r"(_connection|_conn)$", "", basename, flags=re.IGNORECASE)
+
+    return env_name if env_name else None
+
+
 def _run_preflight_checks(
     preflight_mode: PreflightMode, import_plan: dict[str, Any], **kwargs: Any
 ) -> bool:
@@ -150,8 +182,17 @@ def run_import(  # noqa: C901
             return
 
     file_to_process = filename
+    # Determine environment-specific output directory from config file name
+    env_name = _get_env_from_config(config)
+    input_file_dir = Path(filename).resolve().parent
+    if env_name:
+        env_output_dir = input_file_dir / env_name
+    else:
+        env_output_dir = input_file_dir
+
     if fail:
-        fail_path = Path(filename).parent / _get_fail_filename(model, False)
+        # Look for fail file in environment-specific directory
+        fail_path = env_output_dir / _get_fail_filename(model, False)
         line_count = _count_lines(str(fail_path))
         if line_count <= 1:
             Console().print(
@@ -211,7 +252,11 @@ def run_import(  # noqa: C901
 
     final_deferred = deferred_fields or import_plan.get("deferred_fields", [])
     final_uid_field = unique_id_field or import_plan.get("unique_id_field") or "id"
-    fail_output_file = str(Path(filename).parent / _get_fail_filename(model, fail))
+    # Create environment-specific directory if it doesn't exist
+    if env_name and not env_output_dir.exists():
+        env_output_dir.mkdir(parents=True, exist_ok=True)
+        log.info(f"Created environment directory: {env_output_dir}")
+    fail_output_file = str(env_output_dir / _get_fail_filename(model, fail))
 
     if fail:
         log.info("Single-record batching enabled for this import strategy.")
