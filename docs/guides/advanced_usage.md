@@ -115,6 +115,65 @@ product_mapping = {
 
 ---
 
+## Multi-Environment Imports
+
+When working with multiple Odoo environments (e.g., test, UAT, production), the importer automatically organizes fail files into environment-specific subfolders based on your connection file name.
+
+### How It Works
+
+The environment name is extracted from your connection file:
+
+| Connection File | Environment | Fail File Location |
+|----------------|-------------|-------------------|
+| `test_connection.conf` | `test` | `data/test/res_partner_fail.csv` |
+| `uat_connection.conf` | `uat` | `data/uat/res_partner_fail.csv` |
+| `prod_connection.conf` | `prod` | `data/prod/res_partner_fail.csv` |
+| `uat.conf` | `uat` | `data/uat/res_partner_fail.csv` |
+
+The `_connection` suffix is automatically stripped to determine the environment name.
+
+### Example: Importing to Multiple Environments
+
+**Directory Structure:**
+```
+project/
+├── data/
+│   └── res_partner.csv
+├── test_connection.conf
+├── uat_connection.conf
+└── prod_connection.conf
+```
+
+**Import to UAT:**
+```bash
+odoo-data-flow import \
+    --connection-file uat_connection.conf \
+    --file data/res_partner.csv \
+    --model res.partner
+```
+
+If any records fail, they are written to `data/uat/res_partner_fail.csv`.
+
+**Retry Failed Records:**
+```bash
+odoo-data-flow import \
+    --connection-file uat_connection.conf \
+    --file data/res_partner.csv \
+    --model res.partner \
+    --fail
+```
+
+The `--fail` flag automatically looks for the fail file in the correct environment folder (`data/uat/res_partner_fail.csv`).
+
+### Benefits
+
+- **Isolated environments**: Fail files from different environments don't mix
+- **Easy retry**: The `--fail` flag finds the correct fail file automatically
+- **Clean organization**: Each environment has its own subfolder for tracking failures
+- **Automatic folder creation**: Environment folders are created automatically when needed
+
+---
+
 ## Importing Translations
 
 The most efficient way to import translations is to perform a standard import with a special `lang` key in the context. This lets Odoo's ORM handle the translation creation process correctly.
