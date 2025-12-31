@@ -741,6 +741,66 @@ def _process_external_id_fields(
     return converted_vals, external_id_fields
 
 
+def _extract_access_error_message(error_str: str) -> str:
+    """Extract a clean, user-friendly message from an access error.
+
+    Args:
+        error_str: The full error string from Odoo
+
+    Returns:
+        A clean, user-friendly error message
+    """
+    import re
+
+    # First, look for specific error patterns that are most informative
+
+    # Look for "cannot be called remotely" pattern and extract the method name
+    remote_match = re.search(
+        r"Private methods \(such as '([^']+)'\) cannot be called remotely",
+        error_str,
+    )
+    if remote_match:
+        return f"Access denied: insufficient permissions to access '{remote_match.group(1)}'"
+
+    # Look for AccessError message pattern
+    access_match = re.search(
+        r"AccessError\(['\"]([^'\"]+)['\"]\)", error_str, re.IGNORECASE
+    )
+    if access_match:
+        return access_match.group(1)
+
+    # Try to parse as dict and extract data.message (more specific than top-level)
+    try:
+        error_dict = ast.literal_eval(error_str)
+        if isinstance(error_dict, dict):
+            # Prefer data.message over top-level message
+            if "data" in error_dict and isinstance(error_dict["data"], dict):
+                data_msg = error_dict["data"].get("message")
+                if data_msg:
+                    return str(data_msg)
+            # Fall back to top-level message
+            if "message" in error_dict:
+                return str(error_dict["message"])
+    except (ValueError, SyntaxError):
+        pass
+
+    # Fall back to regex for 'message': '...' pattern
+    message_match = re.search(r"'message':\s*['\"]([^'\"]+)['\"]", error_str)
+    if message_match:
+        return message_match.group(1)
+
+    # Default: return a shortened version of the error
+    # Strip debug/traceback info
+    if "Traceback" in error_str:
+        error_str = error_str.split("Traceback")[0].strip()
+
+    # Limit length
+    if len(error_str) > 200:
+        return error_str[:200] + "..."
+
+    return error_str
+
+
 def _handle_create_error(  # noqa C901
     i: int,
     create_error: Exception,
@@ -761,8 +821,22 @@ def _handle_create_error(  # noqa C901
     error_str = str(create_error)
     error_str_lower = error_str.lower()
 
-    # Handle constraint violation errors (e.g., XML ID space constraint)
+    # Handle access/permission errors first (most common user issue)
     if (
+        "accesserror" in error_str_lower
+        or "access denied" in error_str_lower
+        or "permission denied" in error_str_lower
+        or "not allowed" in error_str_lower
+        or "cannot be called remotely" in error_str_lower
+        or "access rights" in error_str_lower
+    ):
+        clean_message = _extract_access_error_message(error_str)
+        error_message = f"Access denied (row {i + 1}): {clean_message}"
+        if "Fell back to create" in error_summary:
+            error_summary = "Access denied - check user permissions"
+
+    # Handle constraint violation errors (e.g., XML ID space constraint)
+    elif (
         "constraint" in error_str_lower
         or "check constraint" in error_str_lower
         or "nospaces" in error_str_lower

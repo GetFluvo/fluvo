@@ -761,6 +761,57 @@ class TestXmlIdCreation:
         assert result is False
 
 
+class TestAccessErrorHandling:
+    """Tests for access error message extraction and handling."""
+
+    def test_extract_access_error_from_private_method(self) -> None:
+        """Test extracting error message from 'cannot be called remotely' error."""
+        from odoo_data_flow.import_threaded import _extract_access_error_message
+
+        error = (
+            "{'code': 0, 'message': 'Odoo Server Error', 'data': {'name': "
+            "'odoo.exceptions.AccessError', 'message': \"Private methods "
+            "(such as 'fleet.vehicle.model.browse') cannot be called remotely.\"}}"
+        )
+        result = _extract_access_error_message(error)
+        assert "fleet.vehicle.model.browse" in result
+        assert "Access denied" in result
+
+    def test_extract_access_error_from_message_field(self) -> None:
+        """Test extracting error message from 'message' field."""
+        from odoo_data_flow.import_threaded import _extract_access_error_message
+
+        error = "{'message': 'Access denied for model res.partner'}"
+        result = _extract_access_error_message(error)
+        assert result == "Access denied for model res.partner"
+
+    def test_handle_create_error_access_denied(self) -> None:
+        """Test that access errors produce clean messages in fail file."""
+        from odoo_data_flow.import_threaded import _handle_create_error
+
+        error = Exception(
+            "Private methods (such as 'res.partner.browse') cannot be called remotely."
+        )
+        line = ["id_001", "Test Partner", "test@example.com"]
+
+        error_message, failed_line, summary = _handle_create_error(
+            0, error, line, "Fell back to create"
+        )
+
+        assert "Access denied" in error_message
+        assert "res.partner.browse" in error_message
+        assert summary == "Access denied - check user permissions"
+        assert len(failed_line) == 4  # Original 3 fields + error message
+
+    def test_handle_create_error_truncates_long_errors(self) -> None:
+        """Test that very long error messages are truncated."""
+        from odoo_data_flow.import_threaded import _extract_access_error_message
+
+        long_error = "AccessError: " + "x" * 500
+        result = _extract_access_error_message(long_error)
+        assert len(result) <= 203  # 200 chars + "..."
+
+
 class TestRecursiveBatching:
     """Tests for the recursive batch creation logic."""
 
