@@ -658,14 +658,14 @@ class RPCThreadImport(RpcThread):
 
 
 def _convert_external_id_field(
-    model: Any,
+    connection: Any,
     field_name: str,
     field_value: str,
 ) -> tuple[str, Any]:
     """Convert an external ID field to a database ID.
 
     Args:
-        model: The Odoo model object
+        connection: The Odoo connection object (used to look up external IDs)
         field_name: The field name (e.g., 'parent_id/id')
         field_value: The external ID value
 
@@ -683,14 +683,38 @@ def _convert_external_id_field(
     else:
         # Convert external ID to database ID
         try:
-            # Look up the database ID for this external ID
-            record_ref = model.env.ref(field_value, raise_if_not_found=False)
-            if record_ref:
-                converted_value = record_ref.id
-                log.debug(
-                    f"Converted external ID {field_name} ({field_value}) -> "
-                    f"{base_field_name} ({record_ref.id})"
-                )
+            # Parse module and name from external ID
+            if "." in field_value:
+                module, name = field_value.split(".", 1)
+            else:
+                # Default module for IDs without prefix
+                module = "__export__"
+                name = field_value
+
+            # Look up the database ID via ir.model.data
+            # This avoids model.env.ref() which may not be allowed for some models
+            ir_model_data = connection.get_model("ir.model.data")
+            existing_ids = ir_model_data.search(
+                [
+                    ("module", "=", module),
+                    ("name", "=", name),
+                ],
+                limit=1,
+            )
+
+            if existing_ids:
+                existing = ir_model_data.read(existing_ids[0], ["res_id"])
+                if existing and existing.get("res_id"):
+                    converted_value = existing["res_id"]
+                    log.debug(
+                        f"Converted external ID {field_name} ({field_value}) -> "
+                        f"{base_field_name} ({converted_value})"
+                    )
+                else:
+                    log.warning(
+                        f"Could not find record for external ID '{field_value}', "
+                        f"setting {base_field_name} to False"
+                    )
             else:
                 # If we can't find the external ID, value remains False
                 log.warning(
@@ -708,13 +732,13 @@ def _convert_external_id_field(
 
 
 def _process_external_id_fields(
-    model: Any,
+    connection: Any,
     clean_vals: dict[str, Any],
 ) -> tuple[dict[str, Any], list[str]]:
     """Process all external ID fields in the clean values.
 
     Args:
-        model: The Odoo model object
+        connection: The Odoo connection object (used to look up external IDs)
         clean_vals: Dictionary of clean field values
 
     Returns:
@@ -730,7 +754,7 @@ def _process_external_id_fields(
             # (base_field_name, converted_value) instead of modifying
             # converted_vals as a side effect
             base_name, value = _convert_external_id_field(
-                model, field_name, field_value
+                connection, field_name, field_value
             )
             converted_vals[base_name] = value
             external_id_fields.append(field_name)
@@ -1020,7 +1044,7 @@ def _create_batch_individually(  # noqa: C901
             # 3. CREATE
             # Convert external ID references to actual database IDs before creating
             converted_vals, external_id_fields = _process_external_id_fields(
-                model, clean_vals
+                connection, clean_vals
             )
 
             log.debug(f"External ID fields found: {external_id_fields}")
