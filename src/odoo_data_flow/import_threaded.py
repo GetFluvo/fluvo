@@ -1051,12 +1051,15 @@ def _create_batch_individually(  # noqa: C901
             log.debug(f"Converted vals keys: {list(converted_vals.keys())}")
 
             new_record = model.create(converted_vals, context=context)
-            id_map[sanitized_source_id] = new_record.id
+            # Handle both cases: create() returns either an int ID or a record object
+            # Accessing .id on a record object can trigger browse() which may fail
+            new_id = new_record if isinstance(new_record, int) else int(new_record)
+            id_map[sanitized_source_id] = new_id
 
             # Create ir.model.data entry for XML ID since create() doesn't do it
             if model_name:
                 _create_xmlid_entry(
-                    connection, sanitized_source_id, new_record.id, model_name
+                    connection, sanitized_source_id, new_id, model_name
                 )
         except IndexError as e:
             error_message = f"Malformed row detected (row {i + 1} in batch): {e}"
