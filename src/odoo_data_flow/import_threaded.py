@@ -886,7 +886,7 @@ def _handle_create_error(  # noqa C901
 
 
 def _create_xmlid_entry(
-    model: Any,
+    connection: Any,
     xml_id: str,
     res_id: int,
     model_name: str,
@@ -898,7 +898,7 @@ def _create_xmlid_entry(
     ir.model.data entry to ensure the XML ID is saved.
 
     Args:
-        model: The Odoo model proxy (used to access other models)
+        connection: The Odoo connection object (used to access ir.model.data)
         xml_id: The external ID (e.g., 'MODULE.identifier' or just 'identifier')
         res_id: The database ID of the created record
         model_name: The model name (e.g., 'res.partner')
@@ -915,11 +915,12 @@ def _create_xmlid_entry(
             module = "__import__"
             name = xml_id
 
-        # Get ir.model.data model
-        ir_model_data = model.browse().env["ir.model.data"]
+        # Get ir.model.data model directly from connection
+        # This avoids using model.browse() which may not be allowed for some models
+        ir_model_data = connection.get_model("ir.model.data")
 
         # Check if entry already exists
-        existing = ir_model_data.search(
+        existing_ids = ir_model_data.search(
             [
                 ("module", "=", module),
                 ("name", "=", name),
@@ -927,14 +928,16 @@ def _create_xmlid_entry(
             limit=1,
         )
 
-        if existing:
+        if existing_ids:
+            # Read the existing entry to check res_id
+            existing = ir_model_data.read(existing_ids[0], ["res_id", "model"])
             # Update existing entry if it points to a different record
-            if existing.res_id != res_id:
+            if existing.get("res_id") != res_id:
                 log.debug(
                     f"Updating existing ir.model.data entry for {xml_id} "
-                    f"from res_id={existing.res_id} to res_id={res_id}"
+                    f"from res_id={existing.get('res_id')} to res_id={res_id}"
                 )
-                existing.write({"res_id": res_id, "model": model_name})
+                ir_model_data.write(existing_ids[0], {"res_id": res_id, "model": model_name})
             return True
 
         # Create new ir.model.data entry
@@ -957,6 +960,7 @@ def _create_xmlid_entry(
 
 def _create_batch_individually(  # noqa: C901
     model: Any,
+    connection: Any,
     batch_lines: list[list[Any]],
     batch_header: list[str],
     uid_index: int,
@@ -970,6 +974,9 @@ def _create_batch_individually(  # noqa: C901
     error_summary = "Fell back to create"
     header_len = len(batch_header)
     ignore_set = set(ignore_list)
+
+    # Get ir.model.data once for the whole batch (used for looking up existing records)
+    ir_model_data = connection.get_model("ir.model.data")
 
     for i, line in enumerate(batch_lines):
         try:
@@ -985,13 +992,21 @@ def _create_batch_individually(  # noqa: C901
             sanitized_source_id = to_xmlid(source_id)
 
             # 1. SEARCH BEFORE CREATE
-            existing_record = model.browse().env.ref(
-                f"__export__.{sanitized_source_id}", raise_if_not_found=False
+            # Use ir.model.data to look up existing record by external ID
+            # This avoids model.browse() which may not be allowed for some models
+            existing_ids = ir_model_data.search(
+                [
+                    ("module", "=", "__export__"),
+                    ("name", "=", sanitized_source_id),
+                ],
+                limit=1,
             )
 
-            if existing_record:
-                id_map[sanitized_source_id] = existing_record.id
-                continue
+            if existing_ids:
+                existing = ir_model_data.read(existing_ids[0], ["res_id"])
+                if existing and existing.get("res_id"):
+                    id_map[sanitized_source_id] = existing["res_id"]
+                    continue
 
             # 2. PREPARE FOR CREATE
             vals = dict(zip(batch_header, line))
@@ -1017,7 +1032,7 @@ def _create_batch_individually(  # noqa: C901
             # Create ir.model.data entry for XML ID since create() doesn't do it
             if model_name:
                 _create_xmlid_entry(
-                    model, sanitized_source_id, new_record.id, model_name
+                    connection, sanitized_source_id, new_record.id, model_name
                 )
         except IndexError as e:
             error_message = f"Malformed row detected (row {i + 1} in batch): {e}"
@@ -1122,6 +1137,7 @@ def _execute_load_batch(  # noqa: C901
         thread_state.get("context", {"tracking_disable": True}),
         thread_state["progress"],
     )
+    connection = thread_state.get("connection")
     uid_index = thread_state["unique_id_field_index"]
     ignore_list = thread_state.get("ignore_list", [])
     model_name = thread_state.get("model_name", "")
@@ -1132,6 +1148,7 @@ def _execute_load_batch(  # noqa: C901
         )
         result = _create_batch_individually(
             model,
+            connection,
             batch_lines,
             batch_header,
             uid_index,
@@ -1448,6 +1465,7 @@ def _execute_load_batch(  # noqa: C901
                     if failed_lines_to_retry:
                         fallback_result = _create_batch_individually(
                             model,
+                            connection,
                             failed_lines_to_retry,
                             batch_header,
                             uid_index,
@@ -1567,6 +1585,7 @@ def _execute_load_batch(  # noqa: C901
                         clean_error = error_str.strip().replace("\n", " ")
                         fallback_result = _create_batch_individually(
                             model,
+                            connection,
                             current_chunk,
                             batch_header,
                             uid_index,
@@ -1599,6 +1618,7 @@ def _execute_load_batch(  # noqa: C901
             )
             fallback_result = _create_batch_individually(
                 model,
+                connection,
                 current_chunk,
                 batch_header,
                 uid_index,
@@ -1859,6 +1879,7 @@ def _orchestrate_pass_1(
     progress: Progress,
     model_obj: Any,
     model_name: str,
+    connection: Any,
     header: list[str],
     all_data: list[list[Any]],
     unique_id_field: str,
@@ -1941,6 +1962,7 @@ def _orchestrate_pass_1(
     thread_state_1 = {
         "model": model_obj,
         "model_name": model_name,
+        "connection": connection,
         "context": context,
         "unique_id_field_index": pass_1_uid_index,
         "batch_header": pass_1_header,
@@ -1962,6 +1984,7 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
     progress: Progress,
     model_obj: Any,
     model_name: str,
+    connection: Any,
     file_csv: str,
     separator: str,
     encoding: str,
@@ -2051,6 +2074,7 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
             thread_state = {
                 "model": model_obj,
                 "model_name": model_name,
+                "connection": connection,
                 "context": context,
                 "unique_id_field_index": unique_id_field_index,
                 "batch_header": header,
@@ -2477,6 +2501,7 @@ def import_data(  # noqa: C901
                     progress,
                     model_obj,
                     model,
+                    connection,
                     file_csv,
                     separator,
                     encoding,
@@ -2511,6 +2536,7 @@ def import_data(  # noqa: C901
                         progress,
                         model_obj,
                         model,
+                        connection,
                         header,
                         all_data,
                         unique_id_field,

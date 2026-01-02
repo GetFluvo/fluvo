@@ -40,7 +40,15 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
     mock_model = MagicMock()
     mock_model.with_context.return_value = mock_model
     mock_model.load.side_effect = Exception("Generic batch error")
-    mock_model.browse.return_value.env.ref.return_value = None
+
+    # Mock ir.model.data for XML ID lookups
+    mock_ir_model_data = MagicMock()
+    mock_ir_model_data.search.return_value = []  # No existing records
+
+    def get_model_side_effect(model_name: str) -> Any:
+        if model_name == "ir.model.data":
+            return mock_ir_model_data
+        return mock_model
 
     def create_side_effect(vals: dict[str, Any], context: dict[str, Any]) -> Any:
         if vals["id"] == "rec_02":
@@ -51,7 +59,7 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
             return mock_record
 
     mock_model.create.side_effect = create_side_effect
-    mock_get_conn.return_value.get_model.return_value = mock_model
+    mock_get_conn.return_value.get_model.side_effect = get_model_side_effect
 
     # --- Act ---
     # Capture the return value of the import process
@@ -102,15 +110,21 @@ def test_create_fallback_handles_malformed_rows(tmp_path: Path) -> None:
     mock_model = MagicMock()
     mock_model.with_context.return_value = mock_model
     mock_model.load.side_effect = Exception("Load fails, trigger fallback")
-    mock_model.browse.return_value.env.ref.return_value = (
-        None  # Ensure create is attempted
-    )
+
+    # Mock ir.model.data for XML ID lookups
+    mock_ir_model_data = MagicMock()
+    mock_ir_model_data.search.return_value = []  # No existing records
+
+    def get_model_side_effect(model_name_arg: str) -> Any:
+        if model_name_arg == "ir.model.data":
+            return mock_ir_model_data
+        return mock_model
 
     # 2. ACT
     with patch(
         "odoo_data_flow.import_threaded.conf_lib.get_connection_from_config"
     ) as mock_get_conn:
-        mock_get_conn.return_value.get_model.return_value = mock_model
+        mock_get_conn.return_value.get_model.side_effect = get_model_side_effect
         result, _ = import_threaded.import_data(
             config="dummy.conf",
             model=model_name,
@@ -161,8 +175,17 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
 
     mock_model = MagicMock()
     mock_model.load.side_effect = Exception("Load fails, forcing fallback")
-    mock_model.browse.return_value.env.ref.return_value = None  # Force create
-    mock_get_conn.return_value.get_model.return_value = mock_model
+
+    # Mock ir.model.data for XML ID lookups
+    mock_ir_model_data = MagicMock()
+    mock_ir_model_data.search.return_value = []  # No existing records
+
+    def get_model_side_effect(model_name_arg: str) -> Any:
+        if model_name_arg == "ir.model.data":
+            return mock_ir_model_data
+        return mock_model
+
+    mock_get_conn.return_value.get_model.side_effect = get_model_side_effect
 
     # 2. ACT
     result, _ = import_threaded.import_data(

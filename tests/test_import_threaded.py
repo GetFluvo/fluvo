@@ -136,6 +136,7 @@ class TestImportData:
                 progress,
                 MagicMock(),
                 "res.partner",
+                MagicMock(),  # connection
                 header,
                 data,
                 "id",
@@ -567,12 +568,15 @@ class TestImportThreadedEdgeCases:
     def test_create_batch_individually_malformed_row(self) -> None:
         """Test handling of malformed rows."""
         mock_model = MagicMock()
+        mock_connection = MagicMock()
+        # Configure ir.model.data mock to return empty search results
+        mock_connection.get_model.return_value.search.return_value = []
         batch_header = ["id", "name"]
         # This row has only one column, but the header has two
         batch_lines = [["record1"]]
 
         result = _create_batch_individually(
-            mock_model, batch_lines, batch_header, 0, {}, []
+            mock_model, mock_connection, batch_lines, batch_header, 0, {}, []
         )
 
         assert len(result["failed_lines"]) == 1
@@ -667,13 +671,13 @@ class TestXmlIdCreation:
         """Test XML ID creation with module prefix (e.g., 'my_module.identifier')."""
         from odoo_data_flow.import_threaded import _create_xmlid_entry
 
-        mock_model = MagicMock()
+        mock_connection = MagicMock()
         mock_ir_model_data = MagicMock()
         mock_ir_model_data.search.return_value = []  # No existing entry
-        mock_model.browse.return_value.env = {"ir.model.data": mock_ir_model_data}
+        mock_connection.get_model.return_value = mock_ir_model_data
 
         result = _create_xmlid_entry(
-            mock_model, "my_module.partner_001", 42, "res.partner"
+            mock_connection, "my_module.partner_001", 42, "res.partner"
         )
 
         assert result is True
@@ -690,12 +694,12 @@ class TestXmlIdCreation:
         """Test XML ID creation without module prefix (uses __import__)."""
         from odoo_data_flow.import_threaded import _create_xmlid_entry
 
-        mock_model = MagicMock()
+        mock_connection = MagicMock()
         mock_ir_model_data = MagicMock()
         mock_ir_model_data.search.return_value = []  # No existing entry
-        mock_model.browse.return_value.env = {"ir.model.data": mock_ir_model_data}
+        mock_connection.get_model.return_value = mock_ir_model_data
 
-        result = _create_xmlid_entry(mock_model, "PARTNER_001", 42, "res.partner")
+        result = _create_xmlid_entry(mock_connection, "PARTNER_001", 42, "res.partner")
 
         assert result is True
         mock_ir_model_data.create.assert_called_once_with(
@@ -711,51 +715,49 @@ class TestXmlIdCreation:
         """Test that existing entries with same res_id are not updated."""
         from odoo_data_flow.import_threaded import _create_xmlid_entry
 
-        mock_model = MagicMock()
-        mock_existing = MagicMock()
-        mock_existing.res_id = 42  # Same res_id
+        mock_connection = MagicMock()
         mock_ir_model_data = MagicMock()
-        mock_ir_model_data.search.return_value = mock_existing
-        mock_model.browse.return_value.env = {"ir.model.data": mock_ir_model_data}
+        mock_ir_model_data.search.return_value = [1]  # Existing entry ID
+        mock_ir_model_data.read.return_value = {"res_id": 42, "model": "res.partner"}
+        mock_connection.get_model.return_value = mock_ir_model_data
 
         result = _create_xmlid_entry(
-            mock_model, "my_module.partner_001", 42, "res.partner"
+            mock_connection, "my_module.partner_001", 42, "res.partner"
         )
 
         assert result is True
         mock_ir_model_data.create.assert_not_called()
-        mock_existing.write.assert_not_called()
+        mock_ir_model_data.write.assert_not_called()
 
     def test_create_xmlid_entry_existing_entry_different_res_id(self) -> None:
         """Test that existing entries with different res_id are updated."""
         from odoo_data_flow.import_threaded import _create_xmlid_entry
 
-        mock_model = MagicMock()
-        mock_existing = MagicMock()
-        mock_existing.res_id = 99  # Different res_id
+        mock_connection = MagicMock()
         mock_ir_model_data = MagicMock()
-        mock_ir_model_data.search.return_value = mock_existing
-        mock_model.browse.return_value.env = {"ir.model.data": mock_ir_model_data}
+        mock_ir_model_data.search.return_value = [1]  # Existing entry ID
+        mock_ir_model_data.read.return_value = {"res_id": 99, "model": "res.partner"}
+        mock_connection.get_model.return_value = mock_ir_model_data
 
         result = _create_xmlid_entry(
-            mock_model, "my_module.partner_001", 42, "res.partner"
+            mock_connection, "my_module.partner_001", 42, "res.partner"
         )
 
         assert result is True
         mock_ir_model_data.create.assert_not_called()
-        mock_existing.write.assert_called_once_with(
-            {"res_id": 42, "model": "res.partner"}
+        mock_ir_model_data.write.assert_called_once_with(
+            1, {"res_id": 42, "model": "res.partner"}
         )
 
     def test_create_xmlid_entry_handles_exception(self) -> None:
         """Test that exceptions during XML ID creation are handled gracefully."""
         from odoo_data_flow.import_threaded import _create_xmlid_entry
 
-        mock_model = MagicMock()
-        mock_model.browse.side_effect = Exception("Connection error")
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = Exception("Connection error")
 
         result = _create_xmlid_entry(
-            mock_model, "my_module.partner_001", 42, "res.partner"
+            mock_connection, "my_module.partner_001", 42, "res.partner"
         )
 
         assert result is False
@@ -1075,11 +1077,15 @@ class TestExecuteLoadBatchEdgeCases:
         mock_record = MagicMock()
         mock_record.id = 42
         mock_model.create.return_value = mock_record
-        mock_model.browse.return_value.env.ref.return_value = None
+        mock_connection = MagicMock()
+        mock_ir_model_data = MagicMock()
+        mock_ir_model_data.search.return_value = []  # No existing entry
+        mock_connection.get_model.return_value = mock_ir_model_data
 
         mock_progress = MagicMock()
         thread_state = {
             "model": mock_model,
+            "connection": mock_connection,
             "progress": mock_progress,
             "unique_id_field_index": 0,
             "ignore_list": [],
@@ -1200,14 +1206,15 @@ class TestCreateBatchIndividuallyEdgeCases:
     def test_create_batch_individually_serialization_error(self) -> None:
         """Test handling of database serialization errors."""
         mock_model = MagicMock()
-        mock_model.browse.return_value.env.ref.return_value = None
         mock_model.create.side_effect = Exception("could not serialize access")
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value.search.return_value = []
 
         batch_header = ["id", "name"]
         batch_lines = [["rec1", "A"]]
 
         result = _create_batch_individually(
-            mock_model, batch_lines, batch_header, 0, {}, []
+            mock_model, mock_connection, batch_lines, batch_header, 0, {}, []
         )
 
         # Serialization errors should not add to failed_lines (retryable)
@@ -1216,14 +1223,15 @@ class TestCreateBatchIndividuallyEdgeCases:
     def test_create_batch_individually_connection_pool_error(self) -> None:
         """Test handling of connection pool exhaustion errors."""
         mock_model = MagicMock()
-        mock_model.browse.return_value.env.ref.return_value = None
         mock_model.create.side_effect = Exception("connection pool is full")
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value.search.return_value = []
 
         batch_header = ["id", "name"]
         batch_lines = [["rec1", "A"]]
 
         result = _create_batch_individually(
-            mock_model, batch_lines, batch_header, 0, {}, []
+            mock_model, mock_connection, batch_lines, batch_header, 0, {}, []
         )
 
         # Pool errors should add to failed_lines for retry
@@ -1233,16 +1241,17 @@ class TestCreateBatchIndividuallyEdgeCases:
     def test_create_batch_individually_odoo_server_error(self) -> None:
         """Test handling of Odoo server internal errors."""
         mock_model = MagicMock()
-        mock_model.browse.return_value.env.ref.return_value = None
         mock_model.create.side_effect = Exception(
             "Odoo Server Error: tuple index out of range"
         )
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value.search.return_value = []
 
         batch_header = ["id", "name"]
         batch_lines = [["rec1", "A"]]
 
         result = _create_batch_individually(
-            mock_model, batch_lines, batch_header, 0, {}, []
+            mock_model, mock_connection, batch_lines, batch_header, 0, {}, []
         )
 
         # Server internal errors should be recorded
@@ -1252,16 +1261,17 @@ class TestCreateBatchIndividuallyEdgeCases:
     def test_create_batch_individually_constraint_violation(self) -> None:
         """Test handling of database constraint violations."""
         mock_model = MagicMock()
-        mock_model.browse.return_value.env.ref.return_value = None
         mock_model.create.side_effect = Exception(
             "check constraint 'nospaces' violated"
         )
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value.search.return_value = []
 
         batch_header = ["id", "name"]
         batch_lines = [["rec1", "A"]]
 
         result = _create_batch_individually(
-            mock_model, batch_lines, batch_header, 0, {}, []
+            mock_model, mock_connection, batch_lines, batch_header, 0, {}, []
         )
 
         assert len(result["failed_lines"]) == 1
