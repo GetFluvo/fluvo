@@ -422,19 +422,31 @@ def _prepare_pass_2_data(  # noqa: C901
 
     # Import the sanitization function to match id_map key format
     from .lib.internal.tools import to_xmlid
+    import time
+
+    # Cache for external ID lookups to avoid repeated RPC calls
+    external_id_cache: dict[str, Optional[int]] = {}
 
     processed = 0
     found_in_idmap = 0
     not_in_idmap = 0
     rpc_lookups = 0
+    cache_hits = 0
+    start_time = time.time()
+    last_print_time = start_time
+
     for row in all_data:
         processed += 1
-        if processed % 1000 == 0:
+        current_time = time.time()
+        # Print progress every 500 records OR every 5 seconds (whichever comes first)
+        if processed % 500 == 0 or (current_time - last_print_time) > 5:
+            elapsed = current_time - start_time
+            rate = processed / elapsed if elapsed > 0 else 0
             print(
-                f"  [Pass 2] Processed {processed}/{len(all_data)} records "
-                f"(idmap hits: {found_in_idmap}, misses: {not_in_idmap}, "
-                f"RPC lookups: {rpc_lookups})"
+                f"  [Pass 2] {processed}/{len(all_data)} ({rate:.0f}/s) | "
+                f"idmap: {found_in_idmap}, rpc: {rpc_lookups}, cache: {cache_hits}"
             )
+            last_print_time = current_time
         source_id = row[unique_id_field_index]
         # Sanitize source_id to match id_map key format
         sanitized_source_id = to_xmlid(source_id) if source_id else source_id
@@ -466,10 +478,18 @@ def _prepare_pass_2_data(  # noqa: C901
                         # Try XML-ID resolution for non-self-referencing fields
                         not_in_idmap += 1
                         if ir_model_data_proxy:
-                            rpc_lookups += 1
-                            resolved_id = _resolve_external_id_for_pass2(
-                                ir_model_data_proxy, field_value
-                            )
+                            # Check cache first to avoid repeated RPC calls
+                            if field_value in external_id_cache:
+                                cache_hits += 1
+                                resolved_id = external_id_cache[field_value]
+                            else:
+                                rpc_lookups += 1
+                                resolved_id = _resolve_external_id_for_pass2(
+                                    ir_model_data_proxy, field_value
+                                )
+                                # Cache the result (even if None)
+                                external_id_cache[field_value] = resolved_id
+
                             if resolved_id:
                                 update_vals[field_name] = resolved_id
                                 log.debug(
