@@ -2223,12 +2223,22 @@ def _orchestrate_pass_2(
         errors, False otherwise.
     """
     unique_id_field_index = header.index(unique_id_field)
+    progress.console.print(
+        f"[blue]INFO:[/blue] Pass 2: Preparing data for {len(all_data)} records..."
+    )
     pass_2_data_to_write = _prepare_pass_2_data(
         all_data, header, unique_id_field_index, id_map, deferred_fields, model_obj
     )
+    progress.console.print(
+        f"[blue]INFO:[/blue] Pass 2: {len(pass_2_data_to_write)} records have "
+        f"parent references to update"
+    )
 
     if not pass_2_data_to_write:
-        log.info("No valid relations found to update in Pass 2. Import complete.")
+        progress.console.print(
+            "[blue]INFO:[/blue] No valid relations found to update in Pass 2. "
+            "Import complete."
+        )
         return True, 0
 
     # --- Grouping Logic ---
@@ -2239,6 +2249,11 @@ def _orchestrate_pass_2(
         # The key must be hashable, so we convert the dict to a frozenset of items.
         vals_key = frozenset(vals.items())
         grouped_writes[vals_key].append(db_id)
+
+    progress.console.print(
+        f"[blue]INFO:[/blue] Pass 2: Grouped into {len(grouped_writes)} unique "
+        f"parent values"
+    )
 
     # --- Batching Logic ---
     pass_2_batches = []
@@ -2252,6 +2267,9 @@ def _orchestrate_pass_2(
         return True, 0
 
     num_batches = len(pass_2_batches)
+    progress.console.print(
+        f"[blue]INFO:[/blue] Pass 2: Starting {num_batches} batches..."
+    )
     pass_2_task = progress.add_task(
         f"Pass 2/2: Updating [bold]{model_name}[/bold] relations",
         total=num_batches,
@@ -2272,6 +2290,9 @@ def _orchestrate_pass_2(
         _execute_write_batch,
         list(enumerate(pass_2_batches, 1)),
         thread_state_2,
+    )
+    progress.console.print(
+        f"[blue]INFO:[/blue] Pass 2: Threaded pass complete"
     )
 
     failed_writes = pass_2_results.get("failed_writes", [])
