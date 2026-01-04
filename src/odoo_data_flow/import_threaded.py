@@ -385,6 +385,8 @@ def _prepare_pass_2_data(  # noqa: C901
     log.debug(f"Deferred field indices: {deferred_field_indices}")
 
     # Get ir.model.data proxy for XML-ID resolution (non-self-referencing)
+    # Note: Using print() for diagnostics since we don't have progress object here
+    print("  [Pass 2] Getting ir.model.data proxy...")
     ir_model_data_proxy = None
     if model_obj is not None:
         try:
@@ -415,10 +417,17 @@ def _prepare_pass_2_data(  # noqa: C901
         except Exception as e:
             log.debug(f"Could not get ir.model.data proxy: {e}")
 
+    print(f"  [Pass 2] ir.model.data proxy: {'found' if ir_model_data_proxy else 'not found'}")
+    print(f"  [Pass 2] Processing {len(all_data)} records...")
+
     # Import the sanitization function to match id_map key format
     from .lib.internal.tools import to_xmlid
 
+    processed = 0
     for row in all_data:
+        processed += 1
+        if processed % 1000 == 0:
+            print(f"  [Pass 2] Processed {processed}/{len(all_data)} records...")
         source_id = row[unique_id_field_index]
         # Sanitize source_id to match id_map key format
         sanitized_source_id = to_xmlid(source_id) if source_id else source_id
@@ -483,7 +492,7 @@ def _prepare_pass_2_data(  # noqa: C901
         if update_vals:
             pass_2_data_to_write.append((db_id, update_vals))
 
-    log.info(f"Prepared {len(pass_2_data_to_write)} records for Pass 2 updates")
+    print(f"  [Pass 2] Data preparation complete: {len(pass_2_data_to_write)} records to update")
     return pass_2_data_to_write
 
 
