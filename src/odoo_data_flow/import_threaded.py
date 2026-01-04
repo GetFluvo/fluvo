@@ -1909,7 +1909,9 @@ def _run_threaded_pass(  # noqa: C901
         if futures and successful_batches == 0:
             log.error("Aborting import: All processed batches failed.")
             rpc_thread.abort_flag = True
+        log.info("All batches processed, shutting down thread pool...")
         rpc_thread.executor.shutdown(wait=True, cancel_futures=True)
+        log.info("Thread pool shutdown complete")
         rpc_thread.progress.update(
             rpc_thread.task_id,
             description=original_description,
