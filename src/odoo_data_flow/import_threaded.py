@@ -415,9 +415,14 @@ def _prepare_pass_2_data(  # noqa: C901
         except Exception as e:
             log.debug(f"Could not get ir.model.data proxy: {e}")
 
+    # Import the sanitization function to match id_map key format
+    from .lib.internal.tools import to_xmlid
+
     for row in all_data:
         source_id = row[unique_id_field_index]
-        db_id = id_map.get(source_id)
+        # Sanitize source_id to match id_map key format
+        sanitized_source_id = to_xmlid(source_id) if source_id else source_id
+        db_id = id_map.get(sanitized_source_id)
         if not db_id:
             continue
 
@@ -428,11 +433,17 @@ def _prepare_pass_2_data(  # noqa: C901
                 field_value = row[field_index]
                 if field_value:  # Ensure there is a value
                     # First, always try id_map lookup (for self-referencing fields)
-                    related_db_id = id_map.get(field_value)
+                    # Sanitize field_value to match id_map key format
+                    sanitized_field_value = to_xmlid(field_value)
+                    related_db_id = id_map.get(sanitized_field_value)
 
                     if related_db_id:
                         # Value found in id_map - use the database ID
                         update_vals[field_name] = related_db_id
+                        log.debug(
+                            f"Resolved self-reference '{field_name}': "
+                            f"'{field_value}' -> db_id {related_db_id}"
+                        )
                     elif is_ext_id_col:
                         # External ID column (e.g., responsible_id/id)
                         # Try XML-ID resolution for non-self-referencing fields
@@ -442,14 +453,20 @@ def _prepare_pass_2_data(  # noqa: C901
                             )
                             if resolved_id:
                                 update_vals[field_name] = resolved_id
-                            else:
                                 log.debug(
-                                    f"Could not resolve '{field_value}' for "
-                                    f"'{field_name}' (source_id={source_id})"
+                                    f"Resolved external ID '{field_name}': "
+                                    f"'{field_value}' -> db_id {resolved_id}"
+                                )
+                            else:
+                                log.warning(
+                                    f"Missing reference for '{field_name}': "
+                                    f"'{field_value}' not found in id_map or ir.model.data "
+                                    f"(source_id={source_id})"
                                 )
                         else:
-                            log.debug(
-                                f"No ir.model.data proxy for '{field_name}' "
+                            log.warning(
+                                f"Cannot resolve '{field_name}': '{field_value}' "
+                                f"not in id_map and no ir.model.data proxy available "
                                 f"(source_id={source_id})"
                             )
                     else:
@@ -2582,15 +2599,18 @@ def import_data(  # noqa: C901
                     )
 
             # A pass is only successful if it wasn't aborted.
+            log.debug("Pass 1 batches completed, checking results...")
             pass_1_successful = pass_1_results.get("success", False)
             if not pass_1_successful:
                 return False, {}
 
             # If we get here, Pass 1 was not aborted. Now determine final status.
             id_map = pass_1_results.get("id_map", {})
+            log.info(f"Pass 1 complete: {len(id_map)} records created")
 
             # --- Checkpoint: Save after Pass 1 completes ---
             if enable_checkpoint and session_id and not can_stream:
+                log.debug("Saving checkpoint after Pass 1...")
                 file_hash = ckpt._compute_file_hash(file_csv)
                 new_checkpoint = ckpt.CheckpointData(
                     session_id=session_id,
@@ -2609,7 +2629,7 @@ def import_data(  # noqa: C901
                     pass_2_complete=False,
                 )
                 ckpt.save_checkpoint(new_checkpoint)
-                log.debug(
+                log.info(
                     f"Checkpoint saved after Pass 1: {len(id_map)} records created."
                 )
 
@@ -2618,6 +2638,7 @@ def import_data(  # noqa: C901
                 updates_made = 0
 
                 if deferred and header is not None and all_data is not None:
+                    log.info(f"Starting Pass 2 for deferred fields: {deferred}")
                     pass_2_successful, updates_made = _orchestrate_pass_2(
                         progress,
                         model_obj,
