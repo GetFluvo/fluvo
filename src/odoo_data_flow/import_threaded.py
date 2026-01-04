@@ -1909,9 +1909,15 @@ def _run_threaded_pass(  # noqa: C901
         if futures and successful_batches == 0:
             log.error("Aborting import: All processed batches failed.")
             rpc_thread.abort_flag = True
-        log.info("All batches processed, shutting down thread pool...")
+        # Use console.print instead of log.info because logging is suppressed
+        # during progress display (suppress_console_handler)
+        rpc_thread.progress.console.print(
+            "[blue]INFO:[/blue] All batches processed, shutting down thread pool..."
+        )
         rpc_thread.executor.shutdown(wait=True, cancel_futures=True)
-        log.info("Thread pool shutdown complete")
+        rpc_thread.progress.console.print(
+            "[blue]INFO:[/blue] Thread pool shutdown complete"
+        )
         rpc_thread.progress.update(
             rpc_thread.task_id,
             description=original_description,
@@ -2601,18 +2607,22 @@ def import_data(  # noqa: C901
                     )
 
             # A pass is only successful if it wasn't aborted.
-            log.debug("Pass 1 batches completed, checking results...")
             pass_1_successful = pass_1_results.get("success", False)
             if not pass_1_successful:
                 return False, {}
 
             # If we get here, Pass 1 was not aborted. Now determine final status.
             id_map = pass_1_results.get("id_map", {})
-            log.info(f"Pass 1 complete: {len(id_map)} records created")
+            # Use console.print - log.info is suppressed during progress display
+            progress.console.print(
+                f"[blue]INFO:[/blue] Pass 1 complete: {len(id_map)} records created"
+            )
 
             # --- Checkpoint: Save after Pass 1 completes ---
             if enable_checkpoint and session_id and not can_stream:
-                log.debug("Saving checkpoint after Pass 1...")
+                progress.console.print(
+                    "[blue]INFO:[/blue] Saving checkpoint after Pass 1..."
+                )
                 file_hash = ckpt._compute_file_hash(file_csv)
                 new_checkpoint = ckpt.CheckpointData(
                     session_id=session_id,
@@ -2631,8 +2641,8 @@ def import_data(  # noqa: C901
                     pass_2_complete=False,
                 )
                 ckpt.save_checkpoint(new_checkpoint)
-                log.info(
-                    f"Checkpoint saved after Pass 1: {len(id_map)} records created."
+                progress.console.print(
+                    f"[blue]INFO:[/blue] Checkpoint saved: {len(id_map)} records"
                 )
 
             if not can_stream:
@@ -2640,7 +2650,10 @@ def import_data(  # noqa: C901
                 updates_made = 0
 
                 if deferred and header is not None and all_data is not None:
-                    log.info(f"Starting Pass 2 for deferred fields: {deferred}")
+                    progress.console.print(
+                        f"[blue]INFO:[/blue] Starting Pass 2 for deferred fields: "
+                        f"{deferred}"
+                    )
                     pass_2_successful, updates_made = _orchestrate_pass_2(
                         progress,
                         model_obj,
