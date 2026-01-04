@@ -424,10 +424,17 @@ def _prepare_pass_2_data(  # noqa: C901
     from .lib.internal.tools import to_xmlid
 
     processed = 0
+    found_in_idmap = 0
+    not_in_idmap = 0
+    rpc_lookups = 0
     for row in all_data:
         processed += 1
         if processed % 1000 == 0:
-            print(f"  [Pass 2] Processed {processed}/{len(all_data)} records...")
+            print(
+                f"  [Pass 2] Processed {processed}/{len(all_data)} records "
+                f"(idmap hits: {found_in_idmap}, misses: {not_in_idmap}, "
+                f"RPC lookups: {rpc_lookups})"
+            )
         source_id = row[unique_id_field_index]
         # Sanitize source_id to match id_map key format
         sanitized_source_id = to_xmlid(source_id) if source_id else source_id
@@ -449,6 +456,7 @@ def _prepare_pass_2_data(  # noqa: C901
                     if related_db_id:
                         # Value found in id_map - use the database ID
                         update_vals[field_name] = related_db_id
+                        found_in_idmap += 1
                         log.debug(
                             f"Resolved self-reference '{field_name}': "
                             f"'{field_value}' -> db_id {related_db_id}"
@@ -456,7 +464,9 @@ def _prepare_pass_2_data(  # noqa: C901
                     elif is_ext_id_col:
                         # External ID column (e.g., responsible_id/id)
                         # Try XML-ID resolution for non-self-referencing fields
+                        not_in_idmap += 1
                         if ir_model_data_proxy:
+                            rpc_lookups += 1
                             resolved_id = _resolve_external_id_for_pass2(
                                 ir_model_data_proxy, field_value
                             )
