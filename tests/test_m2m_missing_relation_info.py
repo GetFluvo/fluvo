@@ -45,6 +45,7 @@ def test_handle_m2m_field_missing_relation_info(
         filename="file.csv",
         config="",
         import_plan=import_plan,
+        auto_defer=True,
     )
     assert result is True
     assert "category_id" in import_plan["deferred_fields"]

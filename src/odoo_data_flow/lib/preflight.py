@@ -457,27 +457,32 @@ def _plan_deferrals_and_strategies(  # noqa: C901
 
     if deferrable_fields:
         if auto_defer:
+            # Auto-defer mode: actually defer these fields to Pass 2
             log.info(
                 f"Auto-defer enabled. Deferring {len(deferrable_fields)} fields to "
                 f"Pass 2: {deferrable_fields}"
             )
-        else:
-            log.info(f"Detected deferrable fields: {deferrable_fields}")
-        unique_id_field = kwargs.get("unique_id_field")
-        if not unique_id_field and "id" in header:
-            log.info("Automatically using 'id' column as the unique identifier.")
-            import_plan["unique_id_field"] = "id"
-        elif not unique_id_field:
-            _show_error_panel(
-                "Action Required for Two-Pass Import",
-                "Deferrable fields were detected, but no 'id' column was found.\n"
-                "Please specify the unique ID column using the "
-                "[bold cyan]--unique-id-field[/bold cyan] option.",
-            )
-            return False
+            unique_id_field = kwargs.get("unique_id_field")
+            if not unique_id_field and "id" in header:
+                log.info("Automatically using 'id' column as the unique identifier.")
+                import_plan["unique_id_field"] = "id"
+            elif not unique_id_field:
+                _show_error_panel(
+                    "Action Required for Two-Pass Import",
+                    "Deferrable fields were detected, but no 'id' column was found.\n"
+                    "Please specify the unique ID column using the "
+                    "[bold cyan]--unique-id-field[/bold cyan] option.",
+                )
+                return False
 
-        import_plan["deferred_fields"] = deferrable_fields
-        import_plan["strategies"] = strategies
+            import_plan["deferred_fields"] = deferrable_fields
+            import_plan["strategies"] = strategies
+        else:
+            # Not auto-deferring: just log at debug level for informational purposes
+            log.debug(
+                f"Deferrable fields detected but not applied (use --auto-defer to "
+                f"enable): {deferrable_fields}"
+            )
     return True
 
 

@@ -397,6 +397,7 @@ class TestDeferralAndStrategyCheck:
             filename="file.csv",
             config="",
             import_plan=import_plan,
+            auto_defer=True,
         )
         assert result is True
         assert "category_id" in import_plan["deferred_fields"]
@@ -436,6 +437,7 @@ class TestDeferralAndStrategyCheck:
             filename="file.csv",
             config="",
             import_plan=import_plan,
+            auto_defer=True,
         )
         assert result is True
         assert "category_id" in import_plan["deferred_fields"]
@@ -475,6 +477,7 @@ class TestDeferralAndStrategyCheck:
             filename="file.csv",
             config="",
             import_plan=import_plan,
+            auto_defer=True,
         )
         assert result is True
         assert "category_id" in import_plan["deferred_fields"]
@@ -502,6 +505,7 @@ class TestDeferralAndStrategyCheck:
             filename="file.csv",
             config="",
             import_plan=import_plan,
+            auto_defer=True,
         )
         assert result is True
         assert "parent_id" in import_plan["deferred_fields"]
@@ -528,6 +532,7 @@ class TestDeferralAndStrategyCheck:
             filename="file.csv",
             config="",
             import_plan=import_plan,
+            auto_defer=True,
         )
         assert result is True
         assert import_plan["unique_id_field"] == "id"
@@ -556,6 +561,7 @@ class TestDeferralAndStrategyCheck:
             filename="file.csv",
             config="",
             import_plan=import_plan,
+            auto_defer=True,
         )
         assert result is False
         mock_show_error_panel.assert_called_once()
