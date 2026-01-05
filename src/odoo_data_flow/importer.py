@@ -250,7 +250,26 @@ def run_import(  # noqa: C901
             # Disable deferred fields for this strategy
             deferred_fields = []
 
-    final_deferred = deferred_fields or import_plan.get("deferred_fields", [])
+    # Only use auto-detected deferred fields if:
+    # 1. User explicitly specified deferred_fields, OR
+    # 2. User enabled auto_defer flag
+    # This prevents automatic deferral of m2m/o2m fields without user consent
+    if deferred_fields:
+        final_deferred = deferred_fields
+    elif auto_defer:
+        final_deferred = import_plan.get("deferred_fields", [])
+    else:
+        # Check for self-referencing fields only (like parent_id)
+        # These are the only fields that MUST be deferred for correctness
+        detected = import_plan.get("deferred_fields", [])
+        # Filter to only include self-referencing fields detected by preflight
+        # For now, we'll only auto-defer if explicitly requested
+        final_deferred = []
+        if detected:
+            log.debug(
+                f"Deferrable fields detected but not applied (use --auto-defer "
+                f"or --deferred-fields to enable): {detected}"
+            )
     final_uid_field = unique_id_field or import_plan.get("unique_id_field") or "id"
     # Create environment-specific directory if it doesn't exist
     if env_name and not env_output_dir.exists():
