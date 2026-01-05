@@ -912,7 +912,7 @@ def _handle_create_error(  # noqa C901
     ):
         clean_message = _extract_access_error_message(error_str)
         error_message = f"Access denied (row {i + 1}): {clean_message}"
-        if "Fell back to create" in error_summary:
+        if "Fell back to" in error_summary:
             error_summary = "Access denied - check user permissions"
 
     # Handle constraint violation errors (e.g., XML ID space constraint)
@@ -923,7 +923,7 @@ def _handle_create_error(  # noqa C901
         or "violation" in error_str_lower
     ):
         error_message = f"Constraint violation in row {i + 1}: {create_error}"
-        if "Fell back to create" in error_summary:
+        if "Fell back to" in error_summary:
             error_summary = "Database constraint violation detected"
 
     # Handle database connection pool exhaustion errors
@@ -935,7 +935,7 @@ def _handle_create_error(  # noqa C901
         error_message = (
             f"Database connection pool exhaustion in row {i + 1}: {create_error}"
         )
-        if "Fell back to create" in error_summary:
+        if "Fell back to" in error_summary:
             error_summary = "Database connection pool exhaustion detected"
     # Handle specific database serialization errors
     elif (
@@ -943,13 +943,13 @@ def _handle_create_error(  # noqa C901
         or "concurrent update" in error_str_lower
     ):
         error_message = f"Database serialization error in row {i + 1}: {create_error}"
-        if "Fell back to create" in error_summary:
+        if "Fell back to" in error_summary:
             error_summary = "Database serialization conflict detected during create"
     elif (
         "tuple index out of range" in error_str_lower or "indexerror" in error_str_lower
     ):
         error_message = f"Tuple unpacking error in row {i + 1}: {create_error}"
-        if "Fell back to create" in error_summary:
+        if "Fell back to" in error_summary:
             error_summary = "Tuple unpacking error detected"
     else:
         error_message = error_str.replace("\n", " | ")
@@ -958,7 +958,7 @@ def _handle_create_error(  # noqa C901
                 f"Invalid external ID field detected in row {i + 1}: {error_message}"
             )
 
-        if "Fell back to create" in error_summary:
+        if "Fell back to" in error_summary:
             error_summary = error_message
 
     failed_line = [*line, error_message]
@@ -1038,7 +1038,7 @@ def _create_xmlid_entry(
         return False
 
 
-def _create_batch_individually(  # noqa: C901
+def _load_records_individually(  # noqa: C901
     model: Any,
     connection: Any,
     batch_lines: list[list[Any]],
@@ -1048,17 +1048,32 @@ def _create_batch_individually(  # noqa: C901
     ignore_list: list[str],
     model_name: str = "",
 ) -> dict[str, Any]:
-    """Fallback to create records one-by-one to get detailed errors."""
+    """Fallback to load records one-by-one using load() for proper XML ID creation.
+
+    Uses Odoo's native load() method with single records instead of create().
+    This ensures XML IDs are properly created in ir.model.data automatically,
+    avoiding the need for manual XML ID creation which can fail independently.
+    """
+    from .lib.internal.tools import to_xmlid
+
     id_map: dict[str, int] = {}
     failed_lines: list[list[Any]] = []
-    error_summary = "Fell back to create"
+    error_summary = "Fell back to single-record load"
     header_len = len(batch_header)
     ignore_set = set(ignore_list)
 
-    # Get ir.model.data once for the whole batch (used for looking up existing records)
-    ir_model_data = connection.get_model("ir.model.data")
+    # Build filtered header (excluding ignored columns)
+    # We need to track which indices to keep
+    keep_indices = []
+    filtered_header = []
+    for idx, col in enumerate(batch_header):
+        base_field = col.split("/")[0]
+        if base_field not in ignore_set:
+            keep_indices.append(idx)
+            filtered_header.append(col)
 
     for i, line in enumerate(batch_lines):
+        source_id = None
         try:
             if len(line) != header_len:
                 raise IndexError(
@@ -1066,65 +1081,41 @@ def _create_batch_individually(  # noqa: C901
                 )
 
             source_id = line[uid_index]
-            # Sanitize source_id to ensure it's a valid XML ID
-            from .lib.internal.tools import to_xmlid
-
             sanitized_source_id = to_xmlid(source_id)
 
-            # 1. SEARCH BEFORE CREATE
-            # Use ir.model.data to look up existing record by external ID
-            # This avoids model.browse() which may not be allowed for some models
-            existing_ids = ir_model_data.search(
-                [
-                    ("module", "=", "__export__"),
-                    ("name", "=", sanitized_source_id),
-                ],
-                limit=1,
-            )
+            # Build filtered line (excluding ignored columns)
+            filtered_line = [line[idx] for idx in keep_indices]
 
-            if existing_ids:
-                existing = ir_model_data.read(existing_ids[0], ["res_id"])
-                if existing and existing.get("res_id"):
-                    id_map[sanitized_source_id] = existing["res_id"]
-                    continue
+            # Sanitize the id column in the filtered line
+            # Find the id column index in the filtered header
+            if "id" in filtered_header:
+                id_idx_in_filtered = filtered_header.index("id")
+                filtered_line[id_idx_in_filtered] = sanitized_source_id
 
-            # 2. PREPARE FOR CREATE
-            vals = dict(zip(batch_header, line))
-            clean_vals = {
-                k: v
-                for k, v in vals.items()
-                if k.split("/")[0] not in ignore_set
-                # Allow external ID fields through for conversion
-            }
+            # Use load() with single record - this handles XML ID creation automatically
+            res = model.load(filtered_header, [filtered_line], context=context)
 
-            # 3. CREATE
-            # Convert external ID references to actual database IDs before creating
-            converted_vals, external_id_fields = _process_external_id_fields(
-                connection, clean_vals
-            )
+            if res.get("ids") and res["ids"][0]:
+                new_id = res["ids"][0]
+                id_map[sanitized_source_id] = new_id
+            else:
+                # Load failed - extract error message
+                error_msg = "Unknown error during load"
+                if res.get("messages"):
+                    msg = res["messages"][0]
+                    error_msg = msg.get("message", str(msg))
+                failed_lines.append([*line, error_msg])
 
-            log.debug(f"External ID fields found: {external_id_fields}")
-            log.debug(f"Converted vals keys: {list(converted_vals.keys())}")
-
-            new_record = model.create(converted_vals, context=context)
-            # Handle both cases: create() returns either an int ID or a record object
-            # Accessing .id on a record object can trigger browse() which may fail
-            new_id = new_record if isinstance(new_record, int) else int(new_record)
-            id_map[sanitized_source_id] = new_id
-
-            # Create ir.model.data entry for XML ID since create() doesn't do it
-            if model_name:
-                _create_xmlid_entry(
-                    connection, sanitized_source_id, new_id, model_name
-                )
         except IndexError as e:
             error_message = f"Malformed row detected (row {i + 1} in batch): {e}"
             failed_lines.append([*line, error_message])
-            if "Fell back to create" in error_summary:
+            if "Fell back to" in error_summary:
                 error_summary = "Malformed CSV row detected"
             continue
-        except Exception as create_error:
-            error_str_lower = str(create_error).lower()
+
+        except Exception as load_error:
+            error_str_lower = str(load_error).lower()
+            source_id_str = source_id if source_id else f"row {i + 1}"
 
             # Special handling for Odoo server internal errors
             if (
@@ -1132,13 +1123,13 @@ def _create_batch_individually(  # noqa: C901
                 and "odoo server error" in error_str_lower
             ):
                 log.warning(
-                    f"Odoo server internal error detected during create for "
-                    f"record {source_id}. This is likely a bug in the Odoo server. "
+                    f"Odoo server internal error detected during load for "
+                    f"record {source_id_str}. This is likely a bug in the Odoo server. "
                     f"Skipping record and continuing with other records."
                 )
                 error_message = (
                     f"Odoo server internal error (tuple index out of range) for record "
-                    f"{source_id}: This is likely a bug in the Odoo server. "
+                    f"{source_id_str}: This is likely a bug in the Odoo server. "
                     f"See server logs for details."
                 )
                 failed_lines.append([*line, error_message])
@@ -1150,45 +1141,46 @@ def _create_batch_individually(  # noqa: C901
                 or "too many connections" in error_str_lower
                 or "poolerror" in error_str_lower
             ):
-                # These are retryable errors
-                # - log and add to failed lines for a later run.
                 log.warning(
-                    f"Database connection pool exhaustion detected during create for "
-                    f"record {source_id}. "
+                    f"Database connection pool exhaustion detected during load for "
+                    f"record {source_id_str}. "
                     f"Marking as failed for retry in a subsequent run."
                 )
                 error_message = (
                     f"Retryable error (connection pool exhaustion) for record "
-                    f"{source_id}: {create_error}"
+                    f"{source_id_str}: {load_error}"
                 )
                 failed_lines.append([*line, error_message])
                 continue
 
-            # Special handling for database serialization errors in create operations
+            # Special handling for database serialization errors
             elif (
                 "could not serialize access" in error_str_lower
                 or "concurrent update" in error_str_lower
             ):
-                # These are retryable errors - log and continue processing other records
                 log.warning(
-                    f"Database serialization conflict detected during create for "
-                    f"record {source_id}. "
+                    f"Database serialization conflict detected during load for "
+                    f"record {source_id_str}. "
                     f"This is often caused by concurrent processes. "
                     f"Continuing with other records."
                 )
                 # Don't add to failed lines for retryable errors
-                # - let the record be processed in next batch
                 continue
 
             error_message, new_failed_line, error_summary = _handle_create_error(
-                i, create_error, line, error_summary
+                i, load_error, line, error_summary
             )
             failed_lines.append(new_failed_line)
+
     return {
         "id_map": id_map,
         "failed_lines": failed_lines,
         "error_summary": error_summary,
     }
+
+
+# Keep old name as alias for backward compatibility
+_create_batch_individually = _load_records_individually
 
 
 def _execute_load_batch(  # noqa: C901
@@ -1546,7 +1538,7 @@ def _execute_load_batch(  # noqa: C901
                         if i >= len(created_ids) or created_ids[i] is None
                     ]
                     if failed_lines_to_retry:
-                        fallback_result = _create_batch_individually(
+                        fallback_result = _load_records_individually(
                             model,
                             connection,
                             failed_lines_to_retry,
@@ -1663,10 +1655,10 @@ def _execute_load_batch(  # noqa: C901
                         progress.console.print(
                             f"[yellow]WARN:[/] Max serialization retries "
                             f"({max_serialization_retries}) reached. "
-                            f"Falling back to individual processing."
+                            f"Falling back to single-record load."
                         )
                         clean_error = error_str.strip().replace("\n", " ")
-                        fallback_result = _create_batch_individually(
+                        fallback_result = _load_records_individually(
                             model,
                             connection,
                             current_chunk,
@@ -1697,9 +1689,9 @@ def _execute_load_batch(  # noqa: C901
             progress.console.print(
                 f"[yellow]WARN:[/] Batch {batch_number} failed `load` "
                 f"('{clean_error}'). "
-                f"Falling back to `create` for {len(current_chunk)} records."
+                f"Falling back to single-record load for {len(current_chunk)} records."
             )
-            fallback_result = _create_batch_individually(
+            fallback_result = _load_records_individually(
                 model,
                 connection,
                 current_chunk,

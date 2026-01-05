@@ -249,14 +249,14 @@ class TestExecuteLoadBatch:
             "Reducing chunk size to 2."
         )
 
-    @patch("odoo_data_flow.import_threaded._create_batch_individually")
+    @patch("odoo_data_flow.import_threaded._load_records_individually")
     def test_batch_falls_back_for_non_scalable_error(
-        self, mock_create_individually: MagicMock
+        self, mock_load_individually: MagicMock
     ) -> None:
-        """Verify fallback to create for regular errors."""
+        """Verify fallback to single-record load for regular errors."""
         mock_model = MagicMock()
         mock_model.load.side_effect = [ValueError("Invalid field value")]
-        mock_create_individually.return_value = {
+        mock_load_individually.return_value = {
             "id_map": {"rec1": 1},
             "failed_lines": [["rec2", "B", "Error"]],
         }
@@ -276,7 +276,7 @@ class TestExecuteLoadBatch:
         assert result["id_map"] == {"rec1": 1}
         assert len(result["failed_lines"]) == 1
         mock_model.load.assert_called_once()
-        mock_create_individually.assert_called_once()
+        mock_load_individually.assert_called_once()
 
 
 class TestBatchingHelpers:
@@ -1072,15 +1072,11 @@ class TestExecuteLoadBatchEdgeCases:
     """Additional edge case tests for _execute_load_batch."""
 
     def test_execute_load_batch_force_create_mode(self) -> None:
-        """Test that force_create bypasses load and uses create directly."""
+        """Test that force_create bypasses batch load and uses single-record load."""
         mock_model = MagicMock()
-        mock_record = MagicMock()
-        mock_record.id = 42
-        mock_model.create.return_value = mock_record
+        # Single-record load returns success
+        mock_model.load.return_value = {"ids": [42], "messages": []}
         mock_connection = MagicMock()
-        mock_ir_model_data = MagicMock()
-        mock_ir_model_data.search.return_value = []  # No existing entry
-        mock_connection.get_model.return_value = mock_ir_model_data
 
         mock_progress = MagicMock()
         thread_state = {
@@ -1098,9 +1094,12 @@ class TestExecuteLoadBatchEdgeCases:
 
         result = _execute_load_batch(thread_state, batch_lines, batch_header, 1)
 
-        # In force_create mode, load should NOT be called
-        mock_model.load.assert_not_called()
-        # create should be called via _create_batch_individually
+        # In force_create mode, load IS called but only for single records
+        # (via _load_records_individually)
+        mock_model.load.assert_called_once()
+        # Verify it was called with single record data
+        call_args = mock_model.load.call_args
+        assert len(call_args[0][1]) == 1  # Single record in data list
         assert result["success"] is True
 
     @patch("odoo_data_flow.import_threaded._create_batch_individually")
@@ -1200,15 +1199,14 @@ class TestReadDataFileEdgeCases:
         assert data[1][0] == "keep2"
 
 
-class TestCreateBatchIndividuallyEdgeCases:
-    """Additional tests for _create_batch_individually edge cases."""
+class TestLoadRecordsIndividuallyEdgeCases:
+    """Tests for _load_records_individually edge cases."""
 
-    def test_create_batch_individually_serialization_error(self) -> None:
+    def test_load_records_individually_serialization_error(self) -> None:
         """Test handling of database serialization errors."""
         mock_model = MagicMock()
-        mock_model.create.side_effect = Exception("could not serialize access")
+        mock_model.load.side_effect = Exception("could not serialize access")
         mock_connection = MagicMock()
-        mock_connection.get_model.return_value.search.return_value = []
 
         batch_header = ["id", "name"]
         batch_lines = [["rec1", "A"]]
@@ -1220,12 +1218,11 @@ class TestCreateBatchIndividuallyEdgeCases:
         # Serialization errors should not add to failed_lines (retryable)
         assert len(result["failed_lines"]) == 0
 
-    def test_create_batch_individually_connection_pool_error(self) -> None:
+    def test_load_records_individually_connection_pool_error(self) -> None:
         """Test handling of connection pool exhaustion errors."""
         mock_model = MagicMock()
-        mock_model.create.side_effect = Exception("connection pool is full")
+        mock_model.load.side_effect = Exception("connection pool is full")
         mock_connection = MagicMock()
-        mock_connection.get_model.return_value.search.return_value = []
 
         batch_header = ["id", "name"]
         batch_lines = [["rec1", "A"]]
@@ -1238,14 +1235,13 @@ class TestCreateBatchIndividuallyEdgeCases:
         assert len(result["failed_lines"]) == 1
         assert "connection pool exhaustion" in result["failed_lines"][0][-1]
 
-    def test_create_batch_individually_odoo_server_error(self) -> None:
+    def test_load_records_individually_odoo_server_error(self) -> None:
         """Test handling of Odoo server internal errors."""
         mock_model = MagicMock()
-        mock_model.create.side_effect = Exception(
+        mock_model.load.side_effect = Exception(
             "Odoo Server Error: tuple index out of range"
         )
         mock_connection = MagicMock()
-        mock_connection.get_model.return_value.search.return_value = []
 
         batch_header = ["id", "name"]
         batch_lines = [["rec1", "A"]]
@@ -1258,14 +1254,13 @@ class TestCreateBatchIndividuallyEdgeCases:
         assert len(result["failed_lines"]) == 1
         assert "Odoo server internal error" in result["failed_lines"][0][-1]
 
-    def test_create_batch_individually_constraint_violation(self) -> None:
+    def test_load_records_individually_constraint_violation(self) -> None:
         """Test handling of database constraint violations."""
         mock_model = MagicMock()
-        mock_model.create.side_effect = Exception(
+        mock_model.load.side_effect = Exception(
             "check constraint 'nospaces' violated"
         )
         mock_connection = MagicMock()
-        mock_connection.get_model.return_value.search.return_value = []
 
         batch_header = ["id", "name"]
         batch_lines = [["rec1", "A"]]
@@ -1276,6 +1271,41 @@ class TestCreateBatchIndividuallyEdgeCases:
 
         assert len(result["failed_lines"]) == 1
         assert "constraint" in result["error_summary"].lower()
+
+    def test_load_records_individually_load_returns_error(self) -> None:
+        """Test handling when load() returns error in messages."""
+        mock_model = MagicMock()
+        mock_model.load.return_value = {
+            "ids": [],
+            "messages": [{"message": "Validation failed: name is required"}],
+        }
+        mock_connection = MagicMock()
+
+        batch_header = ["id", "name"]
+        batch_lines = [["rec1", ""]]
+
+        result = _create_batch_individually(
+            mock_model, mock_connection, batch_lines, batch_header, 0, {}, []
+        )
+
+        assert len(result["failed_lines"]) == 1
+        assert "Validation failed" in result["failed_lines"][0][-1]
+
+    def test_load_records_individually_success(self) -> None:
+        """Test successful single-record load."""
+        mock_model = MagicMock()
+        mock_model.load.return_value = {"ids": [42], "messages": []}
+        mock_connection = MagicMock()
+
+        batch_header = ["id", "name"]
+        batch_lines = [["rec1", "Record A"]]
+
+        result = _create_batch_individually(
+            mock_model, mock_connection, batch_lines, batch_header, 0, {}, []
+        )
+
+        assert len(result["failed_lines"]) == 0
+        assert result["id_map"]["rec1"] == 42
 
 
 class TestImportDataWithDictConfig:

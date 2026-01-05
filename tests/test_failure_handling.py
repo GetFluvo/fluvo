@@ -39,27 +39,27 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
 
     mock_model = MagicMock()
     mock_model.with_context.return_value = mock_model
-    mock_model.load.side_effect = Exception("Generic batch error")
 
-    # Mock ir.model.data for XML ID lookups
-    mock_ir_model_data = MagicMock()
-    mock_ir_model_data.search.return_value = []  # No existing records
+    # Track call count to distinguish batch vs individual load calls
+    load_call_count = [0]
 
-    def get_model_side_effect(model_name: str) -> Any:
-        if model_name == "ir.model.data":
-            return mock_ir_model_data
-        return mock_model
-
-    def create_side_effect(vals: dict[str, Any], context: dict[str, Any]) -> Any:
-        if vals["id"] == "rec_02":
-            raise Exception("Validation Error")
+    def load_side_effect(
+        header: list[str], data: list[list[Any]], context: dict[str, Any] = None
+    ) -> dict[str, Any]:
+        load_call_count[0] += 1
+        # First call is the batch load - simulate failure
+        if load_call_count[0] == 1:
+            raise Exception("Generic batch error")
+        # Subsequent calls are individual record loads
+        # Check the id value in the data
+        record_id = data[0][0] if data else ""
+        if record_id == "rec_02":
+            return {"ids": [], "messages": [{"message": "Validation Error"}]}
         else:
-            mock_record = MagicMock()
-            mock_record.id = 101
-            return mock_record
+            return {"ids": [101], "messages": []}
 
-    mock_model.create.side_effect = create_side_effect
-    mock_get_conn.return_value.get_model.side_effect = get_model_side_effect
+    mock_model.load.side_effect = load_side_effect
+    mock_get_conn.return_value.get_model.return_value = mock_model
 
     # --- Act ---
     # Capture the return value of the import process
@@ -109,22 +109,31 @@ def test_create_fallback_handles_malformed_rows(tmp_path: Path) -> None:
 
     mock_model = MagicMock()
     mock_model.with_context.return_value = mock_model
-    mock_model.load.side_effect = Exception("Load fails, trigger fallback")
 
-    # Mock ir.model.data for XML ID lookups
-    mock_ir_model_data = MagicMock()
-    mock_ir_model_data.search.return_value = []  # No existing records
+    # Track call count to distinguish batch vs individual load calls
+    load_call_count = [0]
+    individual_load_ids = []
 
-    def get_model_side_effect(model_name_arg: str) -> Any:
-        if model_name_arg == "ir.model.data":
-            return mock_ir_model_data
-        return mock_model
+    def load_side_effect(
+        header: list[str], data: list[list[Any]], context: dict[str, Any] = None
+    ) -> dict[str, Any]:
+        load_call_count[0] += 1
+        # First call is the batch load - simulate failure
+        if load_call_count[0] == 1:
+            raise Exception("Load fails, trigger fallback")
+        # Subsequent calls are individual record loads
+        # Track what IDs were loaded individually
+        if data and data[0]:
+            individual_load_ids.append(data[0][0])
+        return {"ids": [101], "messages": []}
+
+    mock_model.load.side_effect = load_side_effect
 
     # 2. ACT
     with patch(
         "odoo_data_flow.import_threaded.conf_lib.get_connection_from_config"
     ) as mock_get_conn:
-        mock_get_conn.return_value.get_model.side_effect = get_model_side_effect
+        mock_get_conn.return_value.get_model.return_value = mock_model
         result, _ = import_threaded.import_data(
             config="dummy.conf",
             model=model_name,
@@ -137,9 +146,8 @@ def test_create_fallback_handles_malformed_rows(tmp_path: Path) -> None:
     # 3. ASSERT
     # The import should be considered a success since one record was processed
     assert result is True
-    # The create method should only have been called for the one good record
-    mock_model.create.assert_called_once()
-    assert mock_model.create.call_args[0][0]["id"] == "rec_ok"
+    # Only the good record should have been loaded individually
+    assert "rec_ok" in individual_load_ids
 
     # The fail file should exist and contain the malformed row with the correct error
     assert fail_file.exists()
@@ -174,18 +182,25 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
         writer.writerows(dirty_data)
 
     mock_model = MagicMock()
-    mock_model.load.side_effect = Exception("Load fails, forcing fallback")
 
-    # Mock ir.model.data for XML ID lookups
-    mock_ir_model_data = MagicMock()
-    mock_ir_model_data.search.return_value = []  # No existing records
+    # Track call count and individual load IDs
+    load_call_count = [0]
+    individual_load_ids = []
 
-    def get_model_side_effect(model_name_arg: str) -> Any:
-        if model_name_arg == "ir.model.data":
-            return mock_ir_model_data
-        return mock_model
+    def load_side_effect(
+        header: list[str], data: list[list[Any]], context: dict[str, Any] = None
+    ) -> dict[str, Any]:
+        load_call_count[0] += 1
+        # First call is the batch load - simulate failure
+        if load_call_count[0] == 1:
+            raise Exception("Load fails, forcing fallback")
+        # Subsequent calls are individual record loads
+        if data and data[0]:
+            individual_load_ids.append(data[0][0])
+        return {"ids": [100 + load_call_count[0]], "messages": []}
 
-    mock_get_conn.return_value.get_model.side_effect = get_model_side_effect
+    mock_model.load.side_effect = load_side_effect
+    mock_get_conn.return_value.get_model.return_value = mock_model
 
     # 2. ACT
     result, _ = import_threaded.import_data(
@@ -199,7 +214,10 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
 
     # 3. ASSERT
     assert result is True  # Process should succeed as good records exist
-    assert mock_model.create.call_count == 2  # Called for ok_1 and ok_2
+    # Load should have been called for the two good records (ok_1 and ok_2)
+    assert len(individual_load_ids) == 2
+    assert "ok_1" in individual_load_ids
+    assert "ok_2" in individual_load_ids
 
     # Verify the content of the fail file
     assert fail_file.exists()
