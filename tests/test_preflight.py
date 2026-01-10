@@ -164,7 +164,7 @@ class TestLanguageCheck:
         """Tests the case where the source file contains no languages."""
         mock_df = MagicMock()
         (
-            mock_df.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+            mock_df.get_column.return_value.unique.return_value.drop_nulls.return_value.filter.return_value.to_list.return_value
         ) = []
         mock_polars_read_csv.return_value = mock_df
         result = preflight.language_check(
@@ -182,7 +182,7 @@ class TestLanguageCheck:
         """Tests the success case where all required languages are installed."""
         mock_df = MagicMock()
         (
-            mock_df.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+            mock_df.get_column.return_value.unique.return_value.drop_nulls.return_value.filter.return_value.to_list.return_value
         ) = [
             "en_US",
             "fr_FR",
@@ -218,7 +218,7 @@ class TestLanguageCheck:
     ) -> None:
         """Tests missing languages where user confirms and install succeeds."""
         (
-            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.filter.return_value.to_list.return_value
         ) = ["fr_FR"]
         mock_installer.return_value = True
 
@@ -247,7 +247,7 @@ class TestLanguageCheck:
     ) -> None:
         """Tests missing languages where user confirms but install fails."""
         (
-            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.filter.return_value.to_list.return_value
         ) = ["fr_FR"]
         mock_conf_lib.return_value.get_model.return_value.search_read.return_value = [
             {"code": "en_US"}
@@ -278,7 +278,7 @@ class TestLanguageCheck:
     ) -> None:
         """Tests that the check fails if the user cancels the installation."""
         (
-            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.filter.return_value.to_list.return_value
         ) = ["fr_FR"]
 
         result = preflight.language_check(
@@ -307,7 +307,7 @@ class TestLanguageCheck:
     ) -> None:
         """Tests that languages are auto-installed in headless mode."""
         (
-            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.to_list.return_value
+            mock_polars_read_csv.return_value.get_column.return_value.unique.return_value.drop_nulls.return_value.filter.return_value.to_list.return_value
         ) = ["fr_FR"]
         mock_installer.return_value = True
 

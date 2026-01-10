@@ -178,13 +178,14 @@ def _get_installed_languages(config: Union[str, dict[str, Any]]) -> Optional[set
 def _get_required_languages(filename: str, separator: str) -> Optional[list[str]]:
     """Extracts the list of required languages from the source file."""
     try:
-        return (
+        lang_series = (
             pl.read_csv(filename, separator=separator, truncate_ragged_lines=True)
             .get_column("lang")
             .unique()
             .drop_nulls()
-            .to_list()
         )
+        # Filter out empty strings (polars Series filter takes a boolean mask)
+        return lang_series.filter(lang_series != "").to_list()
     except ColumnNotFoundError:
         log.debug("No 'lang' column found in source file. Skipping language check.")
         return []
