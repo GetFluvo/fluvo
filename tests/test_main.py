@@ -481,10 +481,10 @@ def test_company_id_flag_sets_context(
 
 @patch("odoo_data_flow.__main__.run_export")
 @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
-def test_export_all_companies_flag_sets_context(
+def test_export_all_companies_flag_sets_context_and_domain(
     mock_get_conn: MagicMock, mock_run_export: MagicMock, runner: CliRunner
 ) -> None:
-    """Tests that export --all-companies fetches user companies and sets context."""
+    """Tests that export --all-companies sets context and adds company domain filter."""
     # Mock the connection and user data
     mock_conn = MagicMock()
     mock_conn.user_id = 2
@@ -516,6 +516,11 @@ def test_export_all_companies_flag_sets_context(
         call_kwargs = mock_run_export.call_args.kwargs
         # Verify allowed_company_ids was set in context
         assert call_kwargs["context"]["allowed_company_ids"] == [1, 2, 3]
+        # Verify domain includes company filter
+        expected_domain = (
+            "['|', ('company_id', '=', False), ('company_id', 'in', [1, 2, 3])]"
+        )
+        assert call_kwargs["domain"] == expected_domain
 
 
 @patch("odoo_data_flow.__main__.run_export")
@@ -585,3 +590,47 @@ def test_export_all_companies_flag_handles_connection_error(
         # Should still proceed, just without allowed_company_ids
         mock_run_export.assert_called_once()
         assert "Failed to fetch user companies" in result.output
+
+
+@patch("odoo_data_flow.__main__.run_export")
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+def test_export_all_companies_flag_combines_with_existing_domain(
+    mock_get_conn: MagicMock, mock_run_export: MagicMock, runner: CliRunner
+) -> None:
+    """Tests that --all-companies combines company filter with existing domain."""
+    mock_conn = MagicMock()
+    mock_conn.user_id = 2
+    mock_user_model = MagicMock()
+    mock_user_model.read.return_value = {"company_ids": [1, 2]}
+    mock_conn.get_model.return_value = mock_user_model
+    mock_get_conn.return_value = mock_conn
+
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "export",
+                "--connection-file",
+                "conn.conf",
+                "--output",
+                "out.csv",
+                "--model",
+                "mrp.bom",
+                "--fields",
+                "id,product_id",
+                "--domain",
+                "[('active', '=', True)]",
+                "--all-companies",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_run_export.assert_called_once()
+        call_kwargs = mock_run_export.call_args.kwargs
+        # Verify domain combines company filter with existing filter
+        expected_domain = (
+            "['|', ('company_id', '=', False), ('company_id', 'in', [1, 2]), "
+            "('active', '=', True)]"
+        )
+        assert call_kwargs["domain"] == expected_domain

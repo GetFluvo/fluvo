@@ -1130,6 +1130,15 @@ def export_cmd(connection_file: str, **kwargs: Any) -> None:
         except (ValueError, SyntaxError):
             context = {}
 
+        # Parse the existing domain string
+        domain_str = kwargs.get("domain", "[]")
+        try:
+            domain = ast.literal_eval(domain_str)
+            if not isinstance(domain, list):
+                domain = []
+        except (ValueError, SyntaxError):
+            domain = []
+
         try:
             if isinstance(kwargs["config"], dict):
                 conn = get_connection_from_dict(kwargs["config"])
@@ -1142,6 +1151,19 @@ def export_cmd(connection_file: str, **kwargs: Any) -> None:
 
             if user_company_ids:
                 context["allowed_company_ids"] = user_company_ids
+                # Add domain filter to include records from all companies
+                # This handles models where company_id can be False (shared records)
+                company_domain = [
+                    "|",
+                    ("company_id", "=", False),
+                    ("company_id", "in", user_company_ids),
+                ]
+                # Combine with existing domain
+                if domain:
+                    domain = company_domain + domain
+                else:
+                    domain = company_domain
+                kwargs["domain"] = str(domain)
                 log.info(
                     f"All-companies mode: enabled access to {len(user_company_ids)} "
                     f"companies: {user_company_ids}"
