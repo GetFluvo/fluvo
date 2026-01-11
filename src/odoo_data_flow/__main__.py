@@ -1104,6 +1104,14 @@ def write_cmd(connection_file: str, **kwargs: Any) -> None:
     help="Automatically set allowed_company_ids to all companies the user has "
     "access to. This enables exporting records across multiple companies.",
 )
+@click.option(
+    "--sudo",
+    is_flag=True,
+    default=False,
+    help="Temporarily disable record rules for the model during export. "
+    "Requires admin rights. Use with --all-companies to export all records "
+    "across companies regardless of restrictive record rules.",
+)
 def export_cmd(connection_file: str, **kwargs: Any) -> None:
     """Runs the data export process."""
     # Handle protocol option - create config dict if protocol specified
@@ -1180,7 +1188,63 @@ def export_cmd(connection_file: str, **kwargs: Any) -> None:
         # Pass context as dict (run_export will handle both str and dict)
         kwargs["context"] = context
 
-    run_export(**kwargs)
+    # Handle --sudo flag: temporarily disable record rules for the model
+    sudo = kwargs.pop("sudo", False)
+    if sudo:
+        from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
+
+        model = kwargs.get("model")
+        disabled_rule_ids: list[int] = []
+        ir_rule = None
+
+        try:
+            # Get connection
+            if isinstance(kwargs["config"], dict):
+                conn = get_connection_from_dict(kwargs["config"])
+            else:
+                conn = get_connection_from_config(kwargs["config"])
+
+            # Find and disable record rules for this model
+            ir_model = conn.get_model("ir.model")
+            ir_rule = conn.get_model("ir.rule")
+
+            model_ids = ir_model.search([("model", "=", model)])
+            if model_ids:
+                # Find active record rules for this model
+                rule_ids = ir_rule.search([
+                    ("model_id", "=", model_ids[0]),
+                    ("active", "=", True),
+                ])
+                if rule_ids:
+                    # Disable the rules
+                    ir_rule.write(rule_ids, {"active": False})
+                    disabled_rule_ids = rule_ids
+                    log.info(
+                        f"Sudo mode: temporarily disabled {len(rule_ids)} "
+                        f"record rule(s) for model '{model}'"
+                    )
+
+            # Run export with rules disabled
+            run_export(**kwargs)
+
+        finally:
+            # Re-enable the rules
+            if disabled_rule_ids and ir_rule:
+                try:
+                    ir_rule.write(disabled_rule_ids, {"active": True})
+                    log.info(
+                        f"Sudo mode: re-enabled {len(disabled_rule_ids)} "
+                        f"record rule(s) for model '{model}'"
+                    )
+                except Exception as e:
+                    log.error(f"Failed to re-enable record rules: {e}")
+                    log.error(
+                        f"IMPORTANT: Record rules {disabled_rule_ids} for model "
+                        f"'{model}' may still be disabled! Please re-enable them "
+                        "manually in Odoo."
+                    )
+    else:
+        run_export(**kwargs)
 
 
 # --- Path-to-Image Command ---

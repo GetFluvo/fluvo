@@ -634,3 +634,53 @@ def test_export_all_companies_flag_combines_with_existing_domain(
             "('active', '=', True)]"
         )
         assert call_kwargs["domain"] == expected_domain
+
+
+@patch("odoo_data_flow.__main__.run_export")
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+def test_export_sudo_flag_disables_and_reenables_rules(
+    mock_get_conn: MagicMock, mock_run_export: MagicMock, runner: CliRunner
+) -> None:
+    """Tests that --sudo temporarily disables record rules during export."""
+    mock_conn = MagicMock()
+    mock_ir_model = MagicMock()
+    mock_ir_model.search.return_value = [123]  # Model ID
+    mock_ir_rule = MagicMock()
+    mock_ir_rule.search.return_value = [456, 789]  # Rule IDs
+
+    def get_model(name: str) -> MagicMock:
+        if name == "ir.model":
+            return mock_ir_model
+        elif name == "ir.rule":
+            return mock_ir_rule
+        return MagicMock()
+
+    mock_conn.get_model.side_effect = get_model
+    mock_get_conn.return_value = mock_conn
+
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "export",
+                "--connection-file",
+                "conn.conf",
+                "--output",
+                "out.csv",
+                "--model",
+                "res.partner",
+                "--fields",
+                "id,name",
+                "--sudo",
+            ],
+        )
+        assert result.exit_code == 0
+        # Verify rules were disabled then re-enabled
+        assert mock_ir_rule.write.call_count == 2
+        # First call: disable rules
+        mock_ir_rule.write.assert_any_call([456, 789], {"active": False})
+        # Second call: re-enable rules
+        mock_ir_rule.write.assert_any_call([456, 789], {"active": True})
+        mock_run_export.assert_called_once()
