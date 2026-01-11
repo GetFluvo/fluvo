@@ -82,6 +82,7 @@ class RPCThreadExport(RpcThread):
         self.technical_names = technical_names
         self.is_hybrid = is_hybrid
         self.has_failures = False
+        self.failed_ids: list[int] = []
 
     def _enrich_with_xml_ids(
         self,
@@ -174,9 +175,11 @@ class RPCThreadExport(RpcThread):
         else:
             log.error(
                 f"Export for record ID {ids_to_export[0]} in batch {num} "
-                f"failed permanently after a network error: {e}"
+                f"failed permanently after a network error: {e}",
+                exc_info=True,
             )
             self.has_failures = True
+            self.failed_ids.append(ids_to_export[0])
             return [], []
 
     def _execute_batch(
@@ -273,10 +276,12 @@ class RPCThreadExport(RpcThread):
                 return results_a + results_b, ids_a + ids_b
             else:
                 log.error(
-                    f"Export for batch {num} failed permanently: {e}",
+                    f"Export for batch {num} ({len(ids_to_export)} records) "
+                    f"failed permanently: {e}",
                     exc_info=True,
                 )
                 self.has_failures = True
+                self.failed_ids.extend(ids_to_export)
                 return [], []
         finally:
             log.debug(f"Batch {num} finished in {time() - start_time:.2f}s.")
@@ -572,10 +577,17 @@ def _process_export_batches(  # noqa: C901
     rpc_thread.executor.shutdown(wait=True)
 
     if rpc_thread.has_failures:
+        failed_count = len(rpc_thread.failed_ids)
         log.error(
-            "Export finished with errors. Some records could not be exported. "
-            "Please check the logs above for details on failed records."
+            f"Export finished with errors. {failed_count} record(s) could not "
+            "be exported. Check the logs above for details."
         )
+        if rpc_thread.failed_ids:
+            # Show first 20 failed IDs to avoid flooding the log
+            sample_ids = rpc_thread.failed_ids[:20]
+            log.error(f"Failed record IDs (first 20): {sample_ids}")
+            if failed_count > 20:
+                log.error(f"... and {failed_count - 20} more failed records.")
     if output and streaming:
         log.info(f"Streaming export complete. Data written to {output}")
         return None
