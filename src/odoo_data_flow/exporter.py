@@ -37,7 +37,7 @@ def run_export(
     domain: str = "[]",
     worker: int = 1,
     batch_size: int = 1000,
-    context: str = "{}",
+    context: Union[str, dict[str, Any]] = "{}",
     separator: str = ";",
     encoding: str = "utf-8",
     technical_names: bool = False,
@@ -56,17 +56,21 @@ def run_export(
         )
         return
 
-    try:
-        parsed_context = ast.literal_eval(context)
-        if not isinstance(parsed_context, dict):
-            raise TypeError("Context must be a dictionary.")
-    except Exception:
-        _show_error_panel(
-            "Invalid Context",
-            f"The --context argument must be a valid Python dictionary string: "
-            f"{context}",
-        )
-        return
+    # Handle context as either string or dict
+    if isinstance(context, dict):
+        parsed_context = context
+    else:
+        try:
+            parsed_context = ast.literal_eval(context)
+            if not isinstance(parsed_context, dict):
+                raise TypeError("Context must be a dictionary.")
+        except Exception:
+            _show_error_panel(
+                "Invalid Context",
+                f"The --context argument must be a valid Python dictionary string: "
+                f"{context}",
+            )
+            return
 
     fields_list = fields.split(",")
 

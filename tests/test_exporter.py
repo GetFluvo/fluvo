@@ -362,3 +362,34 @@ def test_run_export_with_empty_dataframe(
         output="partners.csv",
     )
     mock_show_success_panel.assert_called_once()
+
+
+@patch("odoo_data_flow.exporter.export_threaded.export_data")
+@patch("odoo_data_flow.exporter._show_success_panel")
+def test_run_export_with_context_as_dict(
+    mock_show_success: MagicMock, mock_export_data: MagicMock
+) -> None:
+    """Tests that run_export accepts context as a dict (for --all-companies)."""
+    mock_export_data.return_value = (
+        True,
+        "session-123",
+        2,
+        pl.DataFrame({"id": [1, 2]}),
+    )
+
+    # Pass context as a dict instead of a string
+    run_export(
+        config="dummy.conf",
+        model="res.partner",
+        fields="id,name",
+        output="partners.csv",
+        context={"allowed_company_ids": [1, 2, 3], "tracking_disable": True},
+    )
+
+    mock_export_data.assert_called_once()
+    call_kwargs = mock_export_data.call_args.kwargs
+    assert call_kwargs["context"] == {
+        "allowed_company_ids": [1, 2, 3],
+        "tracking_disable": True,
+    }
+    mock_show_success.assert_called_once()

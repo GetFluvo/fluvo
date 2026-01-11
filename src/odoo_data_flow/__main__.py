@@ -1097,6 +1097,13 @@ def write_cmd(connection_file: str, **kwargs: Any) -> None:
     like 'selection' or 'binary'.
     """,
 )
+@click.option(
+    "--all-companies",
+    is_flag=True,
+    default=False,
+    help="Automatically set allowed_company_ids to all companies the user has "
+    "access to. This enables exporting records across multiple companies.",
+)
 def export_cmd(connection_file: str, **kwargs: Any) -> None:
     """Runs the data export process."""
     # Handle protocol option - create config dict if protocol specified
@@ -1106,6 +1113,51 @@ def export_cmd(connection_file: str, **kwargs: Any) -> None:
         log.info(f"Using {protocol} protocol for RPC communication")
     else:
         kwargs["config"] = connection_file
+
+    # Handle --all-companies flag
+    all_companies = kwargs.pop("all_companies", False)
+    if all_companies:
+        import ast
+
+        from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
+
+        # Parse the existing context string
+        context_str = kwargs.get("context", "{}")
+        try:
+            context = ast.literal_eval(context_str)
+            if not isinstance(context, dict):
+                context = {}
+        except (ValueError, SyntaxError):
+            context = {}
+
+        try:
+            if isinstance(kwargs["config"], dict):
+                conn = get_connection_from_dict(kwargs["config"])
+            else:
+                conn = get_connection_from_config(kwargs["config"])
+
+            user_model = conn.get_model("res.users")
+            user_data = user_model.read(conn.user_id, ["company_ids"])
+            user_company_ids = user_data.get("company_ids", [])
+
+            if user_company_ids:
+                context["allowed_company_ids"] = user_company_ids
+                log.info(
+                    f"All-companies mode: enabled access to {len(user_company_ids)} "
+                    f"companies: {user_company_ids}"
+                )
+            else:
+                log.warning(
+                    "No company access found for user. "
+                    "Continuing without setting allowed_company_ids."
+                )
+        except Exception as e:
+            log.error(f"Failed to fetch user companies: {e}")
+            log.warning("Continuing without setting allowed_company_ids.")
+
+        # Pass context as dict (run_export will handle both str and dict)
+        kwargs["context"] = context
+
     run_export(**kwargs)
 
 
