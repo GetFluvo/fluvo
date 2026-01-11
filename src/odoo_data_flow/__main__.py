@@ -1270,6 +1270,7 @@ def export_cmd(connection_file: str, **kwargs: Any) -> None:
         from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
 
         model = kwargs.get("model")
+        fields = kwargs.get("fields", "")
         disabled_rule_ids: list[int] = []
         ir_rule = None
 
@@ -1280,25 +1281,43 @@ def export_cmd(connection_file: str, **kwargs: Any) -> None:
             else:
                 conn = get_connection_from_config(kwargs["config"])
 
-            # Find and disable record rules for this model
             ir_model = conn.get_model("ir.model")
             ir_rule = conn.get_model("ir.rule")
 
-            model_ids = ir_model.search([("model", "=", model)])
-            if model_ids:
-                # Find active record rules for this model
-                rule_ids = ir_rule.search([
-                    ("model_id", "=", model_ids[0]),
-                    ("active", "=", True),
-                ])
-                if rule_ids:
-                    # Disable the rules
-                    ir_rule.write(rule_ids, {"active": False})
-                    disabled_rule_ids = rule_ids
-                    log.info(
-                        f"Sudo mode: temporarily disabled {len(rule_ids)} "
-                        f"record rule(s) for model '{model}'"
-                    )
+            # Collect all models to disable rules for (main + related)
+            models_to_disable: set[str] = {model}
+
+            # Find related models from the fields being exported
+            model_obj = conn.get_model(model)
+            field_names = [f.split("/")[0].replace(".id", "") for f in fields.split(",")]
+            field_names = [f for f in field_names if f and f != "id"]
+            if field_names:
+                fields_meta = model_obj.fields_get(field_names)
+                for field_name, meta in fields_meta.items():
+                    if meta.get("relation"):
+                        models_to_disable.add(meta["relation"])
+
+            # Find and disable record rules for all models
+            for model_name in models_to_disable:
+                model_ids = ir_model.search([("model", "=", model_name)])
+                if model_ids:
+                    rule_ids = ir_rule.search([
+                        ("model_id", "=", model_ids[0]),
+                        ("active", "=", True),
+                    ])
+                    if rule_ids:
+                        ir_rule.write(rule_ids, {"active": False})
+                        disabled_rule_ids.extend(rule_ids)
+                        log.info(
+                            f"Sudo mode: disabled {len(rule_ids)} rule(s) "
+                            f"for '{model_name}'"
+                        )
+
+            if disabled_rule_ids:
+                log.info(
+                    f"Sudo mode: temporarily disabled {len(disabled_rule_ids)} "
+                    f"record rule(s) total across {len(models_to_disable)} model(s)"
+                )
 
             # Run export with rules disabled
             run_export(**kwargs)
@@ -1310,14 +1329,13 @@ def export_cmd(connection_file: str, **kwargs: Any) -> None:
                     ir_rule.write(disabled_rule_ids, {"active": True})
                     log.info(
                         f"Sudo mode: re-enabled {len(disabled_rule_ids)} "
-                        f"record rule(s) for model '{model}'"
+                        "record rule(s)"
                     )
                 except Exception as e:
                     log.error(f"Failed to re-enable record rules: {e}")
                     log.error(
-                        f"IMPORTANT: Record rules {disabled_rule_ids} for model "
-                        f"'{model}' may still be disabled! Please re-enable them "
-                        "manually in Odoo."
+                        f"IMPORTANT: Record rules {disabled_rule_ids} may still "
+                        "be disabled! Please re-enable them manually in Odoo."
                     )
     else:
         run_export(**kwargs)
