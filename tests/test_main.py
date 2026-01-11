@@ -490,7 +490,15 @@ def test_export_all_companies_flag_sets_context_and_domain(
     mock_conn.user_id = 2
     mock_user_model = MagicMock()
     mock_user_model.read.return_value = {"company_ids": [1, 2, 3]}
-    mock_conn.get_model.return_value = mock_user_model
+    mock_target_model = MagicMock()
+    mock_target_model.fields_get.return_value = {"company_id": {"type": "many2one"}}
+
+    def get_model(name: str) -> MagicMock:
+        if name == "res.users":
+            return mock_user_model
+        return mock_target_model
+
+    mock_conn.get_model.side_effect = get_model
     mock_get_conn.return_value = mock_conn
 
     with runner.isolated_filesystem():
@@ -602,7 +610,15 @@ def test_export_all_companies_flag_combines_with_existing_domain(
     mock_conn.user_id = 2
     mock_user_model = MagicMock()
     mock_user_model.read.return_value = {"company_ids": [1, 2]}
-    mock_conn.get_model.return_value = mock_user_model
+    mock_target_model = MagicMock()
+    mock_target_model.fields_get.return_value = {"company_id": {"type": "many2one"}}
+
+    def get_model(name: str) -> MagicMock:
+        if name == "res.users":
+            return mock_user_model
+        return mock_target_model
+
+    mock_conn.get_model.side_effect = get_model
     mock_get_conn.return_value = mock_conn
 
     with runner.isolated_filesystem():
@@ -684,3 +700,53 @@ def test_export_sudo_flag_disables_and_reenables_rules(
         # Second call: re-enable rules
         mock_ir_rule.write.assert_any_call([456, 789], {"active": True})
         mock_run_export.assert_called_once()
+
+
+@patch("odoo_data_flow.__main__.run_import")
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+def test_import_sudo_flag_disables_and_reenables_rules(
+    mock_get_conn: MagicMock, mock_run_import: MagicMock, runner: CliRunner
+) -> None:
+    """Tests that --sudo temporarily disables record rules during import."""
+    mock_conn = MagicMock()
+    mock_ir_model = MagicMock()
+    mock_ir_model.search.return_value = [123]  # Model ID
+    mock_ir_rule = MagicMock()
+    mock_ir_rule.search.return_value = [456, 789]  # Rule IDs
+
+    def get_model(name: str) -> MagicMock:
+        if name == "ir.model":
+            return mock_ir_model
+        elif name == "ir.rule":
+            return mock_ir_rule
+        return MagicMock()
+
+    mock_conn.get_model.side_effect = get_model
+    mock_get_conn.return_value = mock_conn
+
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        with open("data.csv", "w") as f:
+            f.write("id;name\n1;Test")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "data.csv",
+                "--model",
+                "res.partner",
+                "--sudo",
+            ],
+        )
+        assert result.exit_code == 0
+        # Verify rules were disabled then re-enabled
+        assert mock_ir_rule.write.call_count == 2
+        # First call: disable rules
+        mock_ir_rule.write.assert_any_call([456, 789], {"active": False})
+        # Second call: re-enable rules
+        mock_ir_rule.write.assert_any_call([456, 789], {"active": True})
+        mock_run_import.assert_called_once()

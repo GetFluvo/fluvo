@@ -816,6 +816,14 @@ def vat_validate_cmd(
     help="Enable health-aware throttling that automatically adjusts batch sizes "
     "and delays based on server response times. Helps prevent server overload.",
 )
+@click.option(
+    "--sudo",
+    is_flag=True,
+    default=False,
+    help="Temporarily disable record rules for the model during import. "
+    "Requires admin rights. Use with --all-companies to import all records "
+    "across companies regardless of restrictive record rules.",
+)
 def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     """Runs the data import process."""
     # Handle dry-run mode early
@@ -980,7 +988,63 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     if ignore is not None:
         kwargs["ignore"] = [col.strip() for col in ignore.split(",") if col.strip()]
 
-    run_import(**kwargs)
+    # Handle --sudo flag: temporarily disable record rules for the model
+    sudo = kwargs.pop("sudo", False)
+    if sudo:
+        from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
+
+        model = kwargs.get("model")
+        disabled_rule_ids: list[int] = []
+        ir_rule = None
+
+        try:
+            # Get connection
+            if isinstance(kwargs["config"], dict):
+                conn = get_connection_from_dict(kwargs["config"])
+            else:
+                conn = get_connection_from_config(kwargs["config"])
+
+            # Find and disable record rules for this model
+            ir_model = conn.get_model("ir.model")
+            ir_rule = conn.get_model("ir.rule")
+
+            model_ids = ir_model.search([("model", "=", model)])
+            if model_ids:
+                # Find active record rules for this model
+                rule_ids = ir_rule.search([
+                    ("model_id", "=", model_ids[0]),
+                    ("active", "=", True),
+                ])
+                if rule_ids:
+                    # Disable the rules
+                    ir_rule.write(rule_ids, {"active": False})
+                    disabled_rule_ids = rule_ids
+                    log.info(
+                        f"Sudo mode: temporarily disabled {len(rule_ids)} "
+                        f"record rule(s) for model '{model}'"
+                    )
+
+            # Run import with rules disabled
+            run_import(**kwargs)
+
+        finally:
+            # Re-enable the rules
+            if disabled_rule_ids and ir_rule:
+                try:
+                    ir_rule.write(disabled_rule_ids, {"active": True})
+                    log.info(
+                        f"Sudo mode: re-enabled {len(disabled_rule_ids)} "
+                        f"record rule(s) for model '{model}'"
+                    )
+                except Exception as e:
+                    log.error(f"Failed to re-enable record rules: {e}")
+                    log.error(
+                        f"IMPORTANT: Record rules {disabled_rule_ids} for model "
+                        f"'{model}' may still be disabled! Please re-enable them "
+                        "manually in Odoo."
+                    )
+    else:
+        run_import(**kwargs)
 
 
 # --- Write Command (New) ---
@@ -1159,23 +1223,35 @@ def export_cmd(connection_file: str, **kwargs: Any) -> None:
 
             if user_company_ids:
                 context["allowed_company_ids"] = user_company_ids
-                # Add domain filter to include records from all companies
-                # This handles models where company_id can be False (shared records)
-                company_domain = [
-                    "|",
-                    ("company_id", "=", False),
-                    ("company_id", "in", user_company_ids),
-                ]
-                # Combine with existing domain
-                if domain:
-                    domain = company_domain + domain
-                else:
-                    domain = company_domain
-                kwargs["domain"] = str(domain)
                 log.info(
                     f"All-companies mode: enabled access to {len(user_company_ids)} "
                     f"companies: {user_company_ids}"
                 )
+
+                # Check if model has company_id field before adding domain filter
+                model = kwargs.get("model")
+                model_obj = conn.get_model(model)
+                fields = model_obj.fields_get(["company_id"])
+                if "company_id" in fields:
+                    # Add domain filter to include records from all companies
+                    # This handles models where company_id can be False (shared)
+                    company_domain = [
+                        "|",
+                        ("company_id", "=", False),
+                        ("company_id", "in", user_company_ids),
+                    ]
+                    # Combine with existing domain
+                    if domain:
+                        domain = company_domain + domain
+                    else:
+                        domain = company_domain
+                    kwargs["domain"] = str(domain)
+                    log.info(f"Added company_id domain filter for model '{model}'")
+                else:
+                    log.info(
+                        f"Model '{model}' has no company_id field, "
+                        "skipping domain filter"
+                    )
             else:
                 log.warning(
                     "No company access found for user. "
