@@ -113,6 +113,59 @@ def _extract_per_row_errors(messages: list[dict[str, Any]]) -> dict[int, str]:
     return per_row_errors
 
 
+def _validate_and_fill_empty_ids(
+    header: list[str],
+    data: list[list[Any]],
+    model_name: str = "",
+    start_row: int = 0,
+) -> tuple[list[list[Any]], int]:
+    """Validate id column and auto-generate XML IDs for empty values.
+
+    This function checks each row for empty 'id' values and auto-generates
+    XML IDs for rows that are missing them. This prevents records from being
+    created without XML IDs, which would make them unreferenceable.
+
+    Args:
+        header: The CSV header row.
+        data: The CSV data rows.
+        model_name: The Odoo model name (used in generated XML IDs).
+        start_row: The starting row number for logging (used in streaming mode).
+
+    Returns:
+        A tuple of (modified_data, count_of_filled_ids).
+    """
+    if "id" not in header:
+        return data, 0
+
+    id_index = header.index("id")
+    filled_count = 0
+    # Sanitize model name for use in XML ID (replace dots with underscores)
+    safe_model = model_name.replace(".", "_") if model_name else "record"
+
+    for row_idx, row in enumerate(data):
+        if id_index < len(row):
+            id_value = row[id_index]
+            # Check for empty, None, or whitespace-only values
+            if id_value is None or (isinstance(id_value, str) and not id_value.strip()):
+                # Generate a unique XML ID based on model and row number
+                actual_row = start_row + row_idx + 2  # +2 for header and 1-based
+                generated_id = f"__import__.{safe_model}_{actual_row}"
+                row[id_index] = generated_id
+                filled_count += 1
+                log.warning(
+                    f"Row {actual_row}: Empty 'id' value detected. "
+                    f"Auto-generated XML ID: {generated_id}"
+                )
+
+    if filled_count > 0:
+        log.info(
+            f"Auto-generated {filled_count} XML ID(s) for rows with empty 'id' values. "
+            f"These records will be created with the generated XML IDs."
+        )
+
+    return data, filled_count
+
+
 def _read_data_file(
     file_path: str, separator: str, encoding: str, skip: int
 ) -> tuple[list[str], list[list[Any]]]:
@@ -2138,6 +2191,9 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
             file_csv, separator, encoding, skip, batch_size, ignore
         )
 
+        # Track cumulative row count for proper row numbering in streaming mode
+        cumulative_row_count = 0
+
         for batch_header, batch_num, batch_data in batch_generator:
             if rpc_pass_1.abort_flag:
                 aborted = True
@@ -2153,6 +2209,12 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
                         f"Unique ID field '{unique_id_field}' not found in header."
                     )
                     return {"success": False, "id_map": {}, "failed_lines": []}
+
+            # Validate and auto-fill empty id values for this batch
+            batch_data, _ = _validate_and_fill_empty_ids(
+                batch_header, batch_data, model_name=model_name, start_row=cumulative_row_count
+            )
+            cumulative_row_count += len(batch_data)
 
             thread_state = {
                 "model": model_obj,
@@ -2485,6 +2547,16 @@ def import_data(  # noqa: C901
 
         if not header:
             return False, {}
+
+        # Validate and auto-fill empty id values
+        all_data, filled_count = _validate_and_fill_empty_ids(
+            header, all_data, model_name=model
+        )
+        if filled_count > 0:
+            log.warning(
+                f"Found {filled_count} row(s) with empty 'id' values. "
+                f"Auto-generated XML IDs have been assigned to prevent orphaned records."
+            )
 
     try:
         if isinstance(config, dict):
