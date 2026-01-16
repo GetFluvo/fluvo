@@ -20,7 +20,7 @@ from odoo_data_flow.import_threaded import (
     _read_data_file,
     _setup_fail_file,
     _stream_csv_batches,
-    _validate_and_fill_empty_ids,
+    _warn_empty_ids,
     import_data,
 )
 
@@ -1623,11 +1623,11 @@ class TestImportDataStreamingMode:
         assert result is False
 
 
-class TestValidateAndFillEmptyIds:
-    """Tests for the _validate_and_fill_empty_ids function."""
+class TestWarnEmptyIds:
+    """Tests for the _warn_empty_ids function."""
 
-    def test_fills_empty_id_values(self) -> None:
-        """Test that empty id values are auto-generated."""
+    def test_counts_empty_id_values(self) -> None:
+        """Test that empty id values are counted correctly."""
         header = ["id", "name", "email"]
         data = [
             ["partner_1", "Alice", "alice@example.com"],
@@ -1635,110 +1635,74 @@ class TestValidateAndFillEmptyIds:
             ["partner_3", "Charlie", "charlie@example.com"],
         ]
 
-        result_data, filled_count = _validate_and_fill_empty_ids(
-            header, data, model_name="res.partner"
-        )
+        empty_count = _warn_empty_ids(header, data)
 
-        assert filled_count == 1
-        assert result_data[0][0] == "partner_1"  # Unchanged
-        assert result_data[1][0] == "__import__.res_partner_3"  # Auto-generated
-        assert result_data[2][0] == "partner_3"  # Unchanged
+        assert empty_count == 1
+        # Data should remain unchanged (warning only, no modification)
+        assert data[0][0] == "partner_1"
+        assert data[1][0] == ""
+        assert data[2][0] == "partner_3"
 
-    def test_fills_none_id_values(self) -> None:
-        """Test that None id values are auto-generated."""
+    def test_counts_none_id_values(self) -> None:
+        """Test that None id values are counted correctly."""
         header = ["id", "name"]
         data = [
             [None, "Alice"],  # None id
             ["partner_2", "Bob"],
         ]
 
-        result_data, filled_count = _validate_and_fill_empty_ids(
-            header, data, model_name="res.partner"
-        )
+        empty_count = _warn_empty_ids(header, data)
 
-        assert filled_count == 1
-        assert result_data[0][0] == "__import__.res_partner_2"
-        assert result_data[1][0] == "partner_2"
+        assert empty_count == 1
+        # Data should remain unchanged
+        assert data[0][0] is None
+        assert data[1][0] == "partner_2"
 
-    def test_fills_whitespace_only_id_values(self) -> None:
-        """Test that whitespace-only id values are auto-generated."""
+    def test_counts_whitespace_only_id_values(self) -> None:
+        """Test that whitespace-only id values are counted correctly."""
         header = ["id", "name"]
         data = [
             ["   ", "Alice"],  # Whitespace only
             ["\t", "Bob"],  # Tab only
         ]
 
-        result_data, filled_count = _validate_and_fill_empty_ids(
-            header, data, model_name="res.partner"
-        )
+        empty_count = _warn_empty_ids(header, data)
 
-        assert filled_count == 2
-        assert result_data[0][0] == "__import__.res_partner_2"
-        assert result_data[1][0] == "__import__.res_partner_3"
+        assert empty_count == 2
+        # Data should remain unchanged
+        assert data[0][0] == "   "
+        assert data[1][0] == "\t"
 
-    def test_no_changes_when_all_ids_present(self) -> None:
-        """Test that no changes are made when all ids are present."""
+    def test_returns_zero_when_all_ids_present(self) -> None:
+        """Test that zero is returned when all ids are present."""
         header = ["id", "name"]
         data = [
             ["partner_1", "Alice"],
             ["partner_2", "Bob"],
         ]
 
-        result_data, filled_count = _validate_and_fill_empty_ids(
-            header, data, model_name="res.partner"
-        )
+        empty_count = _warn_empty_ids(header, data)
 
-        assert filled_count == 0
-        assert result_data[0][0] == "partner_1"
-        assert result_data[1][0] == "partner_2"
+        assert empty_count == 0
 
-    def test_returns_unchanged_when_no_id_column(self) -> None:
-        """Test that data is unchanged if no id column exists."""
+    def test_returns_zero_when_no_id_column(self) -> None:
+        """Test that zero is returned if no id column exists."""
         header = ["name", "email"]
         data = [["Alice", "alice@example.com"]]
 
-        result_data, filled_count = _validate_and_fill_empty_ids(
-            header, data, model_name="res.partner"
-        )
+        empty_count = _warn_empty_ids(header, data)
 
-        assert filled_count == 0
-        assert result_data == data
+        assert empty_count == 0
 
-    def test_uses_start_row_for_numbering(self) -> None:
-        """Test that start_row parameter affects row numbering."""
+    def test_uses_start_row_for_logging(self) -> None:
+        """Test that start_row parameter is used for row number calculation."""
         header = ["id", "name"]
         data = [
             ["", "Alice"],
             ["", "Bob"],
         ]
 
-        result_data, filled_count = _validate_and_fill_empty_ids(
-            header, data, model_name="res.partner", start_row=100
-        )
+        # start_row affects logging output, not the count
+        empty_count = _warn_empty_ids(header, data, start_row=100)
 
-        assert filled_count == 2
-        # Row numbers should be: start_row + row_idx + 2
-        # For row 0: 100 + 0 + 2 = 102
-        # For row 1: 100 + 1 + 2 = 103
-        assert result_data[0][0] == "__import__.res_partner_102"
-        assert result_data[1][0] == "__import__.res_partner_103"
-
-    def test_sanitizes_model_name_in_generated_id(self) -> None:
-        """Test that model name dots are replaced with underscores."""
-        header = ["id", "name"]
-        data = [["", "Test"]]
-
-        result_data, _ = _validate_and_fill_empty_ids(
-            header, data, model_name="account.move.line"
-        )
-
-        assert result_data[0][0] == "__import__.account_move_line_2"
-
-    def test_handles_empty_model_name(self) -> None:
-        """Test that empty model name uses 'record' as fallback."""
-        header = ["id", "name"]
-        data = [["", "Test"]]
-
-        result_data, _ = _validate_and_fill_empty_ids(header, data, model_name="")
-
-        assert result_data[0][0] == "__import__.record_2"
+        assert empty_count == 2
