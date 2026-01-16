@@ -1017,11 +1017,11 @@ def _create_xmlid_entry(
     res_id: int,
     model_name: str,
 ) -> bool:
-    """Create an ir.model.data entry for a record created via create().
+    """Ensure an ir.model.data entry exists for a record.
 
-    When records are created using Odoo's create() method instead of load(),
-    the XML ID is not automatically persisted. This function creates the
-    ir.model.data entry to ensure the XML ID is saved.
+    This function ensures the XML ID is persisted in ir.model.data. It handles
+    cases where load() creates a record but fails to persist the XML ID, and
+    also updates existing entries if they point to a different record.
 
     Args:
         connection: The Odoo connection object (used to access ir.model.data)
@@ -1269,9 +1269,9 @@ def _execute_load_batch(  # noqa: C901
 
     if thread_state.get("force_create"):
         progress.console.print(
-            f"Batch {batch_number}: Fail mode active, using `create` method."
+            f"Batch {batch_number}: Fail mode active, using single-record load."
         )
-        result = _create_batch_individually(
+        result = _load_records_individually(
             model,
             connection,
             batch_lines,
@@ -2060,8 +2060,8 @@ def _orchestrate_pass_1(
         batch_delay (float): Delay in seconds between batch submissions to
             reduce server load.
         o2m (bool): Enables one-to-many batching logic.
-        force_create (bool): If True, bypasses the `load` method and uses
-            the `create` method directly. Used for fail mode.
+        force_create (bool): If True, uses single-record load instead of
+            batch load. Used for fail mode to get accurate per-record errors.
         split_by_cols: The column names to group records by to avoid concurrent updates.
         throttle_controller: Optional controller for adaptive throttling based
             on server response times.
@@ -2481,8 +2481,8 @@ def import_data(  # noqa: C901
         batch_delay (float): Delay in seconds between batch submissions to
             reduce server load. Use 0.5-2.0 for busy servers.
         skip (int): The number of lines to skip at the top of the source file.
-        force_create (bool): If True, bypasses the `load` method and uses
-            the `create` method directly. Used for fail mode.
+        force_create (bool): If True, uses single-record load instead of
+            batch load. Used for fail mode to get accurate per-record errors.
         o2m (bool): Enables special handling for one-to-many imports where
             child lines follow a parent record.
         split_by_cols: The column names to group records by to avoid concurrent updates.
