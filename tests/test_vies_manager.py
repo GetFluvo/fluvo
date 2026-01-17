@@ -1,5 +1,7 @@
 """Tests for the VIES (VAT Information Exchange System) manager module."""
 
+import time
+from pathlib import Path
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
@@ -10,8 +12,15 @@ from odoo_data_flow.lib.actions.vies_manager import (
     VAT_PATTERNS,
     VatValidationSettings,
     ViesValidationResult,
+    _delete_backup_file,
+    _get_backup_file_path,
+    _is_retriable_error,
+    _load_settings_from_backup,
+    _save_settings_to_backup,
+    check_vat_settings_backup_status,
     disable_vat_validation,
     get_vat_validation_settings,
+    restore_vat_settings_from_backup,
     restore_vat_validation_settings,
     run_import_with_vat_validation_disabled,
     run_vies_validation,
@@ -514,7 +523,11 @@ class TestRunImportWithVatValidationDisabled:
         assert result == "import_result"
         mock_disable.assert_called_once()
         mock_import_func.assert_called_once_with(file="test.csv")
-        mock_restore.assert_called_once_with("dummy.conf", mock_settings)
+        # Check restore was called with the config and settings
+        mock_restore.assert_called_once()
+        call_args = mock_restore.call_args
+        assert call_args[0][0] == "dummy.conf"
+        assert call_args[0][1] == mock_settings
 
     @patch("odoo_data_flow.lib.actions.vies_manager.restore_vat_validation_settings")
     @patch("odoo_data_flow.lib.actions.vies_manager.disable_vat_validation")
@@ -560,3 +573,414 @@ class TestRunImportWithVatValidationDisabled:
 
         assert result == "import_result"
         mock_restore.assert_not_called()  # Nothing to restore
+
+
+# --- File-based backup functionality tests ---
+
+
+class TestBackupFilePath:
+    """Tests for _get_backup_file_path function."""
+
+    def test_backup_path_from_dict_config(self, tmp_path: Path) -> None:
+        """Test backup path generation from dict config."""
+        config = {"host": "localhost", "database": "test_db"}
+        backup_path = _get_backup_file_path(config, backup_dir=tmp_path)
+
+        assert backup_path.parent == tmp_path
+        assert "localhost" in backup_path.name
+        assert "test_db" in backup_path.name
+        assert backup_path.suffix == ".json"
+
+    def test_backup_path_sanitizes_special_chars(self, tmp_path: Path) -> None:
+        """Test that special characters in host/db names are sanitized."""
+        config = {"host": "my-server.example.com:8069", "database": "prod/main"}
+        backup_path = _get_backup_file_path(config, backup_dir=tmp_path)
+
+        # Should not contain dangerous characters in filename portion
+        filename = backup_path.name
+        assert "/" not in filename
+        # Colon may be converted to underscore
+        assert ":" not in filename or "_" in filename
+
+    def test_backup_path_from_yaml_config(self, tmp_path: Path) -> None:
+        """Test backup path generation from YAML config file."""
+        config_file = tmp_path / "odoo.yaml"
+        config_file.write_text("host: odoo.example.com\ndatabase: production")
+
+        backup_path = _get_backup_file_path(str(config_file), backup_dir=tmp_path)
+
+        assert "odoo.example.com" in backup_path.name
+        assert "production" in backup_path.name
+
+
+class TestBackupFileOperations:
+    """Tests for backup file save/load/delete operations."""
+
+    def test_save_and_load_settings(self, tmp_path: Path) -> None:
+        """Test saving and loading settings to/from backup file."""
+        settings = VatValidationSettings(
+            vies_settings={1: True, 2: False},
+            stdnum_settings={"base_vat.vat_check_on_save": "True"},
+            timestamp=time.time(),
+        )
+        backup_path = tmp_path / "backup.json"
+
+        # Save
+        assert _save_settings_to_backup(settings, backup_path) is True
+        assert backup_path.exists()
+
+        # Load
+        loaded = _load_settings_from_backup(backup_path)
+        assert loaded is not None
+        assert loaded.vies_settings == {1: True, 2: False}
+        assert loaded.stdnum_settings == {"base_vat.vat_check_on_save": "True"}
+
+    def test_load_nonexistent_file_returns_none(self, tmp_path: Path) -> None:
+        """Test loading from nonexistent file returns None."""
+        backup_path = tmp_path / "nonexistent.json"
+        assert _load_settings_from_backup(backup_path) is None
+
+    def test_load_invalid_json_returns_none(self, tmp_path: Path) -> None:
+        """Test loading invalid JSON returns None."""
+        backup_path = tmp_path / "invalid.json"
+        backup_path.write_text("not valid json {{{")
+
+        assert _load_settings_from_backup(backup_path) is None
+
+    def test_delete_backup_file(self, tmp_path: Path) -> None:
+        """Test deleting backup file."""
+        backup_path = tmp_path / "backup.json"
+        backup_path.write_text("{}")
+
+        assert _delete_backup_file(backup_path) is True
+        assert not backup_path.exists()
+
+    def test_delete_nonexistent_file_succeeds(self, tmp_path: Path) -> None:
+        """Test deleting nonexistent file returns True."""
+        backup_path = tmp_path / "nonexistent.json"
+        assert _delete_backup_file(backup_path) is True
+
+    def test_save_creates_parent_directories(self, tmp_path: Path) -> None:
+        """Test that save creates parent directories if needed."""
+        backup_path = tmp_path / "subdir" / "nested" / "backup.json"
+        settings = VatValidationSettings()
+
+        assert _save_settings_to_backup(settings, backup_path) is True
+        assert backup_path.exists()
+
+
+class TestRetriableError:
+    """Tests for _is_retriable_error function."""
+
+    @pytest.mark.parametrize(
+        "error_message",
+        [
+            "503 Service Unavailable",
+            "Connection refused",
+            "Connection reset by peer",
+            "Request timed out",
+            "Network unreachable",
+            "502 Bad Gateway",
+            "504 Gateway Timeout",
+            "service temporarily unavailable",
+        ],
+    )
+    def test_retriable_errors(self, error_message: str) -> None:
+        """Test that transient errors are classified as retriable."""
+        assert _is_retriable_error(Exception(error_message)) is True
+
+    @pytest.mark.parametrize(
+        "error_message",
+        [
+            "Access denied",
+            "Invalid credentials",
+            "Record not found",
+            "Validation error",
+            "Database error",
+        ],
+    )
+    def test_non_retriable_errors(self, error_message: str) -> None:
+        """Test that permanent errors are not classified as retriable."""
+        assert _is_retriable_error(Exception(error_message)) is False
+
+
+class TestDisableVatValidationWithBackup:
+    """Tests for disable_vat_validation with file-based backup."""
+
+    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    def test_creates_backup_file_on_first_run(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test that backup file is created when no previous backup exists."""
+        # Setup mock
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.return_value = [
+            {"id": 1, "name": "Main Company", "vat_check_vies": True}
+        ]
+        mock_param_obj = MagicMock()
+        mock_param_obj.get_param.return_value = "True"
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = lambda m: (
+            mock_company_obj if m == "res.company" else mock_param_obj
+        )
+        mock_get_connection.return_value = mock_connection
+
+        config = {"host": "localhost", "database": "test_db"}
+
+        # Act
+        result = disable_vat_validation(
+            config,
+            disable_vies=True,
+            disable_stdnum=True,
+            save_settings=True,
+            backup_dir=tmp_path,
+        )
+
+        # Assert
+        assert result is not None
+        assert result.vies_settings == {1: True}
+
+        # Backup file should exist
+        backup_path = _get_backup_file_path(config, backup_dir=tmp_path)
+        assert backup_path.exists()
+
+    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    def test_uses_existing_backup_if_present(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test that existing backup is used instead of polling database."""
+        # Create existing backup with different settings
+        config = {"host": "localhost", "database": "test_db"}
+        backup_path = _get_backup_file_path(config, backup_dir=tmp_path)
+        existing_settings = VatValidationSettings(
+            vies_settings={1: True, 2: True},  # Original: both enabled
+            stdnum_settings={"base_vat.vat_check_on_save": "True"},
+        )
+        _save_settings_to_backup(existing_settings, backup_path)
+
+        # Setup mock - database has different (wrong) values
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.return_value = [
+            {"id": 1, "name": "Main Company", "vat_check_vies": False},
+            {"id": 2, "name": "Second Company", "vat_check_vies": False},
+        ]
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value = mock_company_obj
+        mock_get_connection.return_value = mock_connection
+
+        # Act
+        result = disable_vat_validation(
+            config,
+            disable_vies=True,
+            disable_stdnum=False,
+            save_settings=True,
+            backup_dir=tmp_path,
+        )
+
+        # Assert - should use backup file values, not database
+        assert result is not None
+        assert result.vies_settings == {1: True, 2: True}  # From backup, not DB
+
+
+class TestRestoreVatValidationSettingsWithRetry:
+    """Tests for restore_vat_validation_settings with retries."""
+
+    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    def test_deletes_backup_on_success(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test that backup file is deleted after successful restoration."""
+        # Create backup file
+        config = {"host": "localhost", "database": "test_db"}
+        backup_path = _get_backup_file_path(config, backup_dir=tmp_path)
+        settings = VatValidationSettings(vies_settings={1: True})
+        _save_settings_to_backup(settings, backup_path)
+        assert backup_path.exists()
+
+        # Setup mock for successful restoration
+        mock_company_obj = MagicMock()
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value = mock_company_obj
+        mock_get_connection.return_value = mock_connection
+
+        # Act
+        result = restore_vat_validation_settings(
+            config, settings, backup_dir=tmp_path
+        )
+
+        # Assert
+        assert result is True
+        assert not backup_path.exists()  # Backup should be deleted
+
+    @patch("odoo_data_flow.lib.actions.vies_manager.time.sleep")
+    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    def test_retries_on_503_error(
+        self,
+        mock_get_connection: MagicMock,
+        mock_sleep: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that restoration retries on 503 Service Unavailable."""
+        # Create backup file
+        config = {"host": "localhost", "database": "test_db"}
+        backup_path = _get_backup_file_path(config, backup_dir=tmp_path)
+        settings = VatValidationSettings(vies_settings={1: True})
+        _save_settings_to_backup(settings, backup_path)
+
+        # Setup mock - fail twice with 503, then succeed
+        mock_company_obj = MagicMock()
+        mock_company_obj.write.side_effect = [
+            Exception("503 Service Unavailable"),
+            Exception("503 Service Unavailable"),
+            None,  # Success on third try
+        ]
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value = mock_company_obj
+        mock_get_connection.return_value = mock_connection
+
+        # Act
+        result = restore_vat_validation_settings(
+            config,
+            settings,
+            backup_dir=tmp_path,
+            max_retries=5,
+            initial_delay=0.1,
+        )
+
+        # Assert
+        assert result is True
+        assert mock_company_obj.write.call_count == 3
+        assert mock_sleep.call_count == 2  # Slept before retries
+
+    @patch("odoo_data_flow.lib.actions.vies_manager.time.sleep")
+    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    def test_preserves_backup_on_max_retries_exceeded(
+        self,
+        mock_get_connection: MagicMock,
+        mock_sleep: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that backup file is preserved when max retries exceeded."""
+        # Create backup file
+        config = {"host": "localhost", "database": "test_db"}
+        backup_path = _get_backup_file_path(config, backup_dir=tmp_path)
+        settings = VatValidationSettings(vies_settings={1: True})
+        _save_settings_to_backup(settings, backup_path)
+
+        # Setup mock - always fail with 503
+        mock_company_obj = MagicMock()
+        mock_company_obj.write.side_effect = Exception("503 Service Unavailable")
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value = mock_company_obj
+        mock_get_connection.return_value = mock_connection
+
+        # Act
+        result = restore_vat_validation_settings(
+            config,
+            settings,
+            backup_dir=tmp_path,
+            max_retries=2,
+            initial_delay=0.01,
+        )
+
+        # Assert
+        assert result is False
+        assert backup_path.exists()  # Backup should be preserved
+
+    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    def test_no_retry_on_permanent_error(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test that permanent errors do not trigger retries."""
+        config = {"host": "localhost", "database": "test_db"}
+        settings = VatValidationSettings(vies_settings={1: True})
+
+        # Setup mock - fail with permanent error
+        mock_company_obj = MagicMock()
+        mock_company_obj.write.side_effect = Exception("Access denied")
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value = mock_company_obj
+        mock_get_connection.return_value = mock_connection
+
+        # Act
+        result = restore_vat_validation_settings(
+            config, settings, backup_dir=tmp_path
+        )
+
+        # Assert - should fail immediately without retries
+        assert result is False
+        assert mock_company_obj.write.call_count == 1
+
+
+class TestRestoreFromBackup:
+    """Tests for restore_vat_settings_from_backup function."""
+
+    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    def test_restores_from_backup_file(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test manual restoration from backup file."""
+        # Create backup file
+        config = {"host": "localhost", "database": "test_db"}
+        backup_path = _get_backup_file_path(config, backup_dir=tmp_path)
+        settings = VatValidationSettings(
+            vies_settings={1: True, 2: True},
+            stdnum_settings={"base_vat.vat_check_on_save": "True"},
+        )
+        _save_settings_to_backup(settings, backup_path)
+
+        # Setup mock
+        mock_company_obj = MagicMock()
+        mock_param_obj = MagicMock()
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = lambda m: (
+            mock_company_obj if m == "res.company" else mock_param_obj
+        )
+        mock_get_connection.return_value = mock_connection
+
+        # Act
+        result = restore_vat_settings_from_backup(config, backup_dir=tmp_path)
+
+        # Assert
+        assert result is True
+        assert mock_company_obj.write.call_count == 2  # Two companies
+        assert not backup_path.exists()  # Backup deleted on success
+
+    def test_returns_true_when_no_backup_exists(self, tmp_path: Path) -> None:
+        """Test that no-op returns True when no backup exists."""
+        config = {"host": "localhost", "database": "test_db"}
+
+        result = restore_vat_settings_from_backup(config, backup_dir=tmp_path)
+
+        assert result is True
+
+
+class TestCheckBackupStatus:
+    """Tests for check_vat_settings_backup_status function."""
+
+    def test_status_when_no_backup_exists(self, tmp_path: Path) -> None:
+        """Test status check when no backup file exists."""
+        config = {"host": "localhost", "database": "test_db"}
+
+        status = check_vat_settings_backup_status(config, backup_dir=tmp_path)
+
+        assert status["exists"] is False
+        assert "path" in status
+
+    def test_status_when_backup_exists(self, tmp_path: Path) -> None:
+        """Test status check when backup file exists."""
+        config = {"host": "localhost", "database": "test_db"}
+        backup_path = _get_backup_file_path(config, backup_dir=tmp_path)
+        settings = VatValidationSettings(
+            vies_settings={1: True, 2: True},
+            stdnum_settings={"param1": "value1"},
+            timestamp=time.time() - 3600,  # 1 hour ago
+        )
+        _save_settings_to_backup(settings, backup_path)
+
+        status = check_vat_settings_backup_status(config, backup_dir=tmp_path)
+
+        assert status["exists"] is True
+        assert status["vies_company_count"] == 2
+        assert status["stdnum_param_count"] == 1
+        assert 0.9 < status["age_hours"] < 1.1  # Approximately 1 hour

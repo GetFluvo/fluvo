@@ -444,3 +444,74 @@ for index, chunk_processor in split_processors.items():
         params={'model': 'product.product'}
     )
 ```
+
+---
+
+## VAT Validation Settings Recovery
+
+When importing contact data, the importer can temporarily disable VAT validation (VIES and stdnum checks) to prevent timeouts and performance issues. If the restoration of these settings fails (e.g., due to a 503 error or connection timeout), the settings may remain in a "disabled" state.
+
+To prevent settings from being permanently lost, the importer uses a **file-based backup system** that preserves the original settings across import runs.
+
+### How the Backup System Works
+
+1. **Before disabling**: Original VAT settings are saved to a JSON backup file
+2. **After import**: Settings are restored with automatic retry on transient errors
+3. **On successful restore**: The backup file is deleted
+4. **On failed restore**: The backup file is preserved for the next run
+
+**Backup location:** `~/.odoo-data-flow/vat_settings_backup/`
+
+Each database has its own backup file named: `vat_settings_{host}_{database}.json`
+
+### Automatic Recovery
+
+If a backup file exists when starting a new import, the importer recognizes that a previous restoration failed. It will:
+
+1. Use the backed-up settings (the correct original values) instead of polling the database
+2. Attempt to restore these settings after the import completes
+3. Retry up to 5 times with exponential backoff (2s, 4s, 8s, 16s, 32s) for transient errors
+
+### Manual Recovery
+
+If you notice that VAT validation is stuck in a "disabled" state, you can manually check and restore settings:
+
+**Check if a backup exists:**
+
+```python
+from odoo_data_flow.lib.actions.vies_manager import check_vat_settings_backup_status
+
+status = check_vat_settings_backup_status("conf/connection.conf")
+
+if status["exists"]:
+    print(f"Backup found at: {status['path']}")
+    print(f"Age: {status['age_hours']:.1f} hours")
+    print(f"Companies with VIES settings: {status['vies_company_count']}")
+    print(f"Stdnum parameters: {status['stdnum_param_count']}")
+else:
+    print("No backup file found - settings were restored successfully")
+```
+
+**Restore settings from backup:**
+
+```python
+from odoo_data_flow.lib.actions.vies_manager import restore_vat_settings_from_backup
+
+success = restore_vat_settings_from_backup("conf/connection.conf")
+
+if success:
+    print("VAT validation settings restored successfully")
+else:
+    print("Restoration failed - check logs for details")
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Solution |
+|---------|-------|----------|
+| Backup file keeps reappearing | Restoration fails repeatedly | Check Odoo server logs for errors; verify connection settings |
+| VIES check stays disabled | Restoration failed, no backup | Manually enable VIES in Odoo Settings > General Settings |
+| Old backup file (days old) | Multiple failed restorations | Use `restore_vat_settings_from_backup()` to manually restore |
+
+!!! warning "Don't delete the backup file manually"
+    The backup file contains the original VAT validation settings. If you delete it while settings are in the wrong state, the original values will be lost. Always use `restore_vat_settings_from_backup()` to properly restore and clean up.

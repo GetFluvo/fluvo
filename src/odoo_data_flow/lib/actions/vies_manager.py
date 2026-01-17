@@ -18,19 +18,68 @@ This module allows:
 - Batch validation of VAT numbers with notifications
 - Local VAT validation (can be replaced with Rust implementation for speed)
 
+File-based Backup for Settings Recovery
+---------------------------------------
+VAT validation settings are backed up to a JSON file before being disabled.
+This ensures that if restoration fails (e.g., due to a 503 error), the original
+settings are preserved and will be used on the next import run.
+
+**Backup location:** ``~/.odoo-data-flow/vat_settings_backup/``
+
+Each database has its own backup file: ``vat_settings_{host}_{database}.json``
+
+**Automatic recovery:** If a backup file exists when starting a new import,
+it indicates that a previous restoration failed. The import will use the
+backed-up settings instead of polling the database (which may have incorrect
+"disabled" values).
+
+**Manual restoration:** If you notice VAT validation is stuck in "disabled"
+state, you can manually restore settings::
+
+    from odoo_data_flow.lib.actions.vies_manager import (
+        restore_vat_settings_from_backup,
+        check_vat_settings_backup_status,
+    )
+
+    # Check if a backup exists
+    status = check_vat_settings_backup_status("odoo.conf")
+    if status["exists"]:
+        print(f"Backup found, age: {status['age_hours']:.1f} hours")
+        print(f"Companies: {status['vies_company_count']}")
+
+        # Restore settings from backup
+        success = restore_vat_settings_from_backup("odoo.conf")
+        if success:
+            print("Settings restored successfully")
+
+**Retry mechanism:** Restoration automatically retries up to 5 times with
+exponential backoff (2s, 4s, 8s, 16s, 32s) for transient errors like 503
+Service Unavailable, connection timeouts, etc.
+
 For high-performance VAT validation, consider using a Rust-based validator:
 - The `vat_validator` crate provides fast EU VAT validation
 - Can be integrated via PyO3 bindings for Python interop
 - See: https://crates.io/crates/vat
 """
 
+import json
 import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Optional, Union
 
 from ...lib import conf_lib
 from ...logging_config import log
+
+# Default backup file location (in user's home directory)
+DEFAULT_VAT_SETTINGS_BACKUP_DIR = Path.home() / ".odoo-data-flow" / "vat_settings_backup"
+
+# Retry configuration for restoration
+RESTORE_MAX_RETRIES = 5
+RESTORE_INITIAL_DELAY_SECONDS = 2.0
+RESTORE_MAX_DELAY_SECONDS = 60.0
+RESTORE_BACKOFF_MULTIPLIER = 2.0
 
 # EU country codes for VAT validation
 EU_COUNTRY_CODES = {
@@ -125,9 +174,17 @@ class VatValidationSettings:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "VatValidationSettings":
-        """Create from dictionary."""
+        """Create from dictionary.
+
+        Note: JSON serialization converts integer keys to strings, so we
+        convert them back to integers for vies_settings.
+        """
+        # Convert string keys back to integers for vies_settings
+        raw_vies = data.get("vies_settings", {})
+        vies_settings = {int(k): v for k, v in raw_vies.items()}
+
         return cls(
-            vies_settings=data.get("vies_settings", {}),
+            vies_settings=vies_settings,
             stdnum_settings=data.get("stdnum_settings", {}),
             timestamp=data.get("timestamp", time.time()),
         )
@@ -135,6 +192,146 @@ class VatValidationSettings:
 
 # Backwards compatibility alias
 ViesSettings = VatValidationSettings
+
+
+def _get_backup_file_path(
+    config: Union[str, dict[str, Any]],
+    backup_dir: Optional[Path] = None,
+) -> Path:
+    """Get the backup file path for VAT settings.
+
+    The backup file is named based on the database name to support
+    multiple Odoo instances.
+
+    Args:
+        config: Path to connection config file or config dict.
+        backup_dir: Optional custom backup directory.
+
+    Returns:
+        Path to the backup file.
+    """
+    if backup_dir is None:
+        backup_dir = DEFAULT_VAT_SETTINGS_BACKUP_DIR
+
+    # Extract database name from config for unique backup file
+    try:
+        if isinstance(config, dict):
+            db_name = config.get("database", "unknown")
+            host = config.get("host", "localhost")
+        else:
+            # Load config file to get database name
+            import yaml
+
+            with open(config) as f:
+                config_data = yaml.safe_load(f)
+            db_name = config_data.get("database", "unknown")
+            host = config_data.get("host", "localhost")
+
+        # Sanitize for filename
+        safe_host = re.sub(r"[^\w\-.]", "_", host)
+        safe_db = re.sub(r"[^\w\-.]", "_", db_name)
+        filename = f"vat_settings_{safe_host}_{safe_db}.json"
+    except Exception as e:
+        log.debug(f"Could not extract db name from config: {e}")
+        filename = "vat_settings_backup.json"
+
+    return backup_dir / filename
+
+
+def _save_settings_to_backup(
+    settings: VatValidationSettings,
+    backup_path: Path,
+) -> bool:
+    """Save VAT settings to a backup file.
+
+    Args:
+        settings: The settings to save.
+        backup_path: Path to the backup file.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    try:
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(backup_path, "w") as f:
+            json.dump(settings.to_dict(), f, indent=2)
+        log.info(f"Saved VAT settings backup to {backup_path}")
+        return True
+    except Exception as e:
+        log.error(f"Failed to save VAT settings backup: {e}")
+        return False
+
+
+def _load_settings_from_backup(
+    backup_path: Path,
+) -> Optional[VatValidationSettings]:
+    """Load VAT settings from a backup file.
+
+    Args:
+        backup_path: Path to the backup file.
+
+    Returns:
+        VatValidationSettings if file exists and is valid, None otherwise.
+    """
+    if not backup_path.exists():
+        return None
+
+    try:
+        with open(backup_path) as f:
+            data = json.load(f)
+        settings = VatValidationSettings.from_dict(data)
+        log.info(f"Loaded VAT settings from backup file {backup_path}")
+        return settings
+    except Exception as e:
+        log.error(f"Failed to load VAT settings from backup: {e}")
+        return None
+
+
+def _delete_backup_file(backup_path: Path) -> bool:
+    """Delete the backup file after successful restoration.
+
+    Args:
+        backup_path: Path to the backup file.
+
+    Returns:
+        True if deleted or didn't exist, False on error.
+    """
+    if not backup_path.exists():
+        return True
+
+    try:
+        backup_path.unlink()
+        log.info(f"Deleted VAT settings backup file {backup_path}")
+        return True
+    except Exception as e:
+        log.error(f"Failed to delete backup file: {e}")
+        return False
+
+
+def _is_retriable_error(error: Exception) -> bool:
+    """Check if an error is retriable (e.g., 503 Service Unavailable).
+
+    Args:
+        error: The exception to check.
+
+    Returns:
+        True if the error is retriable.
+    """
+    error_str = str(error).lower()
+    retriable_patterns = [
+        "503",
+        "service unavailable",
+        "temporarily unavailable",
+        "connection refused",
+        "connection reset",
+        "timeout",
+        "timed out",
+        "network unreachable",
+        "bad gateway",
+        "502",
+        "504",
+    ]
+    return any(pattern in error_str for pattern in retriable_patterns)
 
 
 def validate_vat_format(vat: str) -> tuple[bool, Optional[str]]:
@@ -410,8 +607,13 @@ def disable_vat_validation(  # noqa: C901
     disable_vies: bool = True,
     disable_stdnum: bool = True,
     save_settings: bool = True,
+    backup_dir: Optional[Path] = None,
 ) -> Optional[VatValidationSettings]:
     """Disable VAT validation (VIES and/or stdnum) for all or specified companies.
+
+    Uses file-based backup to preserve original settings across runs. If a previous
+    restoration failed (backup file exists), the original settings are loaded from
+    the backup file instead of polling the database (which may have incorrect values).
 
     Args:
         config: Path to connection config file or config dict.
@@ -419,6 +621,7 @@ def disable_vat_validation(  # noqa: C901
         disable_vies: Whether to disable VIES online check.
         disable_stdnum: Whether to disable stdnum format validation.
         save_settings: If True, returns the original settings for later restore.
+        backup_dir: Optional custom backup directory for settings file.
 
     Returns:
         VatValidationSettings with original settings if save_settings=True, else None.
@@ -427,13 +630,33 @@ def disable_vat_validation(  # noqa: C901
 
     # First, save current settings if requested
     original_settings = None
+    backup_path = _get_backup_file_path(config, backup_dir)
+
     if save_settings:
-        original_settings = get_vat_validation_settings(
-            config, company_ids, include_stdnum=disable_stdnum
-        )
-        if original_settings is None:
-            log.error("Failed to save original VAT validation settings, aborting")
-            return None
+        # Check if backup file exists (indicates previous restoration failed)
+        existing_backup = _load_settings_from_backup(backup_path)
+
+        if existing_backup is not None:
+            log.warning(
+                "Found existing VAT settings backup file - previous restoration may "
+                "have failed. Using backed-up settings as original values."
+            )
+            original_settings = existing_backup
+        else:
+            # No backup exists - poll database for current settings
+            original_settings = get_vat_validation_settings(
+                config, company_ids, include_stdnum=disable_stdnum
+            )
+            if original_settings is None:
+                log.error("Failed to save original VAT validation settings, aborting")
+                return None
+
+            # Save settings to backup file
+            if not _save_settings_to_backup(original_settings, backup_path):
+                log.warning(
+                    "Could not save settings to backup file. "
+                    "If restoration fails, settings may be lost."
+                )
 
     try:
         if isinstance(config, dict):
@@ -514,12 +737,25 @@ def disable_vies_check(
 def restore_vat_validation_settings(  # noqa: C901
     config: Union[str, dict[str, Any]],
     settings: VatValidationSettings,
+    backup_dir: Optional[Path] = None,
+    max_retries: int = RESTORE_MAX_RETRIES,
+    initial_delay: float = RESTORE_INITIAL_DELAY_SECONDS,
+    max_delay: float = RESTORE_MAX_DELAY_SECONDS,
 ) -> bool:
     """Restore VAT validation settings to their original state.
+
+    Includes automatic retries with exponential backoff for transient errors
+    (503 Service Unavailable, connection issues, etc.). On successful restoration,
+    the backup file is deleted. On failure after all retries, the backup file is
+    preserved so the next import run can use the correct original settings.
 
     Args:
         config: Path to connection config file or config dict.
         settings: The VatValidationSettings object with original settings to restore.
+        backup_dir: Optional custom backup directory for settings file.
+        max_retries: Maximum number of retry attempts (default: 5).
+        initial_delay: Initial delay between retries in seconds (default: 2.0).
+        max_delay: Maximum delay between retries in seconds (default: 60.0).
 
     Returns:
         True if successful, False otherwise.
@@ -528,61 +764,127 @@ def restore_vat_validation_settings(  # noqa: C901
 
     if not settings.vies_settings and not settings.stdnum_settings:
         log.warning("No settings to restore")
+        # Still delete backup file if it exists
+        backup_path = _get_backup_file_path(config, backup_dir)
+        _delete_backup_file(backup_path)
         return True
 
-    try:
-        if isinstance(config, dict):
-            connection: Any = conf_lib.get_connection_from_dict(config)
-        else:
-            connection = conf_lib.get_connection_from_config(config_file=config)
-    except Exception as e:
-        log.error(f"Failed to connect to Odoo: {e}")
-        return False
+    backup_path = _get_backup_file_path(config, backup_dir)
+    attempt = 0
+    delay = initial_delay
 
-    success = True
+    while attempt <= max_retries:
+        attempt += 1
+        success = True
+        retriable_error_occurred = False
+        last_error: Optional[Exception] = None
 
-    try:
-        # Restore VIES settings on res.company
-        if settings.vies_settings:
-            company_obj = connection.get_model("res.company")
-            restored_count = 0
-            for company_id, vies_enabled in settings.vies_settings.items():
-                try:
-                    company_obj.write([company_id], {"vat_check_vies": vies_enabled})
-                    status = "enabled" if vies_enabled else "disabled"
-                    log.debug(
-                        f"Restored VIES check to {status} for company ID {company_id}"
-                    )
-                    restored_count += 1
-                except Exception as e:
-                    log.error(
-                        f"Failed to restore VIES for company ID {company_id}: {e}"
-                    )
-                    success = False
+        try:
+            if isinstance(config, dict):
+                connection: Any = conf_lib.get_connection_from_dict(config)
+            else:
+                connection = conf_lib.get_connection_from_config(config_file=config)
+        except Exception as e:
+            log.error(f"Failed to connect to Odoo (attempt {attempt}/{max_retries + 1}): {e}")
+            if _is_retriable_error(e) and attempt <= max_retries:
+                retriable_error_occurred = True
+                last_error = e
+            else:
+                return False
 
-            log.info(f"Restored VIES settings for {restored_count} companies")
-
-        # Restore stdnum settings via ir.config_parameter
-        if settings.stdnum_settings:
+        if not retriable_error_occurred:
             try:
-                param_obj = connection.get_model("ir.config_parameter")
-                for param_name, param_value in settings.stdnum_settings.items():
+                # Restore VIES settings on res.company
+                if settings.vies_settings:
+                    company_obj = connection.get_model("res.company")
+                    restored_count = 0
+                    for company_id, vies_enabled in settings.vies_settings.items():
+                        try:
+                            company_obj.write([company_id], {"vat_check_vies": vies_enabled})
+                            status = "enabled" if vies_enabled else "disabled"
+                            log.debug(
+                                f"Restored VIES check to {status} for company ID {company_id}"
+                            )
+                            restored_count += 1
+                        except Exception as e:
+                            log.error(
+                                f"Failed to restore VIES for company ID {company_id}: {e}"
+                            )
+                            if _is_retriable_error(e):
+                                retriable_error_occurred = True
+                                last_error = e
+                                break
+                            success = False
+
+                    if not retriable_error_occurred:
+                        log.info(f"Restored VIES settings for {restored_count} companies")
+
+                # Restore stdnum settings via ir.config_parameter
+                if settings.stdnum_settings and not retriable_error_occurred:
                     try:
-                        param_obj.set_param(param_name, param_value)
-                        log.debug(f"Restored system param {param_name} = {param_value}")
+                        param_obj = connection.get_model("ir.config_parameter")
+                        for param_name, param_value in settings.stdnum_settings.items():
+                            try:
+                                param_obj.set_param(param_name, param_value)
+                                log.debug(f"Restored system param {param_name} = {param_value}")
+                            except Exception as e:
+                                log.error(f"Failed to restore {param_name}: {e}")
+                                if _is_retriable_error(e):
+                                    retriable_error_occurred = True
+                                    last_error = e
+                                    break
+                                success = False
+
+                        if not retriable_error_occurred:
+                            log.info(f"Restored {len(settings.stdnum_settings)} stdnum parameters")
                     except Exception as e:
-                        log.error(f"Failed to restore {param_name}: {e}")
-                        success = False
-                log.info(f"Restored {len(settings.stdnum_settings)} stdnum parameters")
+                        log.warning(f"Could not restore stdnum settings: {e}")
+                        if _is_retriable_error(e):
+                            retriable_error_occurred = True
+                            last_error = e
+                        else:
+                            success = False
+
             except Exception as e:
-                log.warning(f"Could not restore stdnum settings: {e}")
-                success = False
+                log.error(f"Error restoring VAT validation settings: {e}")
+                if _is_retriable_error(e):
+                    retriable_error_occurred = True
+                    last_error = e
+                else:
+                    return False
 
-        return success
+        # Handle retry logic
+        if retriable_error_occurred and attempt <= max_retries:
+            log.warning(
+                f"Retriable error during VAT settings restoration: {last_error}. "
+                f"Retrying in {delay:.1f}s (attempt {attempt}/{max_retries + 1})..."
+            )
+            time.sleep(delay)
+            # Exponential backoff with cap
+            delay = min(delay * RESTORE_BACKOFF_MULTIPLIER, max_delay)
+            continue
+        elif retriable_error_occurred:
+            log.error(
+                f"Failed to restore VAT settings after {max_retries + 1} attempts. "
+                f"Backup file preserved at {backup_path} for next import run."
+            )
+            return False
 
-    except Exception as e:
-        log.error(f"Error restoring VAT validation settings: {e}")
-        return False
+        # Success path - delete backup file
+        if success:
+            log.info("VAT validation settings restored successfully")
+            _delete_backup_file(backup_path)
+            return True
+        else:
+            # Partial failure (non-retriable) - keep backup file
+            log.warning(
+                "Some VAT settings could not be restored. "
+                f"Backup file preserved at {backup_path} for manual recovery."
+            )
+            return False
+
+    # Should not reach here, but handle edge case
+    return False
 
 
 # Backwards compatibility
@@ -850,15 +1152,21 @@ def run_import_with_vat_validation_disabled(
     disable_vies: bool = True,
     disable_stdnum: bool = True,
     validate_vat_locally: bool = False,
+    backup_dir: Optional[Path] = None,
 ) -> Any:
     """Run an import function with VAT validation temporarily disabled.
 
     This is a convenience wrapper that:
-    1. Saves current VAT validation settings (VIES and/or stdnum)
+    1. Saves current VAT validation settings (VIES and/or stdnum) to backup file
     2. Disables validation for all/specified companies
     3. Optionally validates VAT numbers locally before import
     4. Runs the import function
-    5. Restores original settings
+    5. Restores original settings with automatic retry on transient errors
+    6. Deletes backup file on successful restoration
+
+    If restoration fails, the backup file is preserved so the next import run
+    will use the correct original settings instead of the (possibly incorrect)
+    database values.
 
     Args:
         config: Path to connection config file or config dict.
@@ -869,6 +1177,7 @@ def run_import_with_vat_validation_disabled(
         disable_stdnum: Whether to disable stdnum format validation.
         validate_vat_locally: If True, validates VAT numbers locally before import
             using the fast regex-based validator (or custom Rust validator).
+        backup_dir: Optional custom backup directory for settings file.
 
     Returns:
         The result of import_func.
@@ -887,6 +1196,7 @@ def run_import_with_vat_validation_disabled(
         disable_vies=disable_vies,
         disable_stdnum=disable_stdnum,
         save_settings=True,
+        backup_dir=backup_dir,
     )
 
     if original_settings is None:
@@ -909,7 +1219,7 @@ def run_import_with_vat_validation_disabled(
         # Step 4: Always restore settings, even if import fails
         if original_settings:
             log.info("Import complete, restoring VAT validation settings...")
-            restore_vat_validation_settings(config, original_settings)
+            restore_vat_validation_settings(config, original_settings, backup_dir=backup_dir)
         else:
             log.warning("No original settings to restore")
 
@@ -918,3 +1228,77 @@ def run_import_with_vat_validation_disabled(
 
 # Backwards compatibility
 run_import_with_vies_disabled = run_import_with_vat_validation_disabled
+
+
+def restore_vat_settings_from_backup(
+    config: Union[str, dict[str, Any]],
+    backup_dir: Optional[Path] = None,
+) -> bool:
+    """Manually restore VAT settings from backup file.
+
+    Use this function to recover from a failed restoration. It reads the
+    original settings from the backup file and attempts to restore them.
+
+    Args:
+        config: Path to connection config file or config dict.
+        backup_dir: Optional custom backup directory for settings file.
+
+    Returns:
+        True if settings were restored successfully (or no backup exists),
+        False otherwise.
+    """
+    log.info("--- Manual VAT Settings Restoration from Backup ---")
+
+    backup_path = _get_backup_file_path(config, backup_dir)
+
+    if not backup_path.exists():
+        log.info(f"No backup file found at {backup_path} - nothing to restore")
+        return True
+
+    settings = _load_settings_from_backup(backup_path)
+    if settings is None:
+        log.error(f"Failed to load settings from {backup_path}")
+        return False
+
+    log.info(f"Loaded backup from {backup_path} (created: {time.ctime(settings.timestamp)})")
+    log.info(f"  VIES settings for {len(settings.vies_settings)} companies")
+    log.info(f"  {len(settings.stdnum_settings)} stdnum parameters")
+
+    return restore_vat_validation_settings(config, settings, backup_dir=backup_dir)
+
+
+def check_vat_settings_backup_status(
+    config: Union[str, dict[str, Any]],
+    backup_dir: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Check if a VAT settings backup file exists and return its status.
+
+    Args:
+        config: Path to connection config file or config dict.
+        backup_dir: Optional custom backup directory for settings file.
+
+    Returns:
+        Dictionary with backup status information:
+        - exists: bool - Whether backup file exists
+        - path: str - Path to backup file
+        - timestamp: float - Backup creation timestamp (if exists)
+        - age_hours: float - Age of backup in hours (if exists)
+        - vies_company_count: int - Number of companies with VIES settings (if exists)
+        - stdnum_param_count: int - Number of stdnum parameters (if exists)
+    """
+    backup_path = _get_backup_file_path(config, backup_dir)
+
+    status: dict[str, Any] = {
+        "exists": backup_path.exists(),
+        "path": str(backup_path),
+    }
+
+    if status["exists"]:
+        settings = _load_settings_from_backup(backup_path)
+        if settings:
+            status["timestamp"] = settings.timestamp
+            status["age_hours"] = (time.time() - settings.timestamp) / 3600
+            status["vies_company_count"] = len(settings.vies_settings)
+            status["stdnum_param_count"] = len(settings.stdnum_settings)
+
+    return status

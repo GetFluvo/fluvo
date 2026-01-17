@@ -248,3 +248,36 @@ To check for the second case, look at the console output when you run the export
 
 `WARNING  Field 'your_field_name' (base: 'your_field_name') not found on model 'res.partner'. An empty column will be created.`
 If you see this warning, correct the field name in your command and run the export again.
+
+## VAT validation is stuck in "disabled" state after an import
+
+When importing contact data, the importer temporarily disables VAT validation (VIES checks) to prevent timeouts. If the restoration fails (e.g., due to a 503 error), the settings may remain disabled.
+
+**Symptoms:**
+- VIES VAT validation no longer runs when saving contacts
+- You see a backup file at `~/.odoo-data-flow/vat_settings_backup/`
+
+**Solution:**
+
+The importer uses a file-based backup system to preserve original settings. You can manually restore them:
+
+```python
+from odoo_data_flow.lib.actions.vies_manager import restore_vat_settings_from_backup
+
+success = restore_vat_settings_from_backup("conf/connection.conf")
+if success:
+    print("Settings restored!")
+```
+
+Or check the backup status first:
+
+```python
+from odoo_data_flow.lib.actions.vies_manager import check_vat_settings_backup_status
+
+status = check_vat_settings_backup_status("conf/connection.conf")
+print(f"Backup exists: {status['exists']}")
+if status['exists']:
+    print(f"Age: {status['age_hours']:.1f} hours")
+```
+
+> For more details, see [VAT Validation Settings Recovery](guides/advanced_usage.md#vat-validation-settings-recovery) in the Advanced Usage guide.
