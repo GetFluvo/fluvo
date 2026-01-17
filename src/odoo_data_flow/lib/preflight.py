@@ -533,6 +533,47 @@ def deferral_and_strategy_check(
     return True
 
 
+def _extract_ids_from_csv(
+    filename: str,
+    header: list[str],
+    separator: str = ";",
+    encoding: str = "utf-8",
+) -> set[str]:
+    """Extract all IDs defined in the 'id' column of the CSV.
+
+    These are records that will be created by this import, so references
+    to them should not be flagged as missing.
+
+    Returns set of external IDs defined in the file.
+    """
+    defined_ids: set[str] = set()
+
+    # Find the 'id' column
+    id_index = -1
+    for i, col in enumerate(header):
+        if col.lower() == "id":
+            id_index = i
+            break
+
+    if id_index < 0:
+        return defined_ids
+
+    try:
+        with open(filename, encoding=encoding, newline="") as f:
+            reader = csv.reader(f, delimiter=separator)
+            next(reader)  # Skip header
+
+            for row in reader:
+                if id_index < len(row):
+                    value = row[id_index].strip()
+                    if value:
+                        defined_ids.add(value)
+    except Exception as e:
+        log.warning(f"Error extracting IDs from CSV: {e}")
+
+    return defined_ids
+
+
 def _extract_references_from_csv(  # noqa: C901
     filename: str,
     header: list[str],
@@ -769,6 +810,10 @@ def reference_check(
         log.info("No relational references found to check.")
         return True
 
+    # Extract IDs defined in this file (records being created)
+    # These should not be flagged as missing for self-referencing fields
+    defined_ids = _extract_ids_from_csv(filename, csv_header, separator, encoding)
+
     # Get connection for checking
     try:
         if isinstance(config, dict):
@@ -781,6 +826,19 @@ def reference_check(
 
     # Check which references exist
     missing = _check_references_exist(connection, references)
+
+    # Exclude self-references (IDs defined in this same file)
+    # This applies to the model being imported (e.g., parent_id on res.partner)
+    if model in missing and defined_ids:
+        for col in list(missing[model].keys()):
+            # Remove references that are defined in this file
+            missing[model][col] -= defined_ids
+            # If no missing refs left for this column, remove it
+            if not missing[model][col]:
+                del missing[model][col]
+        # If no missing columns left for this model, remove it
+        if not missing[model]:
+            del missing[model]
 
     if not missing:
         total_refs = sum(

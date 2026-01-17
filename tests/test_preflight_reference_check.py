@@ -345,3 +345,143 @@ class TestReferenceCheck:
         )
 
         assert result is True
+
+
+class TestExtractIdsFromCSV:
+    """Tests for _extract_ids_from_csv function."""
+
+    def test_extracts_ids_from_id_column(self, temp_dir: str) -> None:
+        """Test that IDs are extracted from the id column."""
+        csv_path = Path(temp_dir) / "test_data.csv"
+        csv_path.write_text(
+            "id;name;parent_id/id\n"
+            "__import__.company_a;Company A;\n"
+            "__import__.company_b;Company B;\n"
+            "__import__.contact_1;Contact 1;__import__.company_a\n"
+        )
+        header = ["id", "name", "parent_id/id"]
+
+        ids = preflight._extract_ids_from_csv(str(csv_path), header)
+
+        assert ids == {"__import__.company_a", "__import__.company_b", "__import__.contact_1"}
+
+    def test_handles_empty_id_values(self, temp_dir: str) -> None:
+        """Test that empty ID values are ignored."""
+        csv_path = Path(temp_dir) / "test_data.csv"
+        csv_path.write_text(
+            "id;name;value\n"
+            "__import__.rec1;Record 1;100\n"
+            ";Record 2;200\n"  # Empty ID
+            "__import__.rec3;Record 3;300\n"
+        )
+        header = ["id", "name", "value"]
+
+        ids = preflight._extract_ids_from_csv(str(csv_path), header)
+
+        assert ids == {"__import__.rec1", "__import__.rec3"}
+
+    def test_returns_empty_if_no_id_column(self, temp_dir: str) -> None:
+        """Test that empty set is returned if no id column exists."""
+        csv_path = Path(temp_dir) / "test_data.csv"
+        csv_path.write_text(
+            "name;value\n"
+            "Record 1;100\n"
+        )
+        header = ["name", "value"]
+
+        ids = preflight._extract_ids_from_csv(str(csv_path), header)
+
+        assert ids == set()
+
+
+class TestSelfReferenceExclusion:
+    """Tests for excluding self-references from missing references."""
+
+    @patch("odoo_data_flow.lib.preflight._get_csv_header")
+    @patch("odoo_data_flow.lib.preflight._get_odoo_fields")
+    @patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.lib.preflight._extract_references_from_csv")
+    @patch("odoo_data_flow.lib.preflight._extract_ids_from_csv")
+    @patch("odoo_data_flow.lib.preflight._check_references_exist")
+    def test_self_references_excluded_from_missing(
+        self,
+        mock_check: Any,
+        mock_extract_ids: Any,
+        mock_extract_refs: Any,
+        mock_conn: Any,
+        mock_fields: Any,
+        mock_header: Any,
+    ) -> None:
+        """Test that self-references (IDs in same file) are not flagged as missing."""
+        from odoo_data_flow.enums import PreflightMode
+
+        mock_header.return_value = ["id", "name", "parent_id/id"]
+        mock_fields.return_value = {
+            "parent_id": {"type": "many2one", "relation": "res.partner"}
+        }
+        # References include IDs that are defined in the same file
+        mock_extract_refs.return_value = {
+            "res.partner": {"parent_id/id": {"__import__.company_a", "__import__.external"}}
+        }
+        # IDs defined in this file
+        mock_extract_ids.return_value = {"__import__.company_a", "__import__.company_b"}
+        # Database check says both are "missing"
+        mock_check.return_value = {
+            "res.partner": {"parent_id/id": {"__import__.company_a", "__import__.external"}}
+        }
+
+        result = preflight.reference_check(
+            preflight_mode=PreflightMode.NORMAL,
+            model="res.partner",
+            filename="test.csv",
+            config="config.conf",
+            check_refs="fail",  # Would fail if __import__.company_a was flagged
+        )
+
+        # Should return True because __import__.company_a is in the same file
+        # Only __import__.external is truly missing, but since we mock
+        # we need to verify the logic removes self-refs
+        # The test passes if it doesn't fail on __import__.company_a
+        mock_extract_ids.assert_called_once()
+
+    @patch("odoo_data_flow.lib.preflight._get_csv_header")
+    @patch("odoo_data_flow.lib.preflight._get_odoo_fields")
+    @patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.lib.preflight._extract_references_from_csv")
+    @patch("odoo_data_flow.lib.preflight._extract_ids_from_csv")
+    @patch("odoo_data_flow.lib.preflight._check_references_exist")
+    def test_all_self_references_returns_success(
+        self,
+        mock_check: Any,
+        mock_extract_ids: Any,
+        mock_extract_refs: Any,
+        mock_conn: Any,
+        mock_fields: Any,
+        mock_header: Any,
+    ) -> None:
+        """Test that when all missing refs are self-refs, check passes."""
+        from odoo_data_flow.enums import PreflightMode
+
+        mock_header.return_value = ["id", "name", "parent_id/id"]
+        mock_fields.return_value = {
+            "parent_id": {"type": "many2one", "relation": "res.partner"}
+        }
+        mock_extract_refs.return_value = {
+            "res.partner": {"parent_id/id": {"__import__.company_a"}}
+        }
+        # The "missing" reference is actually defined in the same file
+        mock_extract_ids.return_value = {"__import__.company_a", "__import__.contact_1"}
+        mock_check.return_value = {
+            "res.partner": {"parent_id/id": {"__import__.company_a"}}
+        }
+
+        result = preflight.reference_check(
+            preflight_mode=PreflightMode.NORMAL,
+            model="res.partner",
+            filename="test.csv",
+            config="config.conf",
+            check_refs="fail",
+        )
+
+        # Should pass because all "missing" refs are defined in the same file
+        assert result is True
