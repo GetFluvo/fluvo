@@ -15,6 +15,7 @@ from odoo_data_flow.import_threaded import (
     _extract_per_row_errors,
     _filter_ignored_columns,
     _format_odoo_error,
+    _load_batch_with_binary_fallback,
     _orchestrate_pass_1,
     _orchestrate_pass_2,
     _read_data_file,
@@ -250,16 +251,17 @@ class TestExecuteLoadBatch:
             "Reducing chunk size to 2."
         )
 
-    @patch("odoo_data_flow.import_threaded._load_records_individually")
+    @patch("odoo_data_flow.import_threaded._load_batch_with_binary_fallback")
     def test_batch_falls_back_for_non_scalable_error(
-        self, mock_load_individually: MagicMock
+        self, mock_binary_fallback: MagicMock
     ) -> None:
-        """Verify fallback to single-record load for regular errors."""
+        """Verify fallback to binary search for regular errors."""
         mock_model = MagicMock()
         mock_model.load.side_effect = [ValueError("Invalid field value")]
-        mock_load_individually.return_value = {
+        mock_binary_fallback.return_value = {
             "id_map": {"rec1": 1},
             "failed_lines": [["rec2", "B", "Error"]],
+            "success": False,
         }
         mock_progress = MagicMock()
         thread_state = {
@@ -277,7 +279,7 @@ class TestExecuteLoadBatch:
         assert result["id_map"] == {"rec1": 1}
         assert len(result["failed_lines"]) == 1
         mock_model.load.assert_called_once()
-        mock_load_individually.assert_called_once()
+        mock_binary_fallback.assert_called_once()
 
 
 class TestBatchingHelpers:
@@ -1348,6 +1350,222 @@ class TestLoadRecordsIndividuallyEdgeCases:
 
         assert len(result["failed_lines"]) == 0
         assert result["id_map"]["rec1"] == 42
+
+
+class TestLoadBatchWithBinaryFallback:
+    """Tests for _load_batch_with_binary_fallback binary search optimization."""
+
+    def test_all_records_succeed(self) -> None:
+        """Test when all records load successfully - no binary search needed."""
+        mock_model = MagicMock()
+        mock_model.load.return_value = {"ids": [1, 2, 3, 4], "messages": []}
+        mock_connection = MagicMock()
+
+        batch_header = ["id", "name"]
+        batch_lines = [
+            ["rec1", "A"],
+            ["rec2", "B"],
+            ["rec3", "C"],
+            ["rec4", "D"],
+        ]
+
+        result = _load_batch_with_binary_fallback(
+            mock_model, mock_connection, batch_lines, batch_header, 0, {}, [], "res.partner"
+        )
+
+        assert result["success"] is True
+        assert len(result["failed_lines"]) == 0
+        assert len(result["id_map"]) == 4
+        # Should only call load once since all succeeded
+        assert mock_model.load.call_count == 1
+
+    def test_single_bad_record_found_via_binary_search(self) -> None:
+        """Test binary search efficiently finds single bad record in batch of 8."""
+        mock_model = MagicMock()
+        mock_connection = MagicMock()
+
+        # Track which records are being loaded to simulate targeted failures
+        def mock_load(header, lines, context=None):
+            # Check if the bad record (rec5) is in the batch
+            has_bad = any("rec5" in str(line) for line in lines)
+            if has_bad and len(lines) == 1:
+                # Single bad record - return failure
+                return {"ids": [], "messages": [{"message": "Validation error for rec5"}]}
+            elif has_bad:
+                # Batch contains bad record - raise exception to trigger split
+                raise ValueError("Batch contains invalid data")
+            else:
+                # All good records - return success
+                return {"ids": list(range(1, len(lines) + 1)), "messages": []}
+
+        mock_model.load.side_effect = mock_load
+
+        batch_header = ["id", "name"]
+        batch_lines = [
+            ["rec1", "A"],
+            ["rec2", "B"],
+            ["rec3", "C"],
+            ["rec4", "D"],
+            ["rec5", "BAD"],  # This one will fail
+            ["rec6", "F"],
+            ["rec7", "G"],
+            ["rec8", "H"],
+        ]
+
+        result = _load_batch_with_binary_fallback(
+            mock_model, mock_connection, batch_lines, batch_header, 0, {}, [], "res.partner"
+        )
+
+        # 7 records should succeed, 1 should fail
+        assert len(result["id_map"]) == 7
+        assert len(result["failed_lines"]) == 1
+        assert "rec5" in str(result["failed_lines"][0])
+        # Binary search should be more efficient than 8 individual calls
+        # Expected: ~log2(8) splits + successful batches < 8 calls
+        assert mock_model.load.call_count < 8
+
+    def test_multiple_bad_records_scattered(self) -> None:
+        """Test binary search handles multiple scattered bad records."""
+        mock_model = MagicMock()
+        mock_connection = MagicMock()
+
+        bad_records = {"rec2", "rec6"}
+
+        def mock_load(header, lines, context=None):
+            has_bad = any(line[0] in bad_records for line in lines)
+            if has_bad and len(lines) == 1:
+                return {"ids": [], "messages": [{"message": f"Validation error"}]}
+            elif has_bad:
+                raise ValueError("Batch contains invalid data")
+            else:
+                return {"ids": list(range(1, len(lines) + 1)), "messages": []}
+
+        mock_model.load.side_effect = mock_load
+
+        batch_header = ["id", "name"]
+        batch_lines = [
+            ["rec1", "A"],
+            ["rec2", "BAD1"],
+            ["rec3", "C"],
+            ["rec4", "D"],
+            ["rec5", "E"],
+            ["rec6", "BAD2"],
+            ["rec7", "G"],
+            ["rec8", "H"],
+        ]
+
+        result = _load_batch_with_binary_fallback(
+            mock_model, mock_connection, batch_lines, batch_header, 0, {}, [], "res.partner"
+        )
+
+        # 6 records should succeed, 2 should fail
+        assert len(result["id_map"]) == 6
+        assert len(result["failed_lines"]) == 2
+
+    def test_all_records_fail(self) -> None:
+        """Test worst case - all records fail (same efficiency as individual load)."""
+        mock_model = MagicMock()
+        mock_model.load.side_effect = ValueError("All records invalid")
+        mock_connection = MagicMock()
+
+        batch_header = ["id", "name"]
+        batch_lines = [
+            ["rec1", "BAD1"],
+            ["rec2", "BAD2"],
+            ["rec3", "BAD3"],
+            ["rec4", "BAD4"],
+        ]
+
+        result = _load_batch_with_binary_fallback(
+            mock_model, mock_connection, batch_lines, batch_header, 0, {}, [], "res.partner"
+        )
+
+        # All records should fail
+        assert len(result["id_map"]) == 0
+        assert len(result["failed_lines"]) == 4
+
+    def test_partial_success_from_load_response(self) -> None:
+        """Test handling partial success where load() returns mixed ids (some None)."""
+        mock_model = MagicMock()
+        mock_connection = MagicMock()
+
+        # First call returns partial success, subsequent calls succeed
+        call_count = [0]
+
+        def mock_load(header, lines, context=None):
+            call_count[0] += 1
+            if call_count[0] == 1 and len(lines) == 4:
+                # First batch: partial success - rec2 fails
+                return {"ids": [1, None, 3, 4], "messages": []}
+            elif len(lines) == 1 and lines[0][0] == "rec2":
+                # Individual load of bad record
+                return {"ids": [], "messages": [{"message": "rec2 validation failed"}]}
+            else:
+                return {"ids": list(range(1, len(lines) + 1)), "messages": []}
+
+        mock_model.load.side_effect = mock_load
+
+        batch_header = ["id", "name"]
+        batch_lines = [
+            ["rec1", "A"],
+            ["rec2", "BAD"],
+            ["rec3", "C"],
+            ["rec4", "D"],
+        ]
+
+        result = _load_batch_with_binary_fallback(
+            mock_model, mock_connection, batch_lines, batch_header, 0, {}, [], "res.partner"
+        )
+
+        # 3 succeed from first batch, 1 fails on retry
+        assert len(result["id_map"]) == 3
+        assert len(result["failed_lines"]) == 1
+
+    def test_single_record_base_case(self) -> None:
+        """Test base case with single record uses _load_records_individually."""
+        mock_model = MagicMock()
+        mock_model.load.return_value = {"ids": [42], "messages": []}
+        mock_connection = MagicMock()
+
+        batch_header = ["id", "name"]
+        batch_lines = [["rec1", "A"]]
+
+        result = _load_batch_with_binary_fallback(
+            mock_model, mock_connection, batch_lines, batch_header, 0, {}, [], "res.partner"
+        )
+
+        assert result["id_map"].get("rec1") == 42
+        assert len(result["failed_lines"]) == 0
+
+    def test_ignores_columns_correctly(self) -> None:
+        """Test that ignored columns are properly filtered during binary search."""
+        mock_model = MagicMock()
+        mock_model.load.return_value = {"ids": [1, 2], "messages": []}
+        mock_connection = MagicMock()
+
+        batch_header = ["id", "name", "ignored_field"]
+        batch_lines = [
+            ["rec1", "A", "ignore1"],
+            ["rec2", "B", "ignore2"],
+        ]
+
+        result = _load_batch_with_binary_fallback(
+            mock_model,
+            mock_connection,
+            batch_lines,
+            batch_header,
+            0,
+            {},
+            ["ignored_field"],
+            "res.partner",
+        )
+
+        # Check that load was called without the ignored column
+        call_args = mock_model.load.call_args
+        header_sent = call_args[0][0]
+        assert "ignored_field" not in header_sent
+        assert "id" in header_sent
+        assert "name" in header_sent
 
 
 class TestImportDataWithDictConfig:

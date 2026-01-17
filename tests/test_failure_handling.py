@@ -183,21 +183,36 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
 
     mock_model = MagicMock()
 
-    # Track call count and individual load IDs
+    # Track call count and successful load IDs
     load_call_count = [0]
-    individual_load_ids = []
+    successful_load_ids = []
 
     def load_side_effect(
         header: list[str], data: list[list[Any]], context: dict[str, Any] = None
     ) -> dict[str, Any]:
         load_call_count[0] += 1
-        # First call is the batch load - simulate failure
+        # First call is the batch load - simulate failure to trigger fallback
         if load_call_count[0] == 1:
             raise Exception("Load fails, forcing fallback")
-        # Subsequent calls are individual record loads
-        if data and data[0]:
-            individual_load_ids.append(data[0][0])
-        return {"ids": [100 + load_call_count[0]], "messages": []}
+
+        # Check for malformed records (like real Odoo would)
+        expected_cols = len(header)
+        ids = []
+        for row in data:
+            if len(row) < expected_cols:
+                # Malformed row - return failure
+                return {
+                    "ids": [],
+                    "messages": [
+                        {"message": f"Row has {len(row)} columns, but header has {expected_cols}"}
+                    ],
+                }
+            # Valid row
+            record_id = row[0] if row else ""
+            if record_id:
+                successful_load_ids.append(record_id)
+            ids.append(100 + load_call_count[0])
+        return {"ids": ids, "messages": []}
 
     mock_model.load.side_effect = load_side_effect
     mock_get_conn.return_value.get_model.return_value = mock_model
@@ -214,10 +229,10 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
 
     # 3. ASSERT
     assert result is True  # Process should succeed as good records exist
-    # Load should have been called for the two good records (ok_1 and ok_2)
-    assert len(individual_load_ids) == 2
-    assert "ok_1" in individual_load_ids
-    assert "ok_2" in individual_load_ids
+    # Load should have succeeded for the two good records (ok_1 and ok_2)
+    assert len(successful_load_ids) == 2
+    assert "ok_1" in successful_load_ids
+    assert "ok_2" in successful_load_ids
 
     # Verify the content of the fail file
     assert fail_file.exists()

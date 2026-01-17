@@ -1233,6 +1233,227 @@ def _load_records_individually(  # noqa: C901
 _create_batch_individually = _load_records_individually
 
 
+def _load_batch_with_binary_fallback(
+    model: Any,
+    connection: Any,
+    batch_lines: list[list[Any]],
+    batch_header: list[str],
+    uid_index: int,
+    context: dict[str, Any],
+    ignore_list: list[str],
+    model_name: str,
+    progress: Any = None,
+    depth: int = 0,
+) -> dict[str, Any]:
+    """Load records using binary search to efficiently identify failing records.
+
+    Instead of loading all records individually when a batch fails, this function
+    recursively splits the batch in half and tries each half. Good records get
+    imported as batches, only bad records end up being processed individually.
+
+    For a batch of N with 1 bad record:
+    - Old approach: N individual loads
+    - This approach: ~log2(N) batch attempts + 1 individual = ~log2(N)+1 calls
+
+    Args:
+        model: The Odoo model object to import into.
+        connection: The Odoo connection object (used for XML ID creation).
+        batch_lines: The raw CSV data rows to import.
+        batch_header: The column names for the data.
+        uid_index: The index of the "id" column in batch_header.
+        context: The Odoo context for the import.
+        ignore_list: List of column names to ignore.
+        model_name: The model name (for XML ID creation).
+        progress: Optional progress handler for console output.
+        depth: Recursion depth (used for logging control).
+
+    Returns:
+        A dict with "id_map", "failed_lines", and "success" keys.
+    """
+    aggregated_id_map: dict[str, int] = {}
+    aggregated_failed_lines: list[list[Any]] = []
+    header_len = len(batch_header)
+
+    # Pre-validate: separate valid rows from malformed rows
+    valid_lines = []
+    for line in batch_lines:
+        if len(line) != header_len:
+            error_msg = f"Malformed row: Row has {len(line)} columns, but header has {header_len}."
+            aggregated_failed_lines.append([*line, error_msg])
+        else:
+            valid_lines.append(line)
+
+    # If no valid lines remain, return early
+    if not valid_lines:
+        return {
+            "id_map": aggregated_id_map,
+            "failed_lines": aggregated_failed_lines,
+            "success": len(aggregated_failed_lines) == 0,
+        }
+
+    # Base case: single valid record - load individually for accurate error message
+    if len(valid_lines) <= 1:
+        result = _load_records_individually(
+            model,
+            connection,
+            valid_lines,
+            batch_header,
+            uid_index,
+            context,
+            ignore_list,
+            model_name,
+        )
+        aggregated_id_map.update(result.get("id_map", {}))
+        aggregated_failed_lines.extend(result.get("failed_lines", []))
+        return {
+            "id_map": aggregated_id_map,
+            "failed_lines": aggregated_failed_lines,
+            "success": len(aggregated_failed_lines) == 0,
+        }
+
+    # Prepare data for load() - filter ignored columns and sanitize IDs
+    filter_indices = [i for i, h in enumerate(batch_header) if h not in ignore_list]
+    load_header = [batch_header[i] for i in filter_indices]
+    uid_index_in_load = (
+        filter_indices.index(uid_index) if uid_index in filter_indices else -1
+    )
+
+    sanitized_load_lines = []
+    for line in valid_lines:
+        filtered_line = [line[i] for i in filter_indices]
+        # Sanitize ID field
+        if uid_index_in_load >= 0 and uid_index_in_load < len(filtered_line):
+            filtered_line[uid_index_in_load] = to_xmlid(filtered_line[uid_index_in_load])
+        sanitized_load_lines.append(filtered_line)
+
+    needs_split = False
+    try:
+        # Try to load the batch
+        res = model.load(load_header, sanitized_load_lines, context=context)
+        created_ids = res.get("ids", [])
+
+        # Check results - handle partial success
+        # Must check all valid_lines, not just created_ids length
+        if created_ids:
+            success_indices = []
+            fail_indices = []
+            for i in range(len(valid_lines)):
+                if i < len(created_ids) and created_ids[i] is not None:
+                    success_indices.append(i)
+                    db_id = created_ids[i]
+                    # Record successful import
+                    if uid_index_in_load >= 0:
+                        sanitized_id = sanitized_load_lines[i][uid_index_in_load]
+                        if sanitized_id:
+                            aggregated_id_map[sanitized_id] = db_id
+                            _create_xmlid_entry(
+                                connection, sanitized_id, db_id, model_name
+                            )
+                else:
+                    fail_indices.append(i)
+
+            if not fail_indices:
+                # All valid rows succeeded
+                return {
+                    "id_map": aggregated_id_map,
+                    "failed_lines": aggregated_failed_lines,
+                    "success": len(aggregated_failed_lines) == 0,
+                }
+
+            # Partial success - only recurse on failed records
+            failed_batch_lines = [valid_lines[i] for i in fail_indices]
+            if len(failed_batch_lines) == 1:
+                # Single failure - get accurate error via individual load
+                fail_result = _load_records_individually(
+                    model,
+                    connection,
+                    failed_batch_lines,
+                    batch_header,
+                    uid_index,
+                    context,
+                    ignore_list,
+                    model_name,
+                )
+                aggregated_failed_lines.extend(fail_result.get("failed_lines", []))
+            else:
+                # Multiple failures - recurse with binary search
+                fail_result = _load_batch_with_binary_fallback(
+                    model,
+                    connection,
+                    failed_batch_lines,
+                    batch_header,
+                    uid_index,
+                    context,
+                    ignore_list,
+                    model_name,
+                    progress,
+                    depth + 1,
+                )
+                aggregated_id_map.update(fail_result.get("id_map", {}))
+                aggregated_failed_lines.extend(fail_result.get("failed_lines", []))
+
+            return {
+                "id_map": aggregated_id_map,
+                "failed_lines": aggregated_failed_lines,
+                "success": len(aggregated_failed_lines) == 0,
+            }
+        else:
+            # No IDs returned at all - batch failed entirely
+            needs_split = True
+
+    except Exception:
+        # Batch failed with exception - need to split
+        needs_split = True
+        if progress and depth == 0:
+            progress.console.print(
+                f"[yellow]INFO:[/] Batch failed, using binary search to isolate "
+                f"{len(valid_lines)} records..."
+            )
+
+    if needs_split:
+        # Split in half and recurse
+        mid = len(valid_lines) // 2
+        left_half = valid_lines[:mid]
+        right_half = valid_lines[mid:]
+
+        left_result = _load_batch_with_binary_fallback(
+            model,
+            connection,
+            left_half,
+            batch_header,
+            uid_index,
+            context,
+            ignore_list,
+            model_name,
+            progress,
+            depth + 1,
+        )
+        right_result = _load_batch_with_binary_fallback(
+            model,
+            connection,
+            right_half,
+            batch_header,
+            uid_index,
+            context,
+            ignore_list,
+            model_name,
+            progress,
+            depth + 1,
+        )
+
+        # Merge results
+        aggregated_id_map.update(left_result.get("id_map", {}))
+        aggregated_id_map.update(right_result.get("id_map", {}))
+        aggregated_failed_lines.extend(left_result.get("failed_lines", []))
+        aggregated_failed_lines.extend(right_result.get("failed_lines", []))
+
+    return {
+        "id_map": aggregated_id_map,
+        "failed_lines": aggregated_failed_lines,
+        "success": len(aggregated_failed_lines) == 0,
+    }
+
+
 def _execute_load_batch(  # noqa: C901
     thread_state: dict[str, Any],
     batch_lines: list[list[Any]],
@@ -1592,7 +1813,7 @@ def _execute_load_batch(  # noqa: C901
                         if i >= len(created_ids) or created_ids[i] is None
                     ]
                     if failed_lines_to_retry:
-                        fallback_result = _load_records_individually(
+                        fallback_result = _load_batch_with_binary_fallback(
                             model,
                             connection,
                             failed_lines_to_retry,
@@ -1601,6 +1822,7 @@ def _execute_load_batch(  # noqa: C901
                             context,
                             ignore_list,
                             model_name,
+                            progress,
                         )
                         # Update id_map with new successes
                         aggregated_id_map.update(fallback_result.get("id_map", {}))
@@ -1709,10 +1931,11 @@ def _execute_load_batch(  # noqa: C901
                         progress.console.print(
                             f"[yellow]WARN:[/] Max serialization retries "
                             f"({max_serialization_retries}) reached. "
-                            f"Falling back to single-record load."
+                            f"Using binary search fallback for "
+                            f"{len(current_chunk)} records."
                         )
                         clean_error = error_str.strip().replace("\n", " ")
-                        fallback_result = _load_records_individually(
+                        fallback_result = _load_batch_with_binary_fallback(
                             model,
                             connection,
                             current_chunk,
@@ -1721,6 +1944,7 @@ def _execute_load_batch(  # noqa: C901
                             context,
                             ignore_list,
                             model_name,
+                            progress,
                         )
                         aggregated_id_map.update(fallback_result.get("id_map", {}))
                         aggregated_failed_lines.extend(
@@ -1743,9 +1967,9 @@ def _execute_load_batch(  # noqa: C901
             progress.console.print(
                 f"[yellow]WARN:[/] Batch {batch_number} failed `load` "
                 f"('{clean_error}'). "
-                f"Falling back to single-record load for {len(current_chunk)} records."
+                f"Using binary search fallback for {len(current_chunk)} records."
             )
-            fallback_result = _load_records_individually(
+            fallback_result = _load_batch_with_binary_fallback(
                 model,
                 connection,
                 current_chunk,
@@ -1754,6 +1978,7 @@ def _execute_load_batch(  # noqa: C901
                 context,
                 ignore_list,
                 model_name,
+                progress,
             )
             aggregated_id_map.update(fallback_result.get("id_map", {}))
             aggregated_failed_lines.extend(fallback_result.get("failed_lines", []))
