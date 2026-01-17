@@ -381,18 +381,24 @@ class TestPass2Batching:
             )
 
         # Assert
-        # We expect two separate write calls because the vals are different
         assert mock_run_pass.call_count == 1
 
-        # Get the batches that were passed to the runner
+        # Get the super-batches that were passed to the runner
         call_args = mock_run_pass.call_args[0]
-        batches = list(call_args[2])  # The batches iterable
+        super_batches = list(call_args[2])  # The batches iterable
 
-        assert len(batches) == 3  # Three unique sets of values to write
+        # With batch_size=10 and only 4 records, all 3 write operations
+        # should be aggregated into 1 super-batch
+        assert len(super_batches) == 1
 
-        # Convert batches to a more easily searchable dict
+        # Extract all write operations from the super-batch
+        # Format: (batch_number, [list of (ids, vals) tuples])
+        batch_number, write_ops = super_batches[0]
+        assert len(write_ops) == 3  # Three unique sets of values
+
+        # Convert to a dict for easier checking
         batch_dict = {
-            frozenset(vals.items()): ids for (ids, vals) in [b[1] for b in batches]
+            frozenset(vals.items()): ids for (ids, vals) in write_ops
         }
 
         # Check group 1: parent=p1, user=u1
@@ -1038,10 +1044,11 @@ class TestExecuteWriteBatch:
     """Tests for the _execute_write_batch function."""
 
     def test_execute_write_batch_success(self) -> None:
-        """Test successful batch write operation."""
+        """Test successful batch write operation with super-batch format."""
         mock_model = MagicMock()
         thread_state = {"model": mock_model, "context": {"tracking_disable": True}}
-        batch_writes = ([1, 2, 3], {"name": "Updated"})
+        # Super-batch format: list of (ids, vals) tuples
+        batch_writes = [([1, 2, 3], {"name": "Updated"})]
 
         result = _execute_write_batch(thread_state, batch_writes, 1)
 
@@ -1052,12 +1059,30 @@ class TestExecuteWriteBatch:
             [1, 2, 3], {"name": "Updated"}, context={"tracking_disable": True}
         )
 
+    def test_execute_write_batch_multiple_ops(self) -> None:
+        """Test successful super-batch with multiple write operations."""
+        mock_model = MagicMock()
+        thread_state = {"model": mock_model, "context": {"tracking_disable": True}}
+        # Super-batch with multiple operations (different parent_ids)
+        batch_writes = [
+            ([1, 2], {"parent_id": 10}),
+            ([3, 4, 5], {"parent_id": 20}),
+        ]
+
+        result = _execute_write_batch(thread_state, batch_writes, 1)
+
+        assert result["success"] is True
+        assert result["successful_writes"] == 5
+        assert result["failed_writes"] == []
+        assert mock_model.write.call_count == 2
+
     def test_execute_write_batch_failure(self) -> None:
         """Test batch write operation that fails."""
         mock_model = MagicMock()
         mock_model.write.side_effect = Exception("Access denied")
         thread_state = {"model": mock_model, "context": {}}
-        batch_writes = ([1, 2], {"parent_id": 10})
+        # Super-batch format: list of (ids, vals) tuples
+        batch_writes = [([1, 2], {"parent_id": 10})]
 
         result = _execute_write_batch(thread_state, batch_writes, 1)
 
@@ -1066,7 +1091,23 @@ class TestExecuteWriteBatch:
         assert len(result["failed_writes"]) == 2
         assert result["failed_writes"][0][0] == 1
         assert result["failed_writes"][1][0] == 2
-        assert "Access denied" in result["error_summary"]
+
+    def test_execute_write_batch_partial_failure(self) -> None:
+        """Test super-batch where one operation fails."""
+        mock_model = MagicMock()
+        # First call succeeds, second fails
+        mock_model.write.side_effect = [None, Exception("Timeout")]
+        thread_state = {"model": mock_model, "context": {}}
+        batch_writes = [
+            ([1, 2], {"parent_id": 10}),
+            ([3], {"parent_id": 20}),
+        ]
+
+        result = _execute_write_batch(thread_state, batch_writes, 1)
+
+        assert result["success"] is False
+        assert result["successful_writes"] == 2  # First op succeeded
+        assert len(result["failed_writes"]) == 1  # Second op failed
 
 
 class TestExecuteLoadBatchEdgeCases:

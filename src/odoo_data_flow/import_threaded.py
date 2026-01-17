@@ -1768,46 +1768,86 @@ def _execute_load_batch(  # noqa: C901
 
 def _execute_write_batch(
     thread_state: dict[str, Any],
-    batch_writes: tuple[list[int], dict[str, Any]],
+    batch_writes: list[tuple[list[int], dict[str, Any]]],
     batch_number: int,
 ) -> dict[str, Any]:
-    """Executes a batch of write operations for a group of records.
+    """Executes a super-batch of write operations for Pass 2.
 
-    This is the core worker function for Pass 2. It takes a list of database
-    IDs and a single dictionary of values and updates all records in one RPC call.
+    This is the core worker function for Pass 2. It processes multiple write
+    operations sequentially within a single thread, reducing thread overhead
+    and network round-trips. Each write operation updates records with the
+    same values in one RPC call.
+
+    Includes retry logic with exponential backoff for timeout errors.
 
     Args:
         thread_state (dict[str, Any]): Shared state from the orchestrator,
             containing the Odoo model object.
-        batch_writes (tuple[list[int], dict[str, Any]]): A tuple containing
-            the list of database IDs and the dictionary of values to write.
+        batch_writes (list[tuple[list[int], dict[str, Any]]]): A list of
+            write operations, where each operation is a tuple of (ids, vals).
         batch_number (int): The identifier for this batch, used for logging.
 
     Returns:
         dict[str, Any]: A dictionary containing the results of the batch,
-        with a `failed_writes` key if the operation failed.
+        with a `failed_writes` key if any operations failed.
     """
     model = thread_state["model"]
-    context = thread_state.get("context", {})  # Get context
-    ids, vals = batch_writes
-    try:
-        # The core of the fix: use model.write(ids, vals) for batch updates.
-        model.write(ids, vals, context=context)
-        return {
-            "failed_writes": [],
-            "successful_writes": len(ids),
-            "success": True,
-        }
-    except Exception as e:
-        error_message = str(e).replace("\n", " | ")
-        # If the batch fails, all IDs in it are considered failed.
-        failed_writes = [(db_id, vals, error_message) for db_id in ids]
-        return {
-            "failed_writes": failed_writes,
-            "error_summary": error_message,
-            "successful_writes": 0,
-            "success": False,
-        }
+    context = thread_state.get("context", {})
+    progress = thread_state.get("progress")
+
+    all_failed_writes: list[tuple[int, dict[str, Any], str]] = []
+    total_successful = 0
+    max_retries = 3
+    base_delay = 2.0  # Starting delay for exponential backoff
+
+    for ids, vals in batch_writes:
+        retry_count = 0
+        success = False
+
+        while retry_count <= max_retries and not success:
+            try:
+                model.write(ids, vals, context=context)
+                total_successful += len(ids)
+                success = True
+
+            except Exception as e:
+                error_str = str(e)
+                error_str_lower = error_str.lower()
+
+                # Check if this is a timeout error that should be retried
+                is_timeout = (
+                    "timed out" in error_str_lower
+                    or "timeout" in error_str_lower
+                    or "read operation timed out" in error_str_lower
+                    or type(e).__name__ in ("ReadTimeout", "Timeout", "TimeoutError")
+                )
+
+                if is_timeout and retry_count < max_retries:
+                    retry_count += 1
+                    delay = base_delay * (2 ** (retry_count - 1))  # Exponential backoff
+                    if progress:
+                        progress.console.print(
+                            f"[yellow]WARN:[/] Pass 2 batch {batch_number} timed out. "
+                            f"Retrying in {delay:.1f}s (attempt {retry_count}/{max_retries})..."
+                        )
+                    time.sleep(delay)
+                    continue
+
+                # Non-retryable error or max retries exceeded
+                error_message = error_str.replace("\n", " | ")
+                if is_timeout and retry_count >= max_retries:
+                    error_message = f"Timeout after {max_retries} retries: {error_message}"
+
+                # All IDs in this operation are considered failed
+                for db_id in ids:
+                    all_failed_writes.append((db_id, vals, error_message))
+                break
+
+    return {
+        "failed_writes": all_failed_writes,
+        "successful_writes": total_successful,
+        "success": len(all_failed_writes) == 0,
+    }
 
 
 def _run_threaded_pass(  # noqa: C901
@@ -2348,19 +2388,50 @@ def _orchestrate_pass_2(
     )
 
     # --- Batching Logic ---
-    pass_2_batches = []
+    # Create individual write operations first
+    individual_writes: list[tuple[list[int], dict[str, Any]]] = []
     for vals_key, ids in grouped_writes.items():
         vals = dict(vals_key)
         # Chunk the list of IDs into sub-batches of the desired size.
         for id_chunk in batch(ids, batch_size):
-            pass_2_batches.append((list(id_chunk), vals))
+            individual_writes.append((list(id_chunk), vals))
 
-    if not pass_2_batches:
+    if not individual_writes:
         return True, 0
 
+    # Aggregate small writes into "super-batches" to reduce RPC overhead
+    # Each super-batch contains multiple write operations that will be executed
+    # sequentially by a single worker thread. This dramatically reduces the number
+    # of thread spawns and network round-trips.
+    #
+    # Target: ~batch_size total records per super-batch (summing all operations)
+    pass_2_batches: list[list[tuple[list[int], dict[str, Any]]]] = []
+    current_super_batch: list[tuple[list[int], dict[str, Any]]] = []
+    current_record_count = 0
+
+    for write_op in individual_writes:
+        ids, vals = write_op
+        op_size = len(ids)
+
+        # If adding this operation would exceed batch_size, start a new super-batch
+        # (unless current_super_batch is empty - always include at least one op)
+        if current_record_count + op_size > batch_size and current_super_batch:
+            pass_2_batches.append(current_super_batch)
+            current_super_batch = []
+            current_record_count = 0
+
+        current_super_batch.append(write_op)
+        current_record_count += op_size
+
+    # Don't forget the last super-batch
+    if current_super_batch:
+        pass_2_batches.append(current_super_batch)
+
     num_batches = len(pass_2_batches)
+    total_ops = len(individual_writes)
     progress.console.print(
-        f"[blue]INFO:[/blue] Pass 2: Starting {num_batches} batches..."
+        f"[blue]INFO:[/blue] Pass 2: Aggregated {total_ops} write operations into "
+        f"{num_batches} super-batches (avg {total_ops / max(num_batches, 1):.1f} ops/batch)"
     )
     pass_2_task = progress.add_task(
         f"Pass 2/2: Updating [bold]{model_name}[/bold] relations",
