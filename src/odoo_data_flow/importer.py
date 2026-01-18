@@ -148,8 +148,13 @@ def run_import(  # noqa: C901
     check_refs: str = "warn",
     skip_unchanged: bool = False,
     adaptive_throttle: bool = False,
-) -> None:
-    """Main entry point for the import command, handling all orchestration."""
+) -> Optional[dict[str, int]]:
+    """Main entry point for the import command, handling all orchestration.
+
+    Returns:
+        dict[str, int]: Mapping of external IDs to database IDs for all
+            successfully imported records, or None if the import failed.
+    """
     log.info("Starting data import process from file...")
 
     parsed_context: dict[str, Any]
@@ -432,11 +437,13 @@ def run_import(  # noqa: C901
                     title="[bold green]Import Complete[/bold green]",
                 )
             )
+        return id_map
     else:
         _show_error_panel(
             "Import Failed",
             "The import process failed. Check logs for details.",
         )
+        return None
 
 
 def run_import_for_migration(

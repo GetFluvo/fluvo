@@ -750,3 +750,136 @@ def test_import_sudo_flag_disables_and_reenables_rules(
         # Second call: re-enable rules
         mock_ir_rule.write.assert_any_call([456, 789], {"active": True})
         mock_run_import.assert_called_once()
+
+
+@patch("odoo_data_flow.__main__._execute_post_action")
+@patch("odoo_data_flow.__main__.run_import")
+def test_import_post_action_called_on_success(
+    mock_run_import: MagicMock,
+    mock_post_action: MagicMock,
+    runner: CliRunner,
+) -> None:
+    """Tests that --post-action is called when import succeeds."""
+    mock_run_import.return_value = {"ext_id_1": 1, "ext_id_2": 2}
+
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        with open("data.csv", "w") as f:
+            f.write("id;name\n1;Test")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "data.csv",
+                "--model",
+                "stock.quant",
+                "--post-action",
+                "action_apply_inventory",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_run_import.assert_called_once()
+        mock_post_action.assert_called_once()
+        # Verify post-action was called with correct arguments
+        call_args = mock_post_action.call_args
+        assert call_args[0][1] == "stock.quant"  # model
+        assert call_args[0][2] == "action_apply_inventory"  # action_name
+        assert call_args[0][3] == {"ext_id_1": 1, "ext_id_2": 2}  # id_map
+
+
+@patch("odoo_data_flow.__main__._execute_post_action")
+@patch("odoo_data_flow.__main__.run_import")
+def test_import_post_action_not_called_on_failure(
+    mock_run_import: MagicMock,
+    mock_post_action: MagicMock,
+    runner: CliRunner,
+) -> None:
+    """Tests that --post-action is not called when import fails."""
+    mock_run_import.return_value = None  # Import failed
+
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        with open("data.csv", "w") as f:
+            f.write("id;name\n1;Test")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "data.csv",
+                "--model",
+                "stock.quant",
+                "--post-action",
+                "action_apply_inventory",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_run_import.assert_called_once()
+        mock_post_action.assert_not_called()
+
+
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+def test_execute_post_action_calls_method(mock_get_conn: MagicMock) -> None:
+    """Tests that _execute_post_action calls the correct method on records."""
+    from odoo_data_flow.__main__ import _execute_post_action
+
+    mock_conn = MagicMock()
+    mock_model = MagicMock()
+    mock_model.action_apply_inventory.return_value = True
+    mock_conn.get_model.return_value = mock_model
+    mock_get_conn.return_value = mock_conn
+
+    id_map = {"ext_1": 10, "ext_2": 20, "ext_3": 30}
+
+    _execute_post_action(
+        config="conn.conf",
+        model="stock.quant",
+        action_name="action_apply_inventory",
+        id_map=id_map,
+        context={"tracking_disable": True},
+    )
+
+    mock_conn.get_model.assert_called_once_with("stock.quant")
+    mock_model.action_apply_inventory.assert_called_once()
+    # Check that all IDs were passed
+    call_args = mock_model.action_apply_inventory.call_args
+    assert set(call_args[0][0]) == {10, 20, 30}
+
+
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+def test_execute_post_action_handles_empty_id_map(mock_get_conn: MagicMock) -> None:
+    """Tests that _execute_post_action handles empty id_map gracefully."""
+    from odoo_data_flow.__main__ import _execute_post_action
+
+    _execute_post_action(
+        config="conn.conf",
+        model="stock.quant",
+        action_name="action_apply_inventory",
+        id_map={},
+        context={},
+    )
+
+    mock_get_conn.assert_not_called()
+
+
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+def test_execute_post_action_handles_missing_model(mock_get_conn: MagicMock) -> None:
+    """Tests that _execute_post_action handles missing model gracefully."""
+    from odoo_data_flow.__main__ import _execute_post_action
+
+    _execute_post_action(
+        config="conn.conf",
+        model=None,
+        action_name="action_apply_inventory",
+        id_map={"ext_1": 10},
+        context={},
+    )
+
+    mock_get_conn.assert_not_called()

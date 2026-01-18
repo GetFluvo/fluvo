@@ -92,6 +92,81 @@ def _run_dry_run_validation(connection_file: str, **kwargs: Any) -> None:
         _show_error_panel("Validation Error", f"Failed to validate data: {e}")
 
 
+def _execute_post_action(
+    config: Any,
+    model: Optional[str],
+    action_name: str,
+    id_map: dict[str, int],
+    context: dict[str, Any],
+) -> None:
+    """Execute a method on all successfully imported records.
+
+    Args:
+        config: Connection configuration (file path or dict).
+        model: The Odoo model name.
+        action_name: The method name to call on the records.
+        id_map: Mapping of external IDs to database IDs.
+        context: Odoo context to use for the method call.
+    """
+    from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
+
+    if not model:
+        log.error("Cannot execute post-action: model name is required.")
+        return
+
+    if not id_map:
+        log.warning("No records were imported, skipping post-action.")
+        return
+
+    # Get all database IDs from the id_map
+    db_ids = list(id_map.values())
+    if not db_ids:
+        log.warning("No record IDs available for post-action.")
+        return
+
+    log.info(
+        f"Executing post-action '{action_name}' on {len(db_ids)} "
+        f"records of model '{model}'..."
+    )
+
+    try:
+        # Get connection
+        if isinstance(config, dict):
+            conn = get_connection_from_dict(config)
+        else:
+            conn = get_connection_from_config(config)
+
+        # Get the model and call the method
+        model_obj = conn.get_model(model)
+
+        # Check if the method exists
+        if not hasattr(model_obj, action_name):
+            log.error(
+                f"Method '{action_name}' not found on model '{model}'. "
+                f"Make sure the method exists and is accessible via RPC."
+            )
+            return
+
+        # Call the method with the record IDs
+        # Most Odoo methods accept a list of IDs as the first argument
+        method = getattr(model_obj, action_name)
+        result = method(db_ids, context=context)
+
+        log.info(
+            f"Post-action '{action_name}' completed successfully on "
+            f"{len(db_ids)} records."
+        )
+        if result:
+            log.debug(f"Post-action result: {result}")
+
+    except Exception as e:
+        log.error(f"Failed to execute post-action '{action_name}': {e}")
+        log.error(
+            "The import was successful, but the post-action failed. "
+            "You may need to run the action manually."
+        )
+
+
 def run_project_flow(flow_file: str, flow_name: Optional[str]) -> None:
     """Placeholder for running a project flow."""
     log.info(f"Running project flow from '{flow_file}'")
@@ -824,6 +899,13 @@ def vat_validate_cmd(
     "Requires admin rights. Use with --all-companies to import all records "
     "across companies regardless of restrictive record rules.",
 )
+@click.option(
+    "--post-action",
+    default=None,
+    help="Method to call on imported records after successful import. "
+    "Example: 'action_apply_inventory' for stock.quant to apply stock adjustments. "
+    "The method is called with all successfully imported record IDs.",
+)
 def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     """Runs the data import process."""
     # Handle dry-run mode early
@@ -988,6 +1070,9 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     if ignore is not None:
         kwargs["ignore"] = [col.strip() for col in ignore.split(",") if col.strip()]
 
+    # Handle --post-action flag
+    post_action = kwargs.pop("post_action", None)
+
     # Handle --sudo flag: temporarily disable record rules for the model
     sudo = kwargs.pop("sudo", False)
     if sudo:
@@ -1025,7 +1110,13 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
                     )
 
             # Run import with rules disabled
-            run_import(**kwargs)
+            import_result = run_import(**kwargs)
+
+            # Execute post-action if specified and import succeeded
+            if post_action and import_result:
+                _execute_post_action(
+                    kwargs["config"], model, post_action, import_result, context
+                )
 
         finally:
             # Re-enable the rules
@@ -1044,7 +1135,13 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
                         "manually in Odoo."
                     )
     else:
-        run_import(**kwargs)
+        import_result = run_import(**kwargs)
+
+        # Execute post-action if specified and import succeeded
+        if post_action and import_result:
+            _execute_post_action(
+                kwargs["config"], kwargs.get("model"), post_action, import_result, context
+            )
 
 
 # --- Write Command (New) ---
