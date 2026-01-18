@@ -2741,6 +2741,7 @@ def import_data(  # noqa: C901
     resume: bool = True,
     enable_checkpoint: bool = True,
     skip_unchanged: bool = False,
+    skip_existing: bool = False,
     adaptive_throttle: bool = False,
 ) -> tuple[bool, dict[str, int]]:
     """Orchestrates a robust, multi-threaded, two-pass import process.
@@ -2791,6 +2792,9 @@ def import_data(  # noqa: C901
             resuming interrupted imports.
         skip_unchanged (bool): If True, skips records that haven't changed
             since the last import based on content hash.
+        skip_existing (bool): If True, skips records whose external ID already
+            exists in Odoo. Makes imports safely re-runnable without triggering
+            update errors on models like stock.quant that restrict updates.
         adaptive_throttle (bool): If True, enables health-aware throttling that
             adjusts batch size and delays based on server response times.
 
@@ -2925,6 +2929,87 @@ def import_data(  # noqa: C901
                 )
         except Exception as e:
             log.warning(f"Error during idempotent filtering, continuing: {e}")
+
+    # Apply skip_existing filtering if enabled (skip records with existing external IDs)
+    skip_existing_stats: dict[str, int] = {"skipped": 0, "total": 0}
+    if skip_existing and not can_stream and header and all_data:
+        log.info("Skip-existing mode: checking for records with existing external IDs...")
+        try:
+            id_field = unique_id_field or "id"
+            if id_field in header:
+                id_index = header.index(id_field)
+                original_count = len(all_data)
+                skip_existing_stats["total"] = original_count
+
+                # Extract and sanitize external IDs, grouped by module
+                ids_by_module: dict[str, list[str]] = {}
+                for row in all_data:
+                    if id_index < len(row) and row[id_index]:
+                        ext_id = to_xmlid(str(row[id_index]).strip())
+                        if ext_id:
+                            if "." in ext_id:
+                                module, name = ext_id.split(".", 1)
+                            else:
+                                module, name = "__import__", ext_id
+                            ids_by_module.setdefault(module, []).append(name)
+
+                if ids_by_module:
+                    # Query ir.model.data for existing external IDs (batch query per module)
+                    ir_model_data = connection.get_model("ir.model.data")
+                    existing_ext_ids: set[str] = set()
+
+                    for module, names in ids_by_module.items():
+                        # Batch query: find all existing names for this module
+                        found_ids = ir_model_data.search([
+                            ("module", "=", module),
+                            ("name", "in", names),
+                            ("model", "=", model),
+                        ])
+                        if found_ids:
+                            # Read the found records to get their full external IDs
+                            found_data = ir_model_data.read(
+                                found_ids, ["module", "name"]
+                            )
+                            for rec in found_data:
+                                existing_ext_ids.add(f"{rec['module']}.{rec['name']}")
+
+                    if existing_ext_ids:
+                        # Filter out rows with existing external IDs
+                        filtered_data = []
+                        for row in all_data:
+                            if id_index < len(row) and row[id_index]:
+                                ext_id = to_xmlid(str(row[id_index]).strip())
+                                if ext_id not in existing_ext_ids:
+                                    filtered_data.append(row)
+                            else:
+                                filtered_data.append(row)
+
+                        skipped_count = original_count - len(filtered_data)
+                        skip_existing_stats["skipped"] = skipped_count
+                        all_data = filtered_data
+
+                        log.info(
+                            f"Skip-existing filter: {original_count} -> {len(all_data)} "
+                            f"records (skipped {skipped_count} with existing external IDs)"
+                        )
+
+                        if skipped_count > 0:
+                            # Log a few examples of skipped IDs
+                            example_ids = list(existing_ext_ids)[:5]
+                            log.info(
+                                f"Example skipped external IDs: {example_ids}"
+                                + (f" ... and {len(existing_ext_ids) - 5} more"
+                                   if len(existing_ext_ids) > 5 else "")
+                            )
+                    else:
+                        log.debug("No existing external IDs found, all records are new")
+            else:
+                log.warning(
+                    f"ID field '{id_field}' not found in header, "
+                    "skipping skip-existing filtering"
+                )
+        except Exception as e:
+            log.warning(f"Error during skip-existing filtering, continuing: {e}")
 
     # For streaming mode, we defer fail file setup (header not known yet)
     # For standard mode, set up fail file now

@@ -147,6 +147,7 @@ def run_import(  # noqa: C901
     no_checkpoint: bool = False,
     check_refs: str = "warn",
     skip_unchanged: bool = False,
+    skip_existing: bool = False,
     adaptive_throttle: bool = False,
 ) -> Optional[dict[str, int]]:
     """Main entry point for the import command, handling all orchestration.
@@ -316,6 +317,7 @@ def run_import(  # noqa: C901
             resume=resume,
             enable_checkpoint=not no_checkpoint,
             skip_unchanged=skip_unchanged,
+            skip_existing=skip_existing,
             adaptive_throttle=adaptive_throttle,
         )
     finally:

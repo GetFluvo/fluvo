@@ -885,6 +885,14 @@ def vat_validate_cmd(
     "Makes imports idempotent by comparing field values before importing.",
 )
 @click.option(
+    "--skip-existing",
+    is_flag=True,
+    default=False,
+    help="Skip records whose external ID already exists in Odoo. "
+    "Makes imports safely re-runnable without update errors. "
+    "Ideal for stock.quant and other models with update restrictions.",
+)
+@click.option(
     "--adaptive-throttle",
     is_flag=True,
     default=False,

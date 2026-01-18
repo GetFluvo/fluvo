@@ -515,3 +515,142 @@ else:
 
 !!! warning "Don't delete the backup file manually"
     The backup file contains the original VAT validation settings. If you delete it while settings are in the wrong state, the original values will be lost. Always use `restore_vat_settings_from_backup()` to properly restore and clean up.
+
+---
+
+## Idempotent Imports with `--skip-existing`
+
+When you need to run the same import multiple times to ensure completeness (common for accounting purposes), the `--skip-existing` flag makes imports safely re-runnable.
+
+### The Problem
+
+Without `--skip-existing`, re-running an import with existing external IDs causes Odoo to attempt an **update** instead of a **create**. For certain models like `stock.quant`, updates are restricted:
+
+```
+Error: Quant's editing is restricted, you can't do this operation.
+```
+
+### The Solution
+
+```bash
+odoo-data-flow import \
+    --connection-file conf/connection.conf \
+    --file data/stock.quant.csv \
+    --model stock.quant \
+    --skip-existing
+```
+
+The `--skip-existing` flag:
+
+1. **Queries `ir.model.data`** to find which external IDs already exist
+2. **Filters out** rows with existing external IDs before import
+3. **Only imports** truly new records
+4. **Logs** which records were skipped
+
+### Example Output
+
+```
+INFO: Skip-existing mode: checking for records with existing external IDs...
+INFO: Skip-existing filter: 100 -> 5 records (skipped 95 with existing external IDs)
+INFO: Example skipped external IDs: ['my_import.quant_001', 'my_import.quant_002'] ... and 93 more
+```
+
+### When to Use
+
+| Scenario | Use `--skip-existing`? |
+|----------|------------------------|
+| First-time import | No |
+| Re-running after partial failure | Yes |
+| Ensuring all records are imported | Yes |
+| Models with update restrictions (stock.quant) | Yes |
+| Daily/recurring imports | Yes |
+
+---
+
+## Importing Stock Quantities (`stock.quant`)
+
+Importing stock levels requires special handling due to Odoo's inventory management system.
+
+### Required Context
+
+Stock quant imports require `inventory_mode: True` in the context:
+
+```bash
+odoo-data-flow import \
+    --connection-file conf/connection.conf \
+    --file data/stock.quant.csv \
+    --model stock.quant \
+    --context "{'inventory_mode': True, 'tracking_disable': True}" \
+    --sudo --all-companies \
+    --skip-existing \
+    --post-action action_apply_inventory
+```
+
+### Key Options Explained
+
+| Option | Purpose |
+|--------|---------|
+| `--context "{'inventory_mode': True}"` | Required to enable inventory adjustments |
+| `--sudo` | Bypasses record rules (needed for stock.quant) |
+| `--all-companies` | Enables cross-company access |
+| `--skip-existing` | Allows safe re-runs without update errors |
+| `--post-action action_apply_inventory` | Applies the stock adjustment after import |
+
+### Allowed Fields
+
+In inventory mode, only these fields can be imported:
+
+- `product_id`, `location_id`, `lot_id`, `package_id`, `owner_id`
+- `inventory_quantity` (the quantity to set)
+- `inventory_date`, `user_id`
+
+!!! warning "Do NOT include `company_id`"
+    The company is automatically derived from the location. Including `company_id` in your CSV will cause an error.
+
+### CSV Format
+
+```csv
+id;product_id/id;location_id/id;inventory_quantity;lot_id/id
+my_import.quant_001;PRODUCT.SKU001;STOCK_LOCATION.WH1;100.0;
+my_import.quant_002;PRODUCT.SKU002;STOCK_LOCATION.WH1;50.0;LOT.LOT001
+```
+
+### External ID Naming Convention
+
+For stock quants, use a naming convention that reflects the unique combination of dimensions:
+
+**Recommended format:**
+```
+{module}.quant_{product}_{location}_{lot}
+```
+
+**Examples:**
+```csv
+# Without lot tracking
+stock_import.quant_SKU001_WH1
+stock_import.quant_SKU002_WH1
+
+# With lot tracking
+stock_import.quant_SKU001_WH1_LOT2024001
+stock_import.quant_SKU002_WH1_LOT2024002
+
+# With package
+stock_import.quant_SKU001_WH1_PKG001
+
+# Using source system IDs
+legacy_import.quant_{legacy_quant_id}
+```
+
+**Why this matters:**
+- External IDs must be unique across the entire database
+- Using product+location+lot ensures uniqueness
+- Makes it easy to trace back to source data
+- Allows safe re-imports with `--skip-existing`
+
+### How `action_apply_inventory` Works
+
+1. **Import creates quants** with `inventory_quantity` set (pending adjustment)
+2. **`action_apply_inventory`** is called via `--post-action`
+3. **Stock moves are created** from Inventory Adjustment location
+4. **`quantity` field is updated** with actual stock
+5. **Quants are consolidated** if same product/location/lot/package/owner exists

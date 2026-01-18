@@ -1965,3 +1965,208 @@ class TestWarnEmptyIds:
         empty_count = _warn_empty_ids(header, data, start_row=100)
 
         assert empty_count == 2
+
+
+class TestSkipExisting:
+    """Tests for the skip_existing functionality."""
+
+    @patch("odoo_data_flow.import_threaded._read_data_file")
+    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    def test_skip_existing_filters_out_existing_ids(
+        self,
+        mock_run_pass: MagicMock,
+        mock_get_conn: MagicMock,
+        mock_read_file: MagicMock,
+    ) -> None:
+        """Test that records with existing external IDs are skipped."""
+        # Arrange - 3 records, 2 already exist
+        mock_read_file.return_value = (
+            ["id", "name"],
+            [
+                ["test.existing_1", "Existing 1"],
+                ["test.new_1", "New 1"],
+                ["test.existing_2", "Existing 2"],
+            ],
+        )
+
+        mock_conn = MagicMock()
+        mock_ir_model_data = MagicMock()
+        # Batch query returns both existing IDs
+        mock_ir_model_data.search.return_value = [1, 2]
+        mock_ir_model_data.read.return_value = [
+            {"module": "test", "name": "existing_1"},
+            {"module": "test", "name": "existing_2"},
+        ]
+
+        def get_model(name: str) -> MagicMock:
+            if name == "ir.model.data":
+                return mock_ir_model_data
+            return MagicMock()
+
+        mock_conn.get_model.side_effect = get_model
+        mock_get_conn.return_value = mock_conn
+
+        # Only 1 record should be imported (test.new_1)
+        mock_run_pass.return_value = (
+            {"id_map": {"test.new_1": 101}, "failed_lines": []},
+            False,
+        )
+
+        # Act
+        success, stats = import_data(
+            config="test.conf",
+            model="res.partner",
+            unique_id_field="id",
+            file_csv="test.csv",
+            skip_existing=True,
+        )
+
+        # Assert
+        assert success is True
+        # Verify only 1 record was imported
+        assert stats.get("created_records", 0) == 1
+
+    @patch("odoo_data_flow.import_threaded._read_data_file")
+    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    def test_skip_existing_allows_all_new_records(
+        self,
+        mock_run_pass: MagicMock,
+        mock_get_conn: MagicMock,
+        mock_read_file: MagicMock,
+    ) -> None:
+        """Test that all records pass through when none exist."""
+        mock_read_file.return_value = (
+            ["id", "name"],
+            [
+                ["test.new_1", "New 1"],
+                ["test.new_2", "New 2"],
+            ],
+        )
+
+        mock_conn = MagicMock()
+        mock_ir_model_data = MagicMock()
+        # No records exist
+        mock_ir_model_data.search.return_value = []
+
+        def get_model(name: str) -> MagicMock:
+            if name == "ir.model.data":
+                return mock_ir_model_data
+            return MagicMock()
+
+        mock_conn.get_model.side_effect = get_model
+        mock_get_conn.return_value = mock_conn
+
+        mock_run_pass.return_value = (
+            {"id_map": {"test.new_1": 101, "test.new_2": 102}, "failed_lines": []},
+            False,
+        )
+
+        # Act
+        success, stats = import_data(
+            config="test.conf",
+            model="res.partner",
+            unique_id_field="id",
+            file_csv="test.csv",
+            skip_existing=True,
+        )
+
+        # Assert
+        assert success is True
+        assert stats.get("created_records", 0) == 2
+
+    @patch("odoo_data_flow.import_threaded._read_data_file")
+    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    def test_skip_existing_handles_ids_without_module_prefix(
+        self,
+        mock_run_pass: MagicMock,
+        mock_get_conn: MagicMock,
+        mock_read_file: MagicMock,
+    ) -> None:
+        """Test that IDs without module prefix use __import__ module."""
+        mock_read_file.return_value = (
+            ["id", "name"],
+            [
+                ["existing_no_prefix", "Existing"],
+                ["new_no_prefix", "New"],
+            ],
+        )
+
+        mock_conn = MagicMock()
+        mock_ir_model_data = MagicMock()
+        # existing_no_prefix exists under __import__ module
+        mock_ir_model_data.search.return_value = [1]
+        mock_ir_model_data.read.return_value = [
+            {"module": "__import__", "name": "existing_no_prefix"}
+        ]
+
+        def get_model(name: str) -> MagicMock:
+            if name == "ir.model.data":
+                return mock_ir_model_data
+            return MagicMock()
+
+        mock_conn.get_model.side_effect = get_model
+        mock_get_conn.return_value = mock_conn
+
+        mock_run_pass.return_value = (
+            {"id_map": {"new_no_prefix": 101}, "failed_lines": []},
+            False,
+        )
+
+        # Act
+        success, stats = import_data(
+            config="test.conf",
+            model="res.partner",
+            unique_id_field="id",
+            file_csv="test.csv",
+            skip_existing=True,
+        )
+
+        # Assert
+        assert success is True
+        assert stats.get("created_records", 0) == 1
+
+    @patch("odoo_data_flow.import_threaded._read_data_file")
+    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+    def test_skip_existing_skips_all_when_all_exist(
+        self,
+        mock_get_conn: MagicMock,
+        mock_read_file: MagicMock,
+    ) -> None:
+        """Test that import completes with 0 records when all exist."""
+        mock_read_file.return_value = (
+            ["id", "name"],
+            [
+                ["test.existing_1", "Existing 1"],
+            ],
+        )
+
+        mock_conn = MagicMock()
+        mock_ir_model_data = MagicMock()
+        mock_ir_model_data.search.return_value = [1]
+        mock_ir_model_data.read.return_value = [
+            {"module": "test", "name": "existing_1"}
+        ]
+
+        def get_model(name: str) -> MagicMock:
+            if name == "ir.model.data":
+                return mock_ir_model_data
+            return MagicMock()
+
+        mock_conn.get_model.side_effect = get_model
+        mock_get_conn.return_value = mock_conn
+
+        # Act
+        success, stats = import_data(
+            config="test.conf",
+            model="res.partner",
+            unique_id_field="id",
+            file_csv="test.csv",
+            skip_existing=True,
+        )
+
+        # Assert - should succeed with 0 created records
+        assert success is True
+        assert stats.get("created_records", 0) == 0
