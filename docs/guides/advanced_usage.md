@@ -115,6 +115,164 @@ product_mapping = {
 
 ---
 
+## Importing Company-Dependent Fields (Cost Prices)
+
+Some fields in Odoo are **company-dependent**, meaning the same record can have different values for different companies. The most common example is `standard_price` (cost price) on `product.product`.
+
+### Understanding Company-Dependent Fields
+
+In Odoo, company-dependent fields store separate values per company. For example:
+- Product "Widget A" can have cost price €10 in Company 1
+- The same product can have cost price €15 in Company 2
+- This is essential for intercompany scenarios where products are sourced internally
+
+**Key fields that are company-dependent:**
+- `product.product.standard_price` - Product cost price
+- `product.template.property_account_income_id` - Income account
+- `product.template.property_account_expense_id` - Expense account
+- Various accounting properties
+
+### Method 1: Separate Files Per Company (Recommended)
+
+Create one cost price file per company and run separate imports with the `--company-id` flag.
+
+**Step 1: Create cost price files**
+
+```csv
+# costs_company_1.csv
+id;standard_price
+PRODUCT.SKU001;100.50
+PRODUCT.SKU002;75.00
+```
+
+```csv
+# costs_company_2.csv (same products, different prices)
+id;standard_price
+PRODUCT.SKU001;120.00
+PRODUCT.SKU002;90.00
+```
+
+**Step 2: Import for each company**
+
+```bash
+# Import costs for Company 1
+odoo-data-flow import \
+    --connection-file conf/connection.conf \
+    --file data/costs_company_1.csv \
+    --model product.product \
+    --company-id 1
+
+# Import costs for Company 2
+odoo-data-flow import \
+    --connection-file conf/connection.conf \
+    --file data/costs_company_2.csv \
+    --model product.product \
+    --company-id 2
+```
+
+The `--company-id` flag sets the `allowed_company_ids` and `force_company` context values, ensuring the cost price is stored for the correct company.
+
+### Method 2: Single File with Shell Loop
+
+If you have the same costs for all companies, or want to automate multi-company imports:
+
+```bash
+#!/bin/bash
+# import_costs.sh
+
+COMPANIES=(1 2 3 5)  # Company IDs to import
+
+for COMPANY_ID in "${COMPANIES[@]}"; do
+    echo "Importing costs for company $COMPANY_ID..."
+    odoo-data-flow import \
+        --connection-file conf/connection.conf \
+        --file "data/costs_company_${COMPANY_ID}.csv" \
+        --model product.product \
+        --company-id "$COMPANY_ID"
+done
+```
+
+### Method 3: Transformation Script with Company Loop
+
+For more complex transformations, use Python to generate and import cost files:
+
+```python
+from odoo_data_flow.lib.transform import Processor
+from odoo_data_flow.lib import mapper
+
+# Source file with costs per company
+# id;cost_company_1;cost_company_2;cost_company_3
+source_mapping = {
+    'id': mapper.val('id'),
+    'standard_price': None,  # Set dynamically
+}
+
+companies = {
+    1: 'cost_company_1',
+    2: 'cost_company_2',
+    3: 'cost_company_3',
+}
+
+for company_id, cost_column in companies.items():
+    # Create mapping for this company's cost column
+    company_mapping = {
+        'id': mapper.val('id'),
+        'standard_price': mapper.val(cost_column),
+    }
+
+    processor = Processor('origin/product_costs.csv')
+    processor.process(
+        mapping=company_mapping,
+        filename_out=f'data/costs_company_{company_id}.csv',
+        params={
+            'model': 'product.product',
+            'context': f"{{'allowed_company_ids': [{company_id}], 'force_company': {company_id}}}",
+        }
+    )
+```
+
+### Verifying Cost Prices
+
+After import, verify that cost prices are correctly set for each company:
+
+```python
+from odoo_data_flow.lib.conf_lib import get_connection_from_config
+
+conn = get_connection_from_config("conf/connection.conf")
+product = conn.get_model('product.product')
+
+# Find product by external ID or code
+prod_id = product.search([('default_code', '=', 'SKU001')])[0]
+
+# Read cost price for different companies
+for company_id in [1, 2, 3]:
+    data = product.read(
+        prod_id,
+        ['standard_price'],
+        context={'allowed_company_ids': [company_id]}
+    )
+    print(f"Company {company_id}: {data['standard_price']}")
+```
+
+### Common Issues and Solutions
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Same cost for all companies | Missing `--company-id` flag | Add `--company-id X` to each import |
+| Access error during import | User lacks company access | Ensure import user has access to target company |
+| Cost not updating | Existing record not being found | Verify external ID matches existing product |
+| Wrong company context | Context not properly set | Use `--company-id` instead of manual context |
+
+### Best Practices
+
+1. **Use external IDs**: Always reference products by external ID (`id` column) rather than database ID
+2. **One file per company**: Cleaner and easier to debug than mixed files
+3. **Verify after import**: Always check a few products to confirm costs are correct
+4. **Document your process**: Keep notes on which files go to which companies
+5. **Use `--skip-existing` for re-runs**: Safe to run multiple times without errors
+
+---
+
 ## Multi-Environment Imports
 
 When working with multiple Odoo environments (e.g., test, UAT, production), the importer automatically organizes fail files into environment-specific subfolders based on your connection file name.
