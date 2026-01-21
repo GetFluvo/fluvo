@@ -197,18 +197,23 @@ PRODUCT.SKU002;75.00
 Import for each company:
 
 ```bash
-# Import costs for Company 1
+# Import costs for Company 1 (using database ID)
 odoo-data-flow import \
     --file data/costs_company_1.csv \
     --model product.product \
     --company-id 1
 
-# Import costs for Company 2
+# Import costs for Company 2 (using XML ID)
 odoo-data-flow import \
     --file data/costs_company_2.csv \
     --model product.product \
-    --company-id 2
+    --company-id my_module.company_germany
 ```
+
+!!! tip "XML IDs for Companies"
+    The `--company-id` flag accepts both database IDs (e.g., `1`, `2`) and XML IDs
+    (e.g., `base.main_company`, `my_module.company_germany`). Using XML IDs makes
+    your import scripts more portable across environments.
 
 ### Transformation Script for Multi-Company Costs
 

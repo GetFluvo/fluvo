@@ -789,10 +789,10 @@ def vat_validate_cmd(
 @click.option(
     "--company-id",
     default=None,
-    type=int,
-    help="Company ID for multicompany imports. Sets allowed_company_ids context "
-    "to enable cross-company field references. Use when importing records that "
-    "reference users/data from different companies.",
+    type=str,
+    help="Company ID or external ID for multicompany imports. Accepts database ID "
+    "(e.g., '1') or XML ID (e.g., 'base.main_company'). Sets allowed_company_ids "
+    "context to enable cross-company field references.",
 )
 @click.option(
     "--all-companies",
@@ -974,11 +974,58 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
             log.warning("Continuing without setting allowed_company_ids.")
 
     elif company_id is not None:
-        # Set allowed_company_ids to enable cross-company access
-        context["allowed_company_ids"] = [company_id]
-        # Also set force_company for compatibility with older Odoo versions
-        context["force_company"] = company_id
-        log.info(f"Multicompany mode enabled for company ID: {company_id}")
+        # Resolve company_id (can be database ID or XML ID)
+        resolved_company_id: Optional[int] = None
+
+        if company_id.isdigit():
+            # It's a database ID
+            resolved_company_id = int(company_id)
+        else:
+            # It's an XML ID - resolve it
+            from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
+
+            try:
+                if isinstance(kwargs["config"], dict):
+                    conn = get_connection_from_dict(kwargs["config"])
+                else:
+                    conn = get_connection_from_config(kwargs["config"])
+
+                ir_model_data = conn.get_model("ir.model.data")
+
+                # Parse the XML ID (module.name format)
+                if "." in company_id:
+                    module, name = company_id.split(".", 1)
+                else:
+                    module, name = "base", company_id
+
+                found = ir_model_data.search([
+                    ("module", "=", module),
+                    ("name", "=", name),
+                    ("model", "=", "res.company"),
+                ])
+
+                if found:
+                    data = ir_model_data.read(found[0], ["res_id"])
+                    resolved_company_id = data["res_id"]
+                    log.info(
+                        f"Resolved company XML ID '{company_id}' to database ID {resolved_company_id}"
+                    )
+                else:
+                    log.error(
+                        f"Company XML ID '{company_id}' not found. "
+                        "Make sure the external ID exists for a res.company record."
+                    )
+                    return
+            except Exception as e:
+                log.error(f"Failed to resolve company XML ID '{company_id}': {e}")
+                return
+
+        if resolved_company_id is not None:
+            # Set allowed_company_ids to enable cross-company access
+            context["allowed_company_ids"] = [resolved_company_id]
+            # Also set force_company for compatibility with older Odoo versions
+            context["force_company"] = resolved_company_id
+            log.info(f"Multicompany mode enabled for company ID: {resolved_company_id}")
 
     # Handle tracking_disable option
     tracking_disable = kwargs.pop("tracking_disable", True)
