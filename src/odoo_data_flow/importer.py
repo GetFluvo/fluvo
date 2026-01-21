@@ -342,7 +342,10 @@ def run_import(  # noqa: C901
         # --- Pass 2: Relational Strategies ---
         if import_plan.get("strategies") and not fail:
             source_df = pl.read_csv(
-                filename, separator=separator, truncate_ragged_lines=True
+                filename,
+                separator=separator,
+                truncate_ragged_lines=True,
+                infer_schema_length=0,  # Read all columns as strings
             )
             with suppress_console_handler(), Progress() as progress:
                 task_id = progress.add_task(

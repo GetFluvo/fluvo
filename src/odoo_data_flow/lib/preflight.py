@@ -179,7 +179,12 @@ def _get_required_languages(filename: str, separator: str) -> Optional[list[str]
     """Extracts the list of required languages from the source file."""
     try:
         lang_series = (
-            pl.read_csv(filename, separator=separator, truncate_ragged_lines=True)
+            pl.read_csv(
+                filename,
+                separator=separator,
+                truncate_ragged_lines=True,
+                infer_schema_length=0,  # Read all columns as strings
+            )
             .get_column("lang")
             .unique()
             .drop_nulls()
@@ -323,7 +328,12 @@ def _get_csv_header(filename: str, separator: str) -> Optional[list[str]]:
         A list of strings representing the header, or None on failure.
     """
     try:
-        return pl.read_csv(filename, separator=separator, n_rows=0).columns
+        return pl.read_csv(
+            filename,
+            separator=separator,
+            n_rows=0,
+            infer_schema_length=0,  # Avoid type inference errors on header-only read
+        ).columns
     except Exception as e:
         _show_error_panel("File Read Error", f"Could not read CSV header. Error: {e}")
         return None
@@ -458,7 +468,12 @@ def _plan_deferrals_and_strategies(  # noqa: C901
     auto_defer = kwargs.get("auto_defer", False)
     deferrable_fields = []
     strategies = {}
-    df = pl.read_csv(filename, separator=separator, truncate_ragged_lines=True)
+    df = pl.read_csv(
+        filename,
+        separator=separator,
+        truncate_ragged_lines=True,
+        infer_schema_length=0,  # Read all columns as strings to avoid type errors
+    )
 
     for field_name in header:
         clean_field_name = field_name.replace("/id", "")
