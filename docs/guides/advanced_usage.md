@@ -882,3 +882,91 @@ legacy_import.quant_{legacy_quant_id}
 3. **Stock moves are created** from Inventory Adjustment location
 4. **`quantity` field is updated** with actual stock
 5. **Quants are consolidated** if same product/location/lot/package/owner exists
+
+### Opening Inventory with a Specific Date
+
+When importing opening inventory (e.g., for a new Odoo implementation or fiscal year), the stock moves created by `action_apply_inventory` default to **today's date**. For proper accounting, you often need these moves dated to a specific date (e.g., the opening balance date).
+
+**The Problem:**
+- `action_apply_inventory()` creates stock moves with `date = today`
+- The `accounting_date` field on stock.quant affects accounting entries but NOT the stock move date
+- For accurate inventory history, you need the opening date on the actual stock moves
+
+**The Solution: `--move-date` flag**
+
+The `--move-date` flag updates the stock move dates after inventory adjustment:
+
+```bash
+odoo-data-flow import \
+    --connection-file conf/connection.conf \
+    --file data/stock.quant.csv \
+    --model stock.quant \
+    --context "{'inventory_mode': True, 'tracking_disable': True}" \
+    --sudo --all-companies \
+    --skip-existing \
+    --post-action action_apply_inventory \
+    --move-date 2026-01-01
+```
+
+**How it works:**
+1. Import creates stock quants with pending adjustments
+2. `--post-action action_apply_inventory` applies the adjustments (creates moves dated today)
+3. `--move-date` finds the newly created moves and updates their date
+
+**Format options:**
+- Date only: `--move-date 2026-01-01` (sets time to 00:00:00)
+- Full datetime: `--move-date "2026-01-01 08:00:00"`
+
+### Complete Opening Inventory Workflow
+
+**Step 1: Prepare your opening inventory CSV**
+
+```csv
+id;product_id/id;location_id/id;inventory_quantity;lot_id/id
+opening.quant_SKU001_WH1;PRODUCT.SKU001;STOCK.WH1_STOCK;100.0;
+opening.quant_SKU002_WH1;PRODUCT.SKU002;STOCK.WH1_STOCK;50.0;LOT.LOT001
+opening.quant_SKU003_WH2;PRODUCT.SKU003;STOCK.WH2_STOCK;25.0;
+```
+
+**Step 2: Run the import with opening date**
+
+```bash
+#!/bin/bash
+# import_opening_inventory.sh
+
+CONFIG="conf/connection.conf"
+OPENING_DATE="2026-01-01"
+
+odoo-data-flow import \
+    --connection-file "$CONFIG" \
+    --file data/stock.quant.csv \
+    --model stock.quant \
+    --context "{'inventory_mode': True, 'tracking_disable': True}" \
+    --sudo --all-companies \
+    --skip-existing \
+    --post-action action_apply_inventory \
+    --move-date "$OPENING_DATE"
+
+echo "Opening inventory imported with date: $OPENING_DATE"
+```
+
+**Step 3: Verify the results**
+
+Check in Odoo that:
+1. Stock quants have the correct quantities
+2. Stock moves are dated to your opening date
+3. Inventory valuation (if using) shows correct historical costs
+
+### Troubleshooting Opening Inventory
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Moves still show today's date | `--move-date` not used | Re-run with `--move-date` flag |
+| Wrong moves updated | Multiple inventory adjustments | Use unique product codes per import |
+| "No stock moves found" | Post-action didn't complete | Check logs for `action_apply_inventory` errors |
+| Date format error | Invalid date format | Use `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` |
+
+!!! tip "Re-running safe with `--skip-existing`"
+    If you need to re-run the import (e.g., after adding more products), the `--skip-existing`
+    flag ensures already-imported quants are skipped. However, `--move-date` will still update
+    moves for all imported products, so be careful with multiple runs on the same day.

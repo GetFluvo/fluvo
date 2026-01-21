@@ -167,6 +167,117 @@ def _execute_post_action(
         )
 
 
+def _update_inventory_move_dates(
+    config: Any,
+    id_map: dict[str, int],
+    move_date: str,
+    context: dict[str, Any],
+    pre_action_timestamp: Optional[str] = None,
+) -> None:
+    """Update stock move dates for inventory adjustment moves.
+
+    After action_apply_inventory creates stock moves with today's date,
+    this function updates them to the specified date.
+
+    Args:
+        config: Connection configuration (file path or dict).
+        id_map: Mapping of external IDs to database IDs (quant IDs).
+        move_date: Target date in YYYY-MM-DD or YYYY-MM-DD HH:MM:SS format.
+        context: Odoo context to use.
+        pre_action_timestamp: Optional timestamp from before post-action was executed.
+    """
+    from datetime import datetime
+
+    from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
+
+    # Parse the move_date
+    try:
+        if " " in move_date:
+            # Full datetime format
+            dt = datetime.strptime(move_date, "%Y-%m-%d %H:%M:%S")
+        else:
+            # Date only - set to start of day
+            dt = datetime.strptime(move_date, "%Y-%m-%d")
+        move_date_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError as e:
+        log.error(f"Invalid --move-date format: {e}")
+        log.error("Expected format: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS")
+        return
+
+    log.info(f"Updating inventory move dates to {move_date_str}...")
+
+    # Get connection
+    try:
+        if isinstance(config, dict):
+            conn = get_connection_from_dict(config)
+        else:
+            conn = get_connection_from_config(config)
+
+        # Get the quant IDs from the id_map (these are stock.quant IDs)
+        quant_ids = list(id_map.values())
+        if not quant_ids:
+            log.warning("No quant IDs available for move date update.")
+            return
+
+        # Read the products from the quants
+        quant_model = conn.get_model("stock.quant")
+        quant_data = quant_model.read(quant_ids, ["product_id"])
+        product_ids = list(
+            set(q["product_id"][0] for q in quant_data if q.get("product_id"))
+        )
+
+        if not product_ids:
+            log.warning("No products found in imported quants.")
+            return
+
+        # Find inventory adjustment location
+        location_model = conn.get_model("stock.location")
+        inv_adj_locs = location_model.search([("usage", "=", "inventory")])
+
+        if not inv_adj_locs:
+            log.error("Could not find inventory adjustment location.")
+            return
+
+        # Build the search domain
+        # - From or to inventory adjustment location
+        # - For the products we imported
+        # - State = done (action_apply_inventory completes them)
+        domain: list[Any] = [
+            "|",
+            ("location_id", "in", inv_adj_locs),
+            ("location_dest_id", "in", inv_adj_locs),
+            ("product_id", "in", product_ids),
+            ("state", "=", "done"),
+        ]
+
+        # If we have a pre-action timestamp, filter to only moves created after it
+        # This prevents updating older inventory moves that weren't part of this import
+        if pre_action_timestamp:
+            domain.append(("create_date", ">=", pre_action_timestamp))
+
+        # Find stock moves
+        move_model = conn.get_model("stock.move")
+        move_ids = move_model.search(domain)
+
+        if not move_ids:
+            log.warning("No stock moves found to update.")
+            return
+
+        # Update the date on these moves
+        move_model.write(move_ids, {"date": move_date_str}, context=context)
+
+        log.info(
+            f"Updated date to {move_date_str} on {len(move_ids)} stock move(s)."
+        )
+
+    except Exception as e:
+        log.error(f"Failed to update stock move dates: {e}")
+        log.error(
+            "The import and inventory adjustment succeeded, but move dates "
+            "could not be updated. You may need to update them manually."
+        )
+
+
 def run_project_flow(flow_file: str, flow_name: Optional[str]) -> None:
     """Placeholder for running a project flow."""
     log.info(f"Running project flow from '{flow_file}'")
@@ -914,6 +1025,14 @@ def vat_validate_cmd(
     "Example: 'action_apply_inventory' for stock.quant to apply stock adjustments. "
     "The method is called with all successfully imported record IDs.",
 )
+@click.option(
+    "--move-date",
+    default=None,
+    help="Set the date on stock moves created by inventory adjustment. "
+    "Use with --post-action action_apply_inventory for opening inventory imports. "
+    "Format: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS. "
+    "Example: --move-date 2026-01-01",
+)
 def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     """Runs the data import process."""
     # Handle dry-run mode early
@@ -1128,6 +1247,15 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     # Handle --post-action flag
     post_action = kwargs.pop("post_action", None)
 
+    # Handle --move-date flag (for opening inventory)
+    move_date = kwargs.pop("move_date", None)
+    if move_date and not post_action:
+        log.warning(
+            "--move-date is only useful with --post-action action_apply_inventory. "
+            "The option will be ignored."
+        )
+        move_date = None
+
     # Handle --sudo flag: temporarily disable record rules for the model
     sudo = kwargs.pop("sudo", False)
     if sudo:
@@ -1169,9 +1297,28 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
 
             # Execute post-action if specified and import succeeded
             if post_action and import_result:
+                # Capture timestamp before post-action for move date filtering
+                pre_action_timestamp = None
+                if move_date:
+                    from datetime import datetime, timezone
+
+                    pre_action_timestamp = datetime.now(timezone.utc).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
+
                 _execute_post_action(
                     kwargs["config"], model, post_action, import_result, context
                 )
+
+                # Update move dates if requested (for opening inventory)
+                if move_date:
+                    _update_inventory_move_dates(
+                        kwargs["config"],
+                        import_result,
+                        move_date,
+                        context,
+                        pre_action_timestamp,
+                    )
 
         finally:
             # Re-enable the rules
@@ -1194,9 +1341,28 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
 
         # Execute post-action if specified and import succeeded
         if post_action and import_result:
+            # Capture timestamp before post-action for move date filtering
+            pre_action_timestamp = None
+            if move_date:
+                from datetime import datetime, timezone
+
+                pre_action_timestamp = datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+
             _execute_post_action(
                 kwargs["config"], kwargs.get("model"), post_action, import_result, context
             )
+
+            # Update move dates if requested (for opening inventory)
+            if move_date:
+                _update_inventory_move_dates(
+                    kwargs["config"],
+                    import_result,
+                    move_date,
+                    context,
+                    pre_action_timestamp,
+                )
 
 
 # --- Write Command (New) ---
