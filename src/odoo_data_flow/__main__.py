@@ -98,7 +98,8 @@ def _execute_post_action(
     action_name: str,
     id_map: dict[str, int],
     context: dict[str, Any],
-) -> None:
+    timeout: int = 600,
+) -> bool:
     """Execute a method on all successfully imported records.
 
     Args:
@@ -107,26 +108,33 @@ def _execute_post_action(
         action_name: The method name to call on the records.
         id_map: Mapping of external IDs to database IDs.
         context: Odoo context to use for the method call.
+        timeout: Timeout in seconds for the RPC call (default: 600 = 10 minutes).
+
+    Returns:
+        True if the action completed successfully or timed out (server may have
+        completed), False if it definitively failed.
     """
+    import socket
+
     from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
 
     if not model:
         log.error("Cannot execute post-action: model name is required.")
-        return
+        return False
 
     if not id_map:
         log.warning("No records were imported, skipping post-action.")
-        return
+        return False
 
     # Get all database IDs from the id_map
     db_ids = list(id_map.values())
     if not db_ids:
         log.warning("No record IDs available for post-action.")
-        return
+        return False
 
     log.info(
         f"Executing post-action '{action_name}' on {len(db_ids)} "
-        f"records of model '{model}'..."
+        f"records of model '{model}' (timeout: {timeout}s)..."
     )
 
     try:
@@ -136,28 +144,51 @@ def _execute_post_action(
         else:
             conn = get_connection_from_config(config)
 
-        # Get the model and call the method
-        model_obj = conn.get_model(model)
+        # Set a longer timeout for the post-action
+        # This helps with large inventory adjustments
+        original_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(timeout)
 
-        # Check if the method exists
-        if not hasattr(model_obj, action_name):
-            log.error(
-                f"Method '{action_name}' not found on model '{model}'. "
-                f"Make sure the method exists and is accessible via RPC."
+        try:
+            # Get the model and call the method
+            model_obj = conn.get_model(model)
+
+            # Check if the method exists
+            if not hasattr(model_obj, action_name):
+                log.error(
+                    f"Method '{action_name}' not found on model '{model}'. "
+                    f"Make sure the method exists and is accessible via RPC."
+                )
+                return False
+
+            # Call the method with the record IDs
+            # Most Odoo methods accept a list of IDs as the first argument
+            method = getattr(model_obj, action_name)
+            result = method(db_ids, context=context)
+
+            log.info(
+                f"Post-action '{action_name}' completed successfully on "
+                f"{len(db_ids)} records."
             )
-            return
+            if result:
+                log.debug(f"Post-action result: {result}")
+            return True
 
-        # Call the method with the record IDs
-        # Most Odoo methods accept a list of IDs as the first argument
-        method = getattr(model_obj, action_name)
-        result = method(db_ids, context=context)
+        finally:
+            # Restore original timeout
+            socket.setdefaulttimeout(original_timeout)
 
-        log.info(
-            f"Post-action '{action_name}' completed successfully on "
-            f"{len(db_ids)} records."
+    except (socket.timeout, TimeoutError, ConnectionError) as e:
+        log.warning(
+            f"Post-action '{action_name}' timed out or connection lost: {e}"
         )
-        if result:
-            log.debug(f"Post-action result: {result}")
+        log.warning(
+            "The operation may have completed on the server. "
+            "Proceeding with subsequent steps..."
+        )
+        # Return True to allow move date update to proceed
+        # The server likely completed the operation
+        return True
 
     except Exception as e:
         log.error(f"Failed to execute post-action '{action_name}': {e}")
@@ -165,14 +196,52 @@ def _execute_post_action(
             "The import was successful, but the post-action failed. "
             "You may need to run the action manually."
         )
+        return False
+
+
+def _get_product_ids_from_quants(
+    config: Any,
+    quant_ids: list[int],
+) -> list[int]:
+    """Extract product IDs from a list of quant IDs.
+
+    Args:
+        config: Connection configuration (file path or dict).
+        quant_ids: List of stock.quant database IDs.
+
+    Returns:
+        List of unique product IDs from the quants.
+    """
+    from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
+
+    if not quant_ids:
+        return []
+
+    try:
+        if isinstance(config, dict):
+            conn = get_connection_from_dict(config)
+        else:
+            conn = get_connection_from_config(config)
+
+        quant_model = conn.get_model("stock.quant")
+        quant_data = quant_model.read(quant_ids, ["product_id"])
+        product_ids = list(
+            set(q["product_id"][0] for q in quant_data if q.get("product_id"))
+        )
+        log.debug(f"Extracted {len(product_ids)} product IDs from {len(quant_ids)} quants")
+        return product_ids
+
+    except Exception as e:
+        log.error(f"Failed to extract product IDs from quants: {e}")
+        return []
 
 
 def _update_inventory_move_dates(
     config: Any,
-    id_map: dict[str, int],
     move_date: str,
     context: dict[str, Any],
-    pre_action_timestamp: Optional[str] = None,
+    product_ids: list[int],
+    time_window_hours: float = 2.0,
 ) -> None:
     """Update stock move dates for inventory adjustment moves.
 
@@ -181,12 +250,14 @@ def _update_inventory_move_dates(
 
     Args:
         config: Connection configuration (file path or dict).
-        id_map: Mapping of external IDs to database IDs (quant IDs).
         move_date: Target date in YYYY-MM-DD or YYYY-MM-DD HH:MM:SS format.
         context: Odoo context to use.
-        pre_action_timestamp: Optional timestamp from before post-action was executed.
+        product_ids: List of product IDs to filter moves by.
+        time_window_hours: How far back to look for moves (default: 2 hours).
+            This handles cases where the post-action timed out but completed
+            on the server.
     """
-    from datetime import datetime
+    from datetime import datetime, timedelta, timezone
 
     from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
 
@@ -204,7 +275,14 @@ def _update_inventory_move_dates(
         log.error("Expected format: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS")
         return
 
-    log.info(f"Updating inventory move dates to {move_date_str}...")
+    if not product_ids:
+        log.warning("No product IDs available for move date update.")
+        return
+
+    log.info(
+        f"Updating inventory move dates to {move_date_str} "
+        f"for {len(product_ids)} product(s)..."
+    )
 
     # Get connection
     try:
@@ -212,23 +290,6 @@ def _update_inventory_move_dates(
             conn = get_connection_from_dict(config)
         else:
             conn = get_connection_from_config(config)
-
-        # Get the quant IDs from the id_map (these are stock.quant IDs)
-        quant_ids = list(id_map.values())
-        if not quant_ids:
-            log.warning("No quant IDs available for move date update.")
-            return
-
-        # Read the products from the quants
-        quant_model = conn.get_model("stock.quant")
-        quant_data = quant_model.read(quant_ids, ["product_id"])
-        product_ids = list(
-            set(q["product_id"][0] for q in quant_data if q.get("product_id"))
-        )
-
-        if not product_ids:
-            log.warning("No products found in imported quants.")
-            return
 
         # Find inventory adjustment location
         location_model = conn.get_model("stock.location")
@@ -238,29 +299,41 @@ def _update_inventory_move_dates(
             log.error("Could not find inventory adjustment location.")
             return
 
+        # Calculate the time window cutoff
+        # Use a generous window to handle timeout scenarios where the server
+        # completed the operation but we lost the connection
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=time_window_hours)
+        cutoff_str = cutoff_time.strftime("%Y-%m-%d %H:%M:%S")
+
+        log.debug(
+            f"Searching for moves created after {cutoff_str} "
+            f"(time window: {time_window_hours} hours)"
+        )
+
         # Build the search domain
         # - From or to inventory adjustment location
         # - For the products we imported
         # - State = done (action_apply_inventory completes them)
+        # - Created within the time window
         domain: list[Any] = [
             "|",
             ("location_id", "in", inv_adj_locs),
             ("location_dest_id", "in", inv_adj_locs),
             ("product_id", "in", product_ids),
             ("state", "=", "done"),
+            ("create_date", ">=", cutoff_str),
         ]
-
-        # If we have a pre-action timestamp, filter to only moves created after it
-        # This prevents updating older inventory moves that weren't part of this import
-        if pre_action_timestamp:
-            domain.append(("create_date", ">=", pre_action_timestamp))
 
         # Find stock moves
         move_model = conn.get_model("stock.move")
         move_ids = move_model.search(domain)
 
         if not move_ids:
-            log.warning("No stock moves found to update.")
+            log.warning(
+                "No stock moves found to update. "
+                "The inventory adjustment may not have created any moves yet, "
+                "or the moves may be older than the time window."
+            )
             return
 
         # Update the date on these moves
@@ -1297,28 +1370,51 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
 
             # Execute post-action if specified and import succeeded
             if post_action and import_result:
-                # Capture timestamp before post-action for move date filtering
-                pre_action_timestamp = None
+                # Extract product IDs BEFORE post-action while connection is reliable
+                # This is needed for --move-date to find the correct moves
+                product_ids_for_move_update: list[int] = []
                 if move_date:
-                    from datetime import datetime, timezone
-
-                    pre_action_timestamp = datetime.now(timezone.utc).strftime(
-                        "%Y-%m-%d %H:%M:%S"
+                    quant_ids = list(import_result.values())
+                    log.info(
+                        f"Extracting product IDs from {len(quant_ids)} imported quants "
+                        f"for --move-date update..."
+                    )
+                    product_ids_for_move_update = _get_product_ids_from_quants(
+                        kwargs["config"], quant_ids
+                    )
+                    log.info(
+                        f"Extracted {len(product_ids_for_move_update)} unique product IDs"
                     )
 
-                _execute_post_action(
+                # Execute the post-action (with longer timeout)
+                post_action_ok = _execute_post_action(
                     kwargs["config"], model, post_action, import_result, context
                 )
 
                 # Update move dates if requested (for opening inventory)
+                # Proceed even if post-action timed out (server may have completed)
                 if move_date:
-                    _update_inventory_move_dates(
-                        kwargs["config"],
-                        import_result,
-                        move_date,
-                        context,
-                        pre_action_timestamp,
-                    )
+                    if not product_ids_for_move_update:
+                        log.warning(
+                            "--move-date: No product IDs extracted from quants. "
+                            "Move date update will be skipped."
+                        )
+                    elif not post_action_ok:
+                        log.warning(
+                            "--move-date: Post-action failed. "
+                            "Move date update will be skipped."
+                        )
+                    else:
+                        log.info(
+                            f"--move-date: Updating move dates to {move_date} "
+                            f"for {len(product_ids_for_move_update)} products..."
+                        )
+                        _update_inventory_move_dates(
+                            kwargs["config"],
+                            move_date,
+                            context,
+                            product_ids_for_move_update,
+                        )
 
         finally:
             # Re-enable the rules
@@ -1341,28 +1437,51 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
 
         # Execute post-action if specified and import succeeded
         if post_action and import_result:
-            # Capture timestamp before post-action for move date filtering
-            pre_action_timestamp = None
+            # Extract product IDs BEFORE post-action while connection is reliable
+            # This is needed for --move-date to find the correct moves
+            product_ids_for_move_update: list[int] = []
             if move_date:
-                from datetime import datetime, timezone
-
-                pre_action_timestamp = datetime.now(timezone.utc).strftime(
-                    "%Y-%m-%d %H:%M:%S"
+                quant_ids = list(import_result.values())
+                log.info(
+                    f"Extracting product IDs from {len(quant_ids)} imported quants "
+                    f"for --move-date update..."
+                )
+                product_ids_for_move_update = _get_product_ids_from_quants(
+                    kwargs["config"], quant_ids
+                )
+                log.info(
+                    f"Extracted {len(product_ids_for_move_update)} unique product IDs"
                 )
 
-            _execute_post_action(
+            # Execute the post-action (with longer timeout)
+            post_action_ok = _execute_post_action(
                 kwargs["config"], kwargs.get("model"), post_action, import_result, context
             )
 
             # Update move dates if requested (for opening inventory)
+            # Proceed even if post-action timed out (server may have completed)
             if move_date:
-                _update_inventory_move_dates(
-                    kwargs["config"],
-                    import_result,
-                    move_date,
-                    context,
-                    pre_action_timestamp,
-                )
+                if not product_ids_for_move_update:
+                    log.warning(
+                        "--move-date: No product IDs extracted from quants. "
+                        "Move date update will be skipped."
+                    )
+                elif not post_action_ok:
+                    log.warning(
+                        "--move-date: Post-action failed. "
+                        "Move date update will be skipped."
+                    )
+                else:
+                    log.info(
+                        f"--move-date: Updating move dates to {move_date} "
+                        f"for {len(product_ids_for_move_update)} products..."
+                    )
+                    _update_inventory_move_dates(
+                        kwargs["config"],
+                        move_date,
+                        context,
+                        product_ids_for_move_update,
+                    )
 
 
 # --- Write Command (New) ---

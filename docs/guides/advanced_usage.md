@@ -910,12 +910,23 @@ odoo-data-flow import \
 
 **How it works:**
 1. Import creates stock quants with pending adjustments
-2. `--post-action action_apply_inventory` applies the adjustments (creates moves dated today)
-3. `--move-date` finds the newly created moves and updates their date
+2. Product IDs are extracted from imported quants (before post-action)
+3. `--post-action action_apply_inventory` applies the adjustments (creates moves dated today)
+   - Uses a 10-minute timeout to handle large inventories
+   - If timeout occurs, the operation may still complete on the server
+4. `--move-date` finds inventory moves by product + location within a 2-hour window
+5. Stock move dates are updated to the specified date
 
 **Format options:**
 - Date only: `--move-date 2026-01-01` (sets time to 00:00:00)
 - Full datetime: `--move-date "2026-01-01 08:00:00"`
+
+**Production reliability:**
+- The post-action uses a longer timeout (10 minutes) for large inventory adjustments
+- Product IDs are captured before the post-action, so even if the connection times out,
+  the move date update can still identify the correct moves
+- Uses a 2-hour time window to find recently created moves, handling cases where the
+  server completed the operation after a client-side timeout
 
 ### Complete Opening Inventory Workflow
 
@@ -963,10 +974,19 @@ Check in Odoo that:
 |-------|-------|----------|
 | Moves still show today's date | `--move-date` not used | Re-run with `--move-date` flag |
 | Wrong moves updated | Multiple inventory adjustments | Use unique product codes per import |
-| "No stock moves found" | Post-action didn't complete | Check logs for `action_apply_inventory` errors |
+| "No stock moves found" | Post-action didn't complete or moves older than 2 hours | Check logs; run again within time window |
 | Date format error | Invalid date format | Use `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` |
+| Post-action timeout | Large inventory taking too long | Operation may have completed; check move dates in Odoo |
+| Connection lost during post-action | Network issues | The tool will still attempt move date update using pre-extracted product IDs |
 
 !!! tip "Re-running safe with `--skip-existing`"
     If you need to re-run the import (e.g., after adding more products), the `--skip-existing`
     flag ensures already-imported quants are skipped. However, `--move-date` will still update
     moves for all imported products, so be careful with multiple runs on the same day.
+
+!!! info "Handling Timeouts"
+    For very large inventories, the `action_apply_inventory` call may take longer than expected.
+    The tool uses a 10-minute timeout and handles timeouts gracefully:
+    - Product IDs are captured before the post-action starts
+    - If timeout occurs, the tool assumes the server completed the operation
+    - Move dates are updated using a 2-hour time window to find the created moves

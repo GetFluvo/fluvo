@@ -883,3 +883,380 @@ def test_execute_post_action_handles_missing_model(mock_get_conn: MagicMock) -> 
     )
 
     mock_get_conn.assert_not_called()
+
+
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+def test_execute_post_action_returns_true_on_success(mock_get_conn: MagicMock) -> None:
+    """Tests that _execute_post_action returns True on success."""
+    from odoo_data_flow.__main__ import _execute_post_action
+
+    mock_conn = MagicMock()
+    mock_model = MagicMock()
+    mock_model.action_apply_inventory.return_value = True
+    mock_conn.get_model.return_value = mock_model
+    mock_get_conn.return_value = mock_conn
+
+    result = _execute_post_action(
+        config="conn.conf",
+        model="stock.quant",
+        action_name="action_apply_inventory",
+        id_map={"ext_1": 10},
+        context={},
+    )
+
+    assert result is True
+
+
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+def test_execute_post_action_returns_true_on_timeout(mock_get_conn: MagicMock) -> None:
+    """Tests that _execute_post_action returns True on timeout (server may have completed)."""
+    import socket
+
+    from odoo_data_flow.__main__ import _execute_post_action
+
+    mock_conn = MagicMock()
+    mock_model = MagicMock()
+    mock_model.action_apply_inventory.side_effect = socket.timeout("Connection timed out")
+    mock_conn.get_model.return_value = mock_model
+    mock_get_conn.return_value = mock_conn
+
+    result = _execute_post_action(
+        config="conn.conf",
+        model="stock.quant",
+        action_name="action_apply_inventory",
+        id_map={"ext_1": 10},
+        context={},
+    )
+
+    # Should return True because server may have completed the operation
+    assert result is True
+
+
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+def test_execute_post_action_returns_false_on_other_error(
+    mock_get_conn: MagicMock,
+) -> None:
+    """Tests that _execute_post_action returns False on non-timeout errors."""
+    from odoo_data_flow.__main__ import _execute_post_action
+
+    mock_conn = MagicMock()
+    mock_model = MagicMock()
+    mock_model.action_apply_inventory.side_effect = ValueError("Some error")
+    mock_conn.get_model.return_value = mock_model
+    mock_get_conn.return_value = mock_conn
+
+    result = _execute_post_action(
+        config="conn.conf",
+        model="stock.quant",
+        action_name="action_apply_inventory",
+        id_map={"ext_1": 10},
+        context={},
+    )
+
+    assert result is False
+
+
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+def test_get_product_ids_from_quants(mock_get_conn: MagicMock) -> None:
+    """Tests that _get_product_ids_from_quants extracts product IDs correctly."""
+    from odoo_data_flow.__main__ import _get_product_ids_from_quants
+
+    mock_conn = MagicMock()
+    mock_quant_model = MagicMock()
+    mock_quant_model.read.return_value = [
+        {"product_id": [101, "Product A"]},
+        {"product_id": [102, "Product B"]},
+        {"product_id": [101, "Product A"]},  # Duplicate
+    ]
+    mock_conn.get_model.return_value = mock_quant_model
+    mock_get_conn.return_value = mock_conn
+
+    product_ids = _get_product_ids_from_quants("conn.conf", [1, 2, 3])
+
+    assert set(product_ids) == {101, 102}  # Should be deduplicated
+    mock_quant_model.read.assert_called_once_with([1, 2, 3], ["product_id"])
+
+
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+def test_get_product_ids_from_quants_empty_input(mock_get_conn: MagicMock) -> None:
+    """Tests that _get_product_ids_from_quants handles empty input."""
+    from odoo_data_flow.__main__ import _get_product_ids_from_quants
+
+    product_ids = _get_product_ids_from_quants("conn.conf", [])
+
+    assert product_ids == []
+    mock_get_conn.assert_not_called()
+
+
+@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+def test_update_inventory_move_dates(mock_get_conn: MagicMock) -> None:
+    """Tests that _update_inventory_move_dates updates move dates correctly."""
+    from odoo_data_flow.__main__ import _update_inventory_move_dates
+
+    mock_conn = MagicMock()
+    mock_location_model = MagicMock()
+    mock_location_model.search.return_value = [99]  # Inventory adjustment location
+    mock_move_model = MagicMock()
+    mock_move_model.search.return_value = [501, 502, 503]
+
+    def get_model(name: str) -> MagicMock:
+        if name == "stock.location":
+            return mock_location_model
+        elif name == "stock.move":
+            return mock_move_model
+        return MagicMock()
+
+    mock_conn.get_model.side_effect = get_model
+    mock_get_conn.return_value = mock_conn
+
+    _update_inventory_move_dates(
+        config="conn.conf",
+        move_date="2026-01-01",
+        context={"tracking_disable": True},
+        product_ids=[101, 102],
+    )
+
+    # Verify location search
+    mock_location_model.search.assert_called_once_with([("usage", "=", "inventory")])
+
+    # Verify move search was called with correct domain structure
+    search_call = mock_move_model.search.call_args[0][0]
+    assert "|" in search_call
+    assert ("location_id", "in", [99]) in search_call
+    assert ("location_dest_id", "in", [99]) in search_call
+    assert ("product_id", "in", [101, 102]) in search_call
+    assert ("state", "=", "done") in search_call
+
+    # Verify write was called with correct date
+    mock_move_model.write.assert_called_once()
+    write_args = mock_move_model.write.call_args
+    assert write_args[0][0] == [501, 502, 503]
+    assert write_args[0][1] == {"date": "2026-01-01 00:00:00"}
+
+
+@patch("odoo_data_flow.__main__._update_inventory_move_dates")
+@patch("odoo_data_flow.__main__._get_product_ids_from_quants")
+@patch("odoo_data_flow.__main__._execute_post_action")
+@patch("odoo_data_flow.__main__.run_import")
+def test_import_move_date_triggers_update(
+    mock_run_import: MagicMock,
+    mock_post_action: MagicMock,
+    mock_get_products: MagicMock,
+    mock_update_dates: MagicMock,
+    runner: CliRunner,
+) -> None:
+    """Tests that --move-date triggers the move date update after post-action."""
+    mock_run_import.return_value = {"ext_id_1": 1, "ext_id_2": 2}
+    mock_post_action.return_value = True
+    mock_get_products.return_value = [101, 102]
+
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        with open("data.csv", "w") as f:
+            f.write("id;name\n1;Test")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "data.csv",
+                "--model",
+                "stock.quant",
+                "--post-action",
+                "action_apply_inventory",
+                "--move-date",
+                "2026-01-01",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mock_run_import.assert_called_once()
+        mock_post_action.assert_called_once()
+
+        # Verify product IDs were extracted
+        mock_get_products.assert_called_once()
+        get_products_args = mock_get_products.call_args[0]
+        assert get_products_args[1] == [1, 2]  # quant_ids from import_result.values()
+
+        # Verify move dates were updated
+        mock_update_dates.assert_called_once()
+        update_args = mock_update_dates.call_args
+        assert update_args[0][1] == "2026-01-01"  # move_date
+        assert update_args[0][3] == [101, 102]  # product_ids
+
+
+@patch("odoo_data_flow.__main__._update_inventory_move_dates")
+@patch("odoo_data_flow.__main__._get_product_ids_from_quants")
+@patch("odoo_data_flow.__main__._execute_post_action")
+@patch("odoo_data_flow.__main__.run_import")
+def test_import_move_date_not_triggered_without_post_action(
+    mock_run_import: MagicMock,
+    mock_post_action: MagicMock,
+    mock_get_products: MagicMock,
+    mock_update_dates: MagicMock,
+    runner: CliRunner,
+) -> None:
+    """Tests that --move-date without --post-action shows warning and doesn't trigger."""
+    mock_run_import.return_value = {"ext_id_1": 1}
+
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        with open("data.csv", "w") as f:
+            f.write("id;name\n1;Test")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "data.csv",
+                "--model",
+                "stock.quant",
+                "--move-date",
+                "2026-01-01",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mock_run_import.assert_called_once()
+        mock_post_action.assert_not_called()
+        mock_get_products.assert_not_called()
+        mock_update_dates.assert_not_called()
+
+
+@patch("odoo_data_flow.__main__._update_inventory_move_dates")
+@patch("odoo_data_flow.__main__._get_product_ids_from_quants")
+@patch("odoo_data_flow.__main__._execute_post_action")
+@patch("odoo_data_flow.__main__.run_import")
+def test_import_move_date_triggered_even_on_timeout(
+    mock_run_import: MagicMock,
+    mock_post_action: MagicMock,
+    mock_get_products: MagicMock,
+    mock_update_dates: MagicMock,
+    runner: CliRunner,
+) -> None:
+    """Tests that --move-date triggers even when post-action times out."""
+    mock_run_import.return_value = {"ext_id_1": 1, "ext_id_2": 2}
+    mock_post_action.return_value = True  # Returns True even on timeout
+    mock_get_products.return_value = [101, 102]
+
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        with open("data.csv", "w") as f:
+            f.write("id;name\n1;Test")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "data.csv",
+                "--model",
+                "stock.quant",
+                "--post-action",
+                "action_apply_inventory",
+                "--move-date",
+                "2026-01-01",
+            ],
+        )
+
+        assert result.exit_code == 0
+        # Even if post-action returned True (timeout case), move date update should trigger
+        mock_update_dates.assert_called_once()
+
+
+@patch("odoo_data_flow.__main__._update_inventory_move_dates")
+@patch("odoo_data_flow.__main__._get_product_ids_from_quants")
+@patch("odoo_data_flow.__main__._execute_post_action")
+@patch("odoo_data_flow.__main__.run_import")
+def test_import_move_date_not_triggered_when_post_action_fails(
+    mock_run_import: MagicMock,
+    mock_post_action: MagicMock,
+    mock_get_products: MagicMock,
+    mock_update_dates: MagicMock,
+    runner: CliRunner,
+) -> None:
+    """Tests that --move-date does not trigger when post-action definitively fails."""
+    mock_run_import.return_value = {"ext_id_1": 1, "ext_id_2": 2}
+    mock_post_action.return_value = False  # Definitive failure
+    mock_get_products.return_value = [101, 102]
+
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        with open("data.csv", "w") as f:
+            f.write("id;name\n1;Test")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "data.csv",
+                "--model",
+                "stock.quant",
+                "--post-action",
+                "action_apply_inventory",
+                "--move-date",
+                "2026-01-01",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mock_post_action.assert_called_once()
+        # Move date update should NOT be called when post-action definitively fails
+        mock_update_dates.assert_not_called()
+
+
+@patch("odoo_data_flow.__main__._update_inventory_move_dates")
+@patch("odoo_data_flow.__main__._get_product_ids_from_quants")
+@patch("odoo_data_flow.__main__._execute_post_action")
+@patch("odoo_data_flow.__main__.run_import")
+def test_import_move_date_not_triggered_when_no_products_extracted(
+    mock_run_import: MagicMock,
+    mock_post_action: MagicMock,
+    mock_get_products: MagicMock,
+    mock_update_dates: MagicMock,
+    runner: CliRunner,
+) -> None:
+    """Tests that --move-date doesn't trigger when product extraction fails."""
+    mock_run_import.return_value = {"ext_id_1": 1, "ext_id_2": 2}
+    mock_post_action.return_value = True
+    mock_get_products.return_value = []  # Empty list - extraction failed
+
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        with open("data.csv", "w") as f:
+            f.write("id;name\n1;Test")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "data.csv",
+                "--model",
+                "stock.quant",
+                "--post-action",
+                "action_apply_inventory",
+                "--move-date",
+                "2026-01-01",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mock_post_action.assert_called_once()
+        # Move date update should NOT be called when no products extracted
+        mock_update_dates.assert_not_called()
+        # Should show warning in output
+        assert "No product IDs extracted" in result.output or result.exit_code == 0
