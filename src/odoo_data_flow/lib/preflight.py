@@ -397,6 +397,46 @@ def _validate_header(
         )
         _show_warning_panel("ReadOnly Fields Detected", warning_message)
 
+    # Check for company-dependent fields that require special handling
+    company_dependent_fields = []
+    for field in csv_header:
+        clean_field = field.split("/")[0]
+        if clean_field == "id":
+            continue
+        if clean_field in odoo_fields:
+            field_info = odoo_fields[clean_field]
+            is_company_dependent = field_info.get("company_dependent", False)
+
+            if is_company_dependent:
+                company_dependent_fields.append(
+                    {
+                        "field": field,
+                        "type": field_info.get("type", "unknown"),
+                    }
+                )
+
+    # Warn about company-dependent fields
+    if company_dependent_fields:
+        warning_message = (
+            "The following fields are [bold]company-dependent[/bold]:\n"
+        )
+        for field_info in company_dependent_fields:
+            warning_message += (
+                f"  - '{field_info['field']}' ({field_info['type']})\n"
+            )
+        warning_message += (
+            "\n[bold]Important:[/bold] These fields store separate values per company.\n"
+            "Without --company-id, values will only be set for the first company\n"
+            "in allowed_company_ids (usually company 1).\n\n"
+            "[bold]Recommended workflow:[/bold]\n"
+            "  1. Import products WITHOUT these fields (or --ignore them)\n"
+            "  2. Import these fields separately per company using --company-id X\n\n"
+            "Example:\n"
+            "  odoo-data-flow import --file costs.csv --company-id 1\n"
+            "  odoo-data-flow import --file costs.csv --company-id 2"
+        )
+        _show_warning_panel("Company-Dependent Fields Detected", warning_message)
+
     return True
 
 
