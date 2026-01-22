@@ -34,6 +34,39 @@ class TestErrorCategorization:
         assert category == retry.ErrorCategory.TRANSIENT
         assert pattern == "connection pool"
 
+    def test_categorize_transient_json_decode_error(self) -> None:
+        """Test that JSONDecodeError (empty response) is categorized as transient."""
+        # This error occurs when server crashes/restarts with single worker
+        category, pattern = retry.categorize_error(
+            "JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+        )
+        assert category == retry.ErrorCategory.TRANSIENT
+        assert pattern in ("jsondecode", "json decode", "expecting value")
+
+    def test_categorize_transient_empty_response(self) -> None:
+        """Test that empty response errors are categorized as transient."""
+        category, pattern = retry.categorize_error("Empty response from server")
+        assert category == retry.ErrorCategory.TRANSIENT
+        assert pattern == "empty response"
+
+    def test_categorize_transient_connection_reset(self) -> None:
+        """Test that connection reset errors are categorized as transient."""
+        category, pattern = retry.categorize_error("Connection reset by peer")
+        assert category == retry.ErrorCategory.TRANSIENT
+        assert pattern == "connection reset"
+
+    def test_categorize_transient_broken_pipe(self) -> None:
+        """Test that broken pipe errors are categorized as transient."""
+        category, pattern = retry.categorize_error("Broken pipe")
+        assert category == retry.ErrorCategory.TRANSIENT
+        assert pattern == "broken pipe"
+
+    def test_categorize_transient_500_error(self) -> None:
+        """Test that 500 internal server errors are categorized as transient."""
+        category, pattern = retry.categorize_error("500 Internal Server Error")
+        assert category == retry.ErrorCategory.TRANSIENT
+        assert pattern in ("500", "internal server error")
+
     def test_categorize_permanent_unique_constraint(self) -> None:
         """Test that unique constraint errors are categorized as permanent."""
         category, pattern = retry.categorize_error(

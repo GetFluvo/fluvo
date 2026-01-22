@@ -1883,24 +1883,60 @@ def _execute_load_batch(  # noqa: C901
             # Transient errors: retry with exponential backoff
             is_transient = error_category == retry_lib.ErrorCategory.TRANSIENT
 
-            # Detect server overload for adaptive throttling
-            is_server_overload = error_pattern in (
+            # Detect server overload/crash for adaptive throttling
+            # Includes HTTP errors, server crashes, and empty response patterns
+            server_error_patterns = (
                 "502",
                 "503",
+                "504",
+                "500",
                 "service unavailable",
                 "bad gateway",
+                "gateway timeout",
+                "internal server error",
+                # Server crash indicators (empty/malformed response)
+                "jsondecode",
+                "json decode",
+                "expecting value",
+                "empty response",
+                "incomplete read",
+                "eof occurred",
+                "connection reset",
+                "connection closed",
+                "broken pipe",
+                "server closed connection",
             )
+            is_server_overload = error_pattern in server_error_patterns
 
             if is_server_overload:
                 # Adaptive throttling with exponential backoff
+                # Use longer delays for server crash recovery (single worker may take time)
                 retry_attempt = thread_state.get("retry_attempt", 0) + 1
                 thread_state["retry_attempt"] = retry_attempt
-                backoff_config = retry_lib.RetryConfig(
-                    base_delay=1.0, max_delay=30.0, exponential_base=2.0
+
+                # Longer backoff for server crashes (up to 120s for worker restart)
+                is_likely_crash = error_pattern in (
+                    "jsondecode",
+                    "json decode",
+                    "expecting value",
+                    "empty response",
+                    "connection reset",
+                    "eof occurred",
                 )
+                if is_likely_crash:
+                    backoff_config = retry_lib.RetryConfig(
+                        base_delay=5.0, max_delay=120.0, exponential_base=2.0
+                    )
+                    error_type = "Server crash/empty response"
+                else:
+                    backoff_config = retry_lib.RetryConfig(
+                        base_delay=1.0, max_delay=60.0, exponential_base=2.0
+                    )
+                    error_type = "Server overload"
+
                 delay = retry_lib.calculate_backoff_delay(retry_attempt, backoff_config)
                 progress.console.print(
-                    f"[yellow]WARN:[/] Server overload detected ({error_pattern}). "
+                    f"[yellow]WARN:[/] {error_type} detected ({error_pattern}). "
                     f"Backing off for {delay:.1f}s (attempt {retry_attempt})."
                 )
                 time.sleep(delay)

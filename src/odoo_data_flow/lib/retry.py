@@ -74,6 +74,10 @@ TRANSIENT_ERROR_PATTERNS = [
     "network unreachable",
     "name resolution failed",
     "dns",
+    "broken pipe",
+    "connection aborted",
+    "remotedisconnected",
+    "connectionerror",
     # Server overload
     "502",
     "503",
@@ -84,6 +88,16 @@ TRANSIENT_ERROR_PATTERNS = [
     "server busy",
     "too many requests",
     "rate limit",
+    # Server crash / empty response (common with single worker)
+    "jsondecode",
+    "json decode",
+    "expecting value",  # JSONDecodeError message
+    "empty response",
+    "no data",
+    "incomplete read",
+    "response ended prematurely",
+    "eof occurred",
+    "unexpected eof",
     # Database contention
     "could not serialize access",
     "concurrent update",
@@ -100,6 +114,9 @@ TRANSIENT_ERROR_PATTERNS = [
     "bus.bus",
     "cursor already closed",
     "transaction aborted",
+    "server closed connection",
+    "internal server error",
+    "500",
 ]
 
 PERMANENT_ERROR_PATTERNS = [
