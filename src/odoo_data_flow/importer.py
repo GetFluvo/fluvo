@@ -148,7 +148,7 @@ def run_import(  # noqa: C901
     check_refs: str = "warn",
     skip_unchanged: bool = False,
     skip_existing: bool = False,
-    adaptive_throttle: bool = False,
+    adaptive_throttle: bool = True,
 ) -> Optional[dict[str, int]]:
     """Main entry point for the import command, handling all orchestration.
 

@@ -1077,11 +1077,11 @@ def vat_validate_cmd(
     "Ideal for stock.quant and other models with update restrictions.",
 )
 @click.option(
-    "--adaptive-throttle",
-    is_flag=True,
-    default=False,
-    help="Enable health-aware throttling that automatically adjusts batch sizes "
-    "and delays based on server response times. Helps prevent server overload.",
+    "--adaptive-throttle/--no-adaptive-throttle",
+    default=True,
+    help="Health-aware throttling that automatically adjusts batch sizes "
+    "and delays based on server response times. Enabled by default to prevent "
+    "server overload. Use --no-adaptive-throttle to disable for maximum speed.",
 )
 @click.option(
     "--sudo",

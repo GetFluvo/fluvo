@@ -2778,7 +2778,7 @@ def import_data(  # noqa: C901
     enable_checkpoint: bool = True,
     skip_unchanged: bool = False,
     skip_existing: bool = False,
-    adaptive_throttle: bool = False,
+    adaptive_throttle: bool = True,
 ) -> tuple[bool, dict[str, int]]:
     """Orchestrates a robust, multi-threaded, two-pass import process.
 
