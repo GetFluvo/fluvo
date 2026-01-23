@@ -24,76 +24,76 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 __all__ = [
-    # Composition
-    "pipe",
-    "when",
-    "fallback",
-    # String cleaners
-    "strip",
-    "normalize_space",
-    "lower",
-    "upper",
-    "title",
-    "capitalize",
-    "remove",
-    "keep",
-    "replace",
-    "regex_sub",
-    "truncate",
-    "default",
-    # Phone cleaners
-    "phone",
-    "phone_digits",
-    "phone_normalize",
-    "phone_clean",
-    # Email cleaners
-    "email",
-    "email_domain",
-    "website_from_email",
-    # URL cleaners
-    "url",
-    "url_https",
-    "url_fix_www",
-    "url_ensure_scheme",
-    # VAT cleaners
-    "vat",
-    "vat_or_exempt",
-    "vat_clean",
-    # Zip cleaners
-    "zip_code",
-    "zip_strip_prefix",
-    # Address cleaners
-    "separate_city_postal",
-    "detect_country",
-    # Name cleaners
-    "name_strip_title",
-    "name_strip_suffix",
-    "name_split_first",
-    "name_split_last",
-    "name_filter_common",
-    "name_clean",
-    # Date cleaners
-    "date_parse",
-    "date_normalize",
-    # Numeric cleaners
-    "digits",
-    "numeric",
-    "integer",
     # Constants (extensible)
     "COMMON_EMAIL_PROVIDERS",
     "COMMON_FILTER_NAMES",
-    "TITLES",
-    "SUFFIXES",
-    "VAT_EXEMPT_VALUES",
+    "COMPANY_SUFFIX_CANONICAL",
     "PHONE_COUNTRY_RULES",
     "PHONE_PREFIX_TO_COUNTRY",
     "POSTAL_PATTERNS",
+    "SUFFIXES",
+    "TITLES",
+    "VAT_EXEMPT_VALUES",
+    "capitalize",
     # Company cleaners
     "company_suffix",
-    "COMPANY_SUFFIX_CANONICAL",
+    "date_normalize",
+    # Date cleaners
+    "date_parse",
+    "default",
+    "detect_country",
+    # Numeric cleaners
+    "digits",
+    # Email cleaners
+    "email",
+    "email_domain",
+    "fallback",
+    "integer",
+    "keep",
+    "lower",
+    "name_clean",
+    "name_filter_common",
+    "name_split_first",
+    "name_split_last",
+    "name_strip_suffix",
+    # Name cleaners
+    "name_strip_title",
+    "normalize_space",
+    "numeric",
+    # Phone cleaners
+    "phone",
+    "phone_clean",
+    "phone_digits",
+    "phone_normalize",
+    # Composition
+    "pipe",
+    "regex_sub",
+    "remove",
+    "replace",
+    # Address cleaners
+    "separate_city_postal",
+    # String cleaners
+    "strip",
+    "title",
+    "truncate",
+    "upper",
+    # URL cleaners
+    "url",
+    "url_ensure_scheme",
+    "url_fix_www",
+    "url_https",
+    # VAT cleaners
+    "vat",
+    "vat_clean",
+    "vat_or_exempt",
+    "website_from_email",
+    "when",
+    # Zip cleaners
+    "zip_code",
+    "zip_strip_prefix",
 ]
 
 # Type alias for cleaner functions
@@ -416,7 +416,7 @@ def pipe(*cleaners: Cleaner) -> Cleaner:
 def when(
     condition: Callable[[Any], bool],
     then: Cleaner,
-    else_: Optional[Cleaner] = None,
+    else_: Cleaner | None = None,
 ) -> Cleaner:
     """Conditional cleaning.
 
@@ -669,7 +669,7 @@ def phone_digits() -> Cleaner:
 
 def phone_normalize(
     country: str,
-    rules: Optional[dict[str, dict[str, str]]] = None,
+    rules: dict[str, dict[str, str]] | None = None,
 ) -> Cleaner:
     """Normalize phone number for specific country.
 
@@ -728,8 +728,8 @@ def phone_normalize(
 
 
 def phone_clean(
-    country: Optional[str] = None,
-    rules: Optional[dict[str, dict[str, str]]] = None,
+    country: str | None = None,
+    rules: dict[str, dict[str, str]] | None = None,
 ) -> Cleaner:
     """All-in-one phone cleaner: strip, normalize format, apply country rules.
 
@@ -759,7 +759,7 @@ def email() -> Callable[..., Any]:
     Can be called with 1 arg (value) or 2 args (value, state).
     """
 
-    def clean(value: Any, state: Optional[dict[str, Any]] = None) -> Any:
+    def clean(value: Any, state: dict[str, Any] | None = None) -> Any:
         if not value or not isinstance(value, str):
             return value
 
@@ -807,7 +807,7 @@ def email_domain() -> Cleaner:
 
 
 def website_from_email(
-    providers: Optional[set[str]] = None,
+    providers: set[str] | None = None,
     scheme: str = "https://www.",
 ) -> Callable[..., Any]:
     """Derive website from previously parsed email domain (stateful).
@@ -823,7 +823,7 @@ def website_from_email(
     """
     providers_set = providers or COMMON_EMAIL_PROVIDERS
 
-    def clean(value: Any, state: Optional[dict[str, Any]] = None) -> Any:
+    def clean(value: Any, state: dict[str, Any] | None = None) -> Any:
         # Only fill if website is empty
         if value and str(value).strip():
             return value
@@ -936,7 +936,7 @@ def vat() -> Cleaner:
 
 
 def vat_or_exempt(
-    exempt_values: Optional[set[str]] = None,
+    exempt_values: set[str] | None = None,
     marker: str = "/",
     exempt_output: str = "vat exempt",
 ) -> Cleaner:
@@ -1090,8 +1090,8 @@ def street() -> Cleaner:
 
 
 def separate_city_postal(
-    country: Optional[str] = None,
-    patterns: Optional[dict[str, tuple[str, str]]] = None,
+    country: str | None = None,
+    patterns: dict[str, tuple[str, str]] | None = None,
 ) -> Callable[[Any], tuple[str, str]]:
     """Separate city and postal code from a combined field.
 
@@ -1167,7 +1167,7 @@ def separate_city_postal(
         for _country_code, pattern, position in compiled_patterns:
             match = pattern.search(value.upper())
             if match:
-                postal = match.group(0)
+                match.group(0)
                 # Get original case postal from the value
                 start, end = match.start(), match.end()
                 # Map positions back to original (non-uppercased) string
@@ -1188,14 +1188,14 @@ def separate_city_postal(
     return clean
 
 
-def detect_country(
-    phone: Optional[str] = None,
-    postal: Optional[str] = None,
-    city: Optional[str] = None,
-    phone_prefixes: Optional[dict[str, str]] = None,
-    postal_patterns: Optional[dict[str, tuple[str, str]]] = None,
-    cities: Optional[dict[str, str]] = None,
-) -> Optional[str]:
+def detect_country(  # noqa: C901
+    phone: str | None = None,
+    postal: str | None = None,
+    city: str | None = None,
+    phone_prefixes: dict[str, str] | None = None,
+    postal_patterns: dict[str, tuple[str, str]] | None = None,
+    cities: dict[str, str] | None = None,
+) -> str | None:
     """Detect country code from available hints (phone, postal code, city).
 
     Uses multiple signals to infer the country when it's missing:
@@ -1299,7 +1299,7 @@ def detect_country(
 # =============================================================================
 
 
-def name_strip_title(titles: Optional[set[str]] = None) -> Cleaner:
+def name_strip_title(titles: set[str] | None = None) -> Cleaner:
     """Remove common titles from name.
 
     Args:
@@ -1318,7 +1318,7 @@ def name_strip_title(titles: Optional[set[str]] = None) -> Cleaner:
     return clean
 
 
-def name_strip_suffix(suffixes: Optional[set[str]] = None) -> Cleaner:
+def name_strip_suffix(suffixes: set[str] | None = None) -> Cleaner:
     """Remove common suffixes from name.
 
     Args:
@@ -1361,7 +1361,7 @@ def name_split_last() -> Cleaner:
     return clean
 
 
-def name_filter_common(filter_names: Optional[set[str]] = None) -> Cleaner:
+def name_filter_common(filter_names: set[str] | None = None) -> Cleaner:
     """Return None if name is a common placeholder.
 
     Args:
@@ -1380,8 +1380,8 @@ def name_filter_common(filter_names: Optional[set[str]] = None) -> Cleaner:
 
 
 def name_clean(
-    titles: Optional[set[str]] = None,
-    suffixes: Optional[set[str]] = None,
+    titles: set[str] | None = None,
+    suffixes: set[str] | None = None,
 ) -> Cleaner:
     """All-in-one name cleaner: strip, normalize space, remove titles/suffixes.
 
@@ -1408,7 +1408,7 @@ def _normalize_company_suffix(suffix: str) -> str:
 
 
 def _build_suffix_pattern(normalized: str) -> str:
-    """Build regex pattern for suffix that matches with/without dots/spaces.
+    r"""Build regex pattern for suffix that matches with/without dots/spaces.
 
     E.g., "bv" -> "[Bb]\\.?\\s*[Vv]"
     E.g., "gmbh" -> "[Gg]\\.?\\s*[Mm]\\.?\\s*[Bb]\\.?\\s*[Hh]"
@@ -1426,7 +1426,7 @@ def _build_suffix_pattern(normalized: str) -> str:
 
 
 def company_suffix(
-    suffixes: Optional[dict[str, str]] = None,
+    suffixes: dict[str, str] | None = None,
 ) -> Cleaner:
     """Normalize company legal suffix (e.g., "BV" → "B.V.", "gmbh" → "GmbH").
 
@@ -1487,7 +1487,7 @@ def company_suffix(
         match = full_pattern.search(value)
         if match:
             # Get the space before suffix and the matched suffix
-            space = match.group(1)
+            match.group(1)
             matched_suffix = match.group(2)
 
             # Normalize the matched suffix for lookup
@@ -1541,7 +1541,7 @@ def date_parse(
 
 
 def date_normalize(
-    input_formats: Optional[list[str]] = None,
+    input_formats: list[str] | None = None,
 ) -> Cleaner:
     """Normalize date to ISO format (YYYY-MM-DD).
 

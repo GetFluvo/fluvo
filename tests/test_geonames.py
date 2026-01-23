@@ -1,6 +1,5 @@
 """Tests for the geonames module."""
 
-import tempfile
 import zipfile
 from pathlib import Path
 from unittest import mock
@@ -84,9 +83,7 @@ class TestLoadCities:
             assert "longitude" in df.columns
             assert "population" in df.columns
 
-    def test_load_cities_min_population_filter(
-        self, sample_cities_file: Path
-    ) -> None:
+    def test_load_cities_min_population_filter(self, sample_cities_file: Path) -> None:
         """Test population filtering."""
         with mock.patch.object(
             geonames, "_get_cached_file", return_value=sample_cities_file
@@ -111,10 +108,13 @@ class TestGetCitiesLookup:
     @pytest.fixture
     def sample_cities_file(self, tmp_path: Path) -> Path:
         """Create a sample cities file for testing."""
+        # GeoNames TSV format - lines are intentionally long
         content = (
-            "2759794\tAmsterdam\tAmsterdam\tAmsterdam,Mokum,'s-Gravenhage\t52.37403\t4.88969\t"
+            "2759794\tAmsterdam\tAmsterdam\t"
+            "Amsterdam,Mokum,'s-Gravenhage\t52.37403\t4.88969\t"
             "P\tPPLA\tNL\t\t07\t\t\t\t872680\t-2\t13\tEurope/Amsterdam\t2023-01-01\n"
-            "2747373\tThe Hague\tThe Hague\tDen Haag,'s-Gravenhage,La Haye\t52.07667\t4.29861\t"
+            "2747373\tThe Hague\tThe Hague\t"
+            "Den Haag,'s-Gravenhage,La Haye\t52.07667\t4.29861\t"
             "P\tPPLC\tNL\t\t11\t\t\t\t514861\t\t5\tEurope/Amsterdam\t2023-01-01\n"
             "2968815\tParis\tParis\tParis,Parigi\t48.85341\t2.3488\t"
             "P\tPPLC\tFR\t\t11\t75\t751\t75056\t2102650\t\t42\tEurope/Paris\t2023-01-01\n"
@@ -202,13 +202,12 @@ class TestDownloadDataset:
             # Setup mock response
             mock_response = mock.MagicMock()
             mock_response.iter_bytes.return_value = [zip_content]
-            mock_client.return_value.__enter__.return_value.stream.return_value.__enter__.return_value = (
-                mock_response
-            )
+            client_enter = mock_client.return_value.__enter__.return_value
+            client_enter.stream.return_value.__enter__.return_value = mock_response
 
             # Should attempt to download even though cached
             with pytest.raises(zipfile.BadZipFile):
-                # Will fail because our mock zip is invalid, but proves download attempted
+                # Fails because mock zip is invalid, but proves download attempted
                 geonames.download_dataset("cities15000", force=True)
 
 
@@ -331,9 +330,7 @@ class TestIntegrationWithClean:
         cities_file.write_text(content)
         return cities_file
 
-    def test_cities_lookup_with_detect_country(
-        self, sample_cities_file: Path
-    ) -> None:
+    def test_cities_lookup_with_detect_country(self, sample_cities_file: Path) -> None:
         """Test using geonames lookup with clean.detect_country."""
         from odoo_data_flow.lib import clean
 

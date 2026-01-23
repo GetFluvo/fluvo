@@ -463,12 +463,14 @@ def _prepare_pass_2_data(  # noqa: C901
         except Exception as e:
             log.debug(f"Could not get ir.model.data proxy: {e}")
 
-    print(f"  [Pass 2] ir.model.data proxy: {'found' if ir_model_data_proxy else 'not found'}")
+    proxy_status = "found" if ir_model_data_proxy else "not found"
+    print(f"  [Pass 2] ir.model.data proxy: {proxy_status}")
     print(f"  [Pass 2] Processing {len(all_data)} records...")
 
     # Import the sanitization function to match id_map key format
-    from .lib.internal.tools import to_xmlid
     import time
+
+    from .lib.internal.tools import to_xmlid
 
     # Cache for external ID lookups to avoid repeated RPC calls
     external_id_cache: dict[str, Optional[int]] = {}
@@ -545,7 +547,7 @@ def _prepare_pass_2_data(  # noqa: C901
                             else:
                                 log.warning(
                                     f"Missing reference for '{field_name}': "
-                                    f"'{field_value}' not found in id_map or ir.model.data "
+                                    f"'{field_value}' not in id_map/ir.model.data "
                                     f"(source_id={source_id})"
                                 )
                         else:
@@ -568,7 +570,8 @@ def _prepare_pass_2_data(  # noqa: C901
         if update_vals:
             pass_2_data_to_write.append((db_id, update_vals))
 
-    print(f"  [Pass 2] Data preparation complete: {len(pass_2_data_to_write)} records to update")
+    num_to_update = len(pass_2_data_to_write)
+    print(f"  [Pass 2] Data prep complete: {num_to_update} records to update")
     return pass_2_data_to_write
 
 
@@ -867,7 +870,7 @@ def _process_external_id_fields(
     return converted_vals, external_id_fields
 
 
-def _extract_access_error_message(error_str: str) -> str:
+def _extract_access_error_message(error_str: str) -> str:  # noqa: C901
     """Extract a clean, user-friendly message from an access error.
 
     Args:
@@ -886,7 +889,8 @@ def _extract_access_error_message(error_str: str) -> str:
         error_str,
     )
     if remote_match:
-        return f"Access denied: insufficient permissions to access '{remote_match.group(1)}'"
+        model_name = remote_match.group(1)
+        return f"Access denied: insufficient permissions to access '{model_name}'"
 
     # Look for AccessError message pattern
     access_match = re.search(
@@ -1063,7 +1067,9 @@ def _create_xmlid_entry(
                     f"Updating existing ir.model.data entry for {xml_id} "
                     f"from res_id={existing.get('res_id')} to res_id={res_id}"
                 )
-                ir_model_data.write(existing_ids[0], {"res_id": res_id, "model": model_name})
+                ir_model_data.write(
+                    existing_ids[0], {"res_id": res_id, "model": model_name}
+                )
             return True
 
         # Create new ir.model.data entry
@@ -1147,7 +1153,9 @@ def _load_records_individually(  # noqa: C901
 
                 # Ensure XML ID is persisted (load() sometimes fails to create it)
                 if sanitized_source_id and sanitized_source_id.strip():
-                    _create_xmlid_entry(connection, sanitized_source_id, new_id, model_name)
+                    _create_xmlid_entry(
+                        connection, sanitized_source_id, new_id, model_name
+                    )
             else:
                 # Load failed - extract error message
                 error_msg = "Unknown error during load"
@@ -1233,7 +1241,7 @@ def _load_records_individually(  # noqa: C901
 _create_batch_individually = _load_records_individually
 
 
-def _load_batch_with_binary_fallback(
+def _load_batch_with_binary_fallback(  # noqa: C901
     model: Any,
     connection: Any,
     batch_lines: list[list[Any]],
@@ -1278,7 +1286,10 @@ def _load_batch_with_binary_fallback(
     valid_lines = []
     for line in batch_lines:
         if len(line) != header_len:
-            error_msg = f"Malformed row: Row has {len(line)} columns, but header has {header_len}."
+            error_msg = (
+                f"Malformed row: Row has {len(line)} columns, "
+                f"but header has {header_len}."
+            )
             aggregated_failed_lines.append([*line, error_msg])
         else:
             valid_lines.append(line)
@@ -1323,7 +1334,9 @@ def _load_batch_with_binary_fallback(
         filtered_line = [line[i] for i in filter_indices]
         # Sanitize ID field
         if uid_index_in_load >= 0 and uid_index_in_load < len(filtered_line):
-            filtered_line[uid_index_in_load] = to_xmlid(filtered_line[uid_index_in_load])
+            filtered_line[uid_index_in_load] = to_xmlid(
+                filtered_line[uid_index_in_load]
+            )
         sanitized_load_lines.append(filtered_line)
 
     needs_split = False
@@ -1909,8 +1922,8 @@ def _execute_load_batch(  # noqa: C901
             is_server_overload = error_pattern in server_error_patterns
 
             if is_server_overload:
-                # Adaptive throttling with exponential backoff
-                # Use longer delays for server crash recovery (single worker may take time)
+                # Adaptive throttling with exponential backoff.
+                # Use longer delays for crash recovery (worker may need time)
                 retry_attempt = thread_state.get("retry_attempt", 0) + 1
                 thread_state["retry_attempt"] = retry_attempt
 
@@ -2089,7 +2102,7 @@ def _execute_write_batch(
                     if progress:
                         progress.console.print(
                             f"[yellow]WARN:[/] Pass 2 batch {batch_number} timed out. "
-                            f"Retrying in {delay:.1f}s (attempt {retry_count}/{max_retries})..."
+                            f"Retrying in {delay:.1f}s ({retry_count}/{max_retries})..."
                         )
                     time.sleep(delay)
                     continue
@@ -2097,7 +2110,9 @@ def _execute_write_batch(
                 # Non-retryable error or max retries exceeded
                 error_message = error_str.replace("\n", " | ")
                 if is_timeout and retry_count >= max_retries:
-                    error_message = f"Timeout after {max_retries} retries: {error_message}"
+                    error_message = (
+                        f"Timeout after {max_retries} retries: {error_message}"
+                    )
 
                 # All IDs in this operation are considered failed
                 for db_id in ids:
@@ -2345,6 +2360,7 @@ def _orchestrate_pass_1(
         progress (Progress): The rich Progress instance for updating the UI.
         model_obj (Any): The connected Odoo model object used for RPC calls.
         model_name (str): The technical name of the target Odoo model.
+        connection (Any): The Odoo connection object for RPC calls.
         header (list[str]): The complete header from the source CSV file.
         all_data (list[list[Any]]): The complete data from the source CSV.
         unique_id_field (str): The name of the column containing the unique
@@ -2448,6 +2464,7 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
         progress: The rich Progress instance for updating the UI.
         model_obj: The connected Odoo model object used for RPC calls.
         model_name: The technical name of the target Odoo model.
+        connection: The Odoo connection object for RPC calls.
         file_csv: Path to the source CSV file.
         separator: The CSV delimiter character.
         encoding: The character encoding of the file.
@@ -2571,7 +2588,7 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
     }
 
 
-def _orchestrate_pass_2(
+def _orchestrate_pass_2(  # noqa: C901
     progress: Progress,
     model_obj: Any,
     model_name: str,
@@ -2690,9 +2707,10 @@ def _orchestrate_pass_2(
 
     num_batches = len(pass_2_batches)
     total_ops = len(individual_writes)
+    avg_ops = total_ops / max(num_batches, 1)
     progress.console.print(
-        f"[blue]INFO:[/blue] Pass 2: Aggregated {total_ops} write operations into "
-        f"{num_batches} super-batches (avg {total_ops / max(num_batches, 1):.1f} ops/batch)"
+        f"[blue]INFO:[/blue] Pass 2: Aggregated {total_ops} write ops into "
+        f"{num_batches} super-batches (avg {avg_ops:.1f} ops/batch)"
     )
     pass_2_task = progress.add_task(
         f"Pass 2/2: Updating [bold]{model_name}[/bold] relations",
@@ -2715,9 +2733,7 @@ def _orchestrate_pass_2(
         list(enumerate(pass_2_batches, 1)),
         thread_state_2,
     )
-    progress.console.print(
-        f"[blue]INFO:[/blue] Pass 2: Threaded pass complete"
-    )
+    progress.console.print("[blue]INFO:[/blue] Pass 2: Threaded pass complete")
 
     failed_writes = pass_2_results.get("failed_writes", [])
     if fail_writer and failed_writes:
@@ -2969,7 +2985,9 @@ def import_data(  # noqa: C901
     # Apply skip_existing filtering if enabled (skip records with existing external IDs)
     skip_existing_stats: dict[str, int] = {"skipped": 0, "total": 0}
     if skip_existing and not can_stream and header and all_data:
-        log.info("Skip-existing mode: checking for records with existing external IDs...")
+        log.info(
+            "Skip-existing mode: checking for records with existing external IDs..."
+        )
         try:
             id_field = unique_id_field or "id"
             if id_field in header:
@@ -2990,17 +3008,19 @@ def import_data(  # noqa: C901
                             ids_by_module.setdefault(module, []).append(name)
 
                 if ids_by_module:
-                    # Query ir.model.data for existing external IDs (batch query per module)
+                    # Query ir.model.data for existing external IDs
                     ir_model_data = connection.get_model("ir.model.data")
                     existing_ext_ids: set[str] = set()
 
                     for module, names in ids_by_module.items():
                         # Batch query: find all existing names for this module
-                        found_ids = ir_model_data.search([
-                            ("module", "=", module),
-                            ("name", "in", names),
-                            ("model", "=", model),
-                        ])
+                        found_ids = ir_model_data.search(
+                            [
+                                ("module", "=", module),
+                                ("name", "in", names),
+                                ("model", "=", model),
+                            ]
+                        )
                         if found_ids:
                             # Read the found records to get their full external IDs
                             found_data = ir_model_data.read(
@@ -3024,9 +3044,10 @@ def import_data(  # noqa: C901
                         skip_existing_stats["skipped"] = skipped_count
                         all_data = filtered_data
 
+                        new_count = len(all_data)
                         log.info(
-                            f"Skip-existing filter: {original_count} -> {len(all_data)} "
-                            f"records (skipped {skipped_count} with existing external IDs)"
+                            f"Skip-existing: {original_count} -> {new_count} records "
+                            f"(skipped {skipped_count} with existing external IDs)"
                         )
 
                         if skipped_count > 0:
@@ -3034,8 +3055,11 @@ def import_data(  # noqa: C901
                             example_ids = list(existing_ext_ids)[:5]
                             log.info(
                                 f"Example skipped external IDs: {example_ids}"
-                                + (f" ... and {len(existing_ext_ids) - 5} more"
-                                   if len(existing_ext_ids) > 5 else "")
+                                + (
+                                    f" ... and {len(existing_ext_ids) - 5} more"
+                                    if len(existing_ext_ids) > 5
+                                    else ""
+                                )
                             )
                     else:
                         log.debug("No existing external IDs found, all records are new")

@@ -1,6 +1,7 @@
 """Tests for the refactored, low-level, multi-threaded import logic."""
 
 from pathlib import Path
+from typing import Any, Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -395,13 +396,11 @@ class TestPass2Batching:
 
         # Extract all write operations from the super-batch
         # Format: (batch_number, [list of (ids, vals) tuples])
-        batch_number, write_ops = super_batches[0]
+        _batch_number, write_ops = super_batches[0]
         assert len(write_ops) == 3  # Three unique sets of values
 
         # Convert to a dict for easier checking
-        batch_dict = {
-            frozenset(vals.items()): ids for (ids, vals) in write_ops
-        }
+        batch_dict = {frozenset(vals.items()): ids for (ids, vals) in write_ops}
 
         # Check group 1: parent=p1, user=u1
         group1_key = frozenset({"parent_id": 101, "user_id": 201}.items())
@@ -1301,9 +1300,7 @@ class TestLoadRecordsIndividuallyEdgeCases:
     def test_load_records_individually_constraint_violation(self) -> None:
         """Test handling of database constraint violations."""
         mock_model = MagicMock()
-        mock_model.load.side_effect = Exception(
-            "check constraint 'nospaces' violated"
-        )
+        mock_model.load.side_effect = Exception("check constraint 'nospaces' violated")
         mock_connection = MagicMock()
 
         batch_header = ["id", "name"]
@@ -1370,7 +1367,14 @@ class TestLoadBatchWithBinaryFallback:
         ]
 
         result = _load_batch_with_binary_fallback(
-            mock_model, mock_connection, batch_lines, batch_header, 0, {}, [], "res.partner"
+            mock_model,
+            mock_connection,
+            batch_lines,
+            batch_header,
+            0,
+            {},
+            [],
+            "res.partner",
         )
 
         assert result["success"] is True
@@ -1385,12 +1389,19 @@ class TestLoadBatchWithBinaryFallback:
         mock_connection = MagicMock()
 
         # Track which records are being loaded to simulate targeted failures
-        def mock_load(header, lines, context=None):
+        def mock_load(
+            header: list[str],
+            lines: list[list[Any]],
+            context: Optional[dict[str, Any]] = None,
+        ) -> dict[str, Any]:
             # Check if the bad record (rec5) is in the batch
             has_bad = any("rec5" in str(line) for line in lines)
             if has_bad and len(lines) == 1:
                 # Single bad record - return failure
-                return {"ids": [], "messages": [{"message": "Validation error for rec5"}]}
+                return {
+                    "ids": [],
+                    "messages": [{"message": "Validation error for rec5"}],
+                }
             elif has_bad:
                 # Batch contains bad record - raise exception to trigger split
                 raise ValueError("Batch contains invalid data")
@@ -1413,7 +1424,14 @@ class TestLoadBatchWithBinaryFallback:
         ]
 
         result = _load_batch_with_binary_fallback(
-            mock_model, mock_connection, batch_lines, batch_header, 0, {}, [], "res.partner"
+            mock_model,
+            mock_connection,
+            batch_lines,
+            batch_header,
+            0,
+            {},
+            [],
+            "res.partner",
         )
 
         # 7 records should succeed, 1 should fail
@@ -1431,10 +1449,14 @@ class TestLoadBatchWithBinaryFallback:
 
         bad_records = {"rec2", "rec6"}
 
-        def mock_load(header, lines, context=None):
+        def mock_load(
+            header: list[str],
+            lines: list[list[Any]],
+            context: Optional[dict[str, Any]] = None,
+        ) -> dict[str, Any]:
             has_bad = any(line[0] in bad_records for line in lines)
             if has_bad and len(lines) == 1:
-                return {"ids": [], "messages": [{"message": f"Validation error"}]}
+                return {"ids": [], "messages": [{"message": "Validation error"}]}
             elif has_bad:
                 raise ValueError("Batch contains invalid data")
             else:
@@ -1455,7 +1477,14 @@ class TestLoadBatchWithBinaryFallback:
         ]
 
         result = _load_batch_with_binary_fallback(
-            mock_model, mock_connection, batch_lines, batch_header, 0, {}, [], "res.partner"
+            mock_model,
+            mock_connection,
+            batch_lines,
+            batch_header,
+            0,
+            {},
+            [],
+            "res.partner",
         )
 
         # 6 records should succeed, 2 should fail
@@ -1477,7 +1506,14 @@ class TestLoadBatchWithBinaryFallback:
         ]
 
         result = _load_batch_with_binary_fallback(
-            mock_model, mock_connection, batch_lines, batch_header, 0, {}, [], "res.partner"
+            mock_model,
+            mock_connection,
+            batch_lines,
+            batch_header,
+            0,
+            {},
+            [],
+            "res.partner",
         )
 
         # All records should fail
@@ -1492,7 +1528,11 @@ class TestLoadBatchWithBinaryFallback:
         # First call returns partial success, subsequent calls succeed
         call_count = [0]
 
-        def mock_load(header, lines, context=None):
+        def mock_load(
+            header: list[str],
+            lines: list[list[Any]],
+            context: Optional[dict[str, Any]] = None,
+        ) -> dict[str, Any]:
             call_count[0] += 1
             if call_count[0] == 1 and len(lines) == 4:
                 # First batch: partial success - rec2 fails
@@ -1514,7 +1554,14 @@ class TestLoadBatchWithBinaryFallback:
         ]
 
         result = _load_batch_with_binary_fallback(
-            mock_model, mock_connection, batch_lines, batch_header, 0, {}, [], "res.partner"
+            mock_model,
+            mock_connection,
+            batch_lines,
+            batch_header,
+            0,
+            {},
+            [],
+            "res.partner",
         )
 
         # 3 succeed from first batch, 1 fails on retry
@@ -1531,7 +1578,14 @@ class TestLoadBatchWithBinaryFallback:
         batch_lines = [["rec1", "A"]]
 
         result = _load_batch_with_binary_fallback(
-            mock_model, mock_connection, batch_lines, batch_header, 0, {}, [], "res.partner"
+            mock_model,
+            mock_connection,
+            batch_lines,
+            batch_header,
+            0,
+            {},
+            [],
+            "res.partner",
         )
 
         assert result["id_map"].get("rec1") == 42
@@ -1549,7 +1603,7 @@ class TestLoadBatchWithBinaryFallback:
             ["rec2", "B", "ignore2"],
         ]
 
-        result = _load_batch_with_binary_fallback(
+        _load_batch_with_binary_fallback(
             mock_model,
             mock_connection,
             batch_lines,
@@ -1905,7 +1959,7 @@ class TestWarnEmptyIds:
     def test_counts_none_id_values(self) -> None:
         """Test that None id values are counted correctly."""
         header = ["id", "name"]
-        data = [
+        data: list[list[Any]] = [
             [None, "Alice"],  # None id
             ["partner_2", "Bob"],
         ]

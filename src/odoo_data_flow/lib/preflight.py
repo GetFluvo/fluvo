@@ -339,7 +339,7 @@ def _get_csv_header(filename: str, separator: str) -> Optional[list[str]]:
         return None
 
 
-def _validate_header(
+def _validate_header(  # noqa: C901
     csv_header: list[str], odoo_fields: dict[str, Any], model: str
 ) -> bool:
     """Validates that all CSV columns exist as fields on the Odoo model."""
@@ -427,16 +427,13 @@ def _validate_header(
 
     # Warn about company-dependent fields
     if company_dependent_fields:
-        warning_message = (
-            "The following fields are [bold]company-dependent[/bold]:\n"
-        )
+        warning_message = "The following fields are [bold]company-dependent[/bold]:\n"
         for field_info in company_dependent_fields:
-            warning_message += (
-                f"  - '{field_info['field']}' ({field_info['type']})\n"
-            )
+            warning_message += f"  - '{field_info['field']}' ({field_info['type']})\n"
         warning_message += (
-            "\n[bold]Important:[/bold] These fields store separate values per company.\n"
-            "Without --company-id, values will only be set for the first company\n"
+            "\n[bold]Important:[/bold] These fields store separate values per "
+            "company.\nWithout --company-id, values will only be set for the first "
+            "company\n"
             "in allowed_company_ids (usually company 1).\n\n"
             "[bold]Recommended workflow:[/bold]\n"
             "  1. Import products WITHOUT these fields (or --ignore them)\n"
@@ -823,7 +820,7 @@ def _display_missing_references(
 
 
 @register_check
-def reference_check(
+def reference_check(  # noqa: C901
     preflight_mode: "PreflightMode",
     model: str,
     filename: str,

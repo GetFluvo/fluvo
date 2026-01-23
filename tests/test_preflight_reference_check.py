@@ -363,7 +363,11 @@ class TestExtractIdsFromCSV:
 
         ids = preflight._extract_ids_from_csv(str(csv_path), header)
 
-        assert ids == {"__import__.company_a", "__import__.company_b", "__import__.contact_1"}
+        assert ids == {
+            "__import__.company_a",
+            "__import__.company_b",
+            "__import__.contact_1",
+        }
 
     def test_handles_empty_id_values(self, temp_dir: str) -> None:
         """Test that empty ID values are ignored."""
@@ -383,10 +387,7 @@ class TestExtractIdsFromCSV:
     def test_returns_empty_if_no_id_column(self, temp_dir: str) -> None:
         """Test that empty set is returned if no id column exists."""
         csv_path = Path(temp_dir) / "test_data.csv"
-        csv_path.write_text(
-            "name;value\n"
-            "Record 1;100\n"
-        )
+        csv_path.write_text("name;value\nRecord 1;100\n")
         header = ["name", "value"]
 
         ids = preflight._extract_ids_from_csv(str(csv_path), header)
@@ -421,16 +422,20 @@ class TestSelfReferenceExclusion:
         }
         # References include IDs that are defined in the same file
         mock_extract_refs.return_value = {
-            "res.partner": {"parent_id/id": {"__import__.company_a", "__import__.external"}}
+            "res.partner": {
+                "parent_id/id": {"__import__.company_a", "__import__.external"}
+            }
         }
         # IDs defined in this file
         mock_extract_ids.return_value = {"__import__.company_a", "__import__.company_b"}
         # Database check says both are "missing"
         mock_check.return_value = {
-            "res.partner": {"parent_id/id": {"__import__.company_a", "__import__.external"}}
+            "res.partner": {
+                "parent_id/id": {"__import__.company_a", "__import__.external"}
+            }
         }
 
-        result = preflight.reference_check(
+        preflight.reference_check(
             preflight_mode=PreflightMode.NORMAL,
             model="res.partner",
             filename="test.csv",

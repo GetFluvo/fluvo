@@ -909,14 +909,19 @@ def test_execute_post_action_returns_true_on_success(mock_get_conn: MagicMock) -
 
 @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
 def test_execute_post_action_returns_true_on_timeout(mock_get_conn: MagicMock) -> None:
-    """Tests that _execute_post_action returns True on timeout (server may have completed)."""
+    """Tests that _execute_post_action returns True on timeout.
+
+    Server may have completed the operation even though we timed out.
+    """
     import socket
 
     from odoo_data_flow.__main__ import _execute_post_action
 
     mock_conn = MagicMock()
     mock_model = MagicMock()
-    mock_model.action_apply_inventory.side_effect = socket.timeout("Connection timed out")
+    mock_model.action_apply_inventory.side_effect = socket.timeout(
+        "Connection timed out"
+    )
     mock_conn.get_model.return_value = mock_model
     mock_get_conn.return_value = mock_conn
 
@@ -1099,7 +1104,7 @@ def test_import_move_date_not_triggered_without_post_action(
     mock_update_dates: MagicMock,
     runner: CliRunner,
 ) -> None:
-    """Tests that --move-date without --post-action shows warning and doesn't trigger."""
+    """Tests that --move-date without --post-action shows warning."""
     mock_run_import.return_value = {"ext_id_1": 1}
 
     with runner.isolated_filesystem():
@@ -1168,7 +1173,7 @@ def test_import_move_date_triggered_even_on_timeout(
         )
 
         assert result.exit_code == 0
-        # Even if post-action returned True (timeout case), move date update should trigger
+        # Even on timeout, move date update should trigger
         mock_update_dates.assert_called_once()
 
 

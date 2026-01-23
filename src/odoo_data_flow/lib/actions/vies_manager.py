@@ -73,7 +73,9 @@ from ...lib import conf_lib
 from ...logging_config import log
 
 # Default backup file location (in user's home directory)
-DEFAULT_VAT_SETTINGS_BACKUP_DIR = Path.home() / ".odoo-data-flow" / "vat_settings_backup"
+DEFAULT_VAT_SETTINGS_BACKUP_DIR = (
+    Path.home() / ".odoo-data-flow" / "vat_settings_backup"
+)
 
 # Retry configuration for restoration
 RESTORE_MAX_RETRIES = 5
@@ -785,7 +787,9 @@ def restore_vat_validation_settings(  # noqa: C901
             else:
                 connection = conf_lib.get_connection_from_config(config_file=config)
         except Exception as e:
-            log.error(f"Failed to connect to Odoo (attempt {attempt}/{max_retries + 1}): {e}")
+            log.error(
+                f"Failed to connect to Odoo (attempt {attempt}/{max_retries + 1}): {e}"
+            )
             if _is_retriable_error(e) and attempt <= max_retries:
                 retriable_error_occurred = True
                 last_error = e
@@ -800,16 +804,14 @@ def restore_vat_validation_settings(  # noqa: C901
                     restored_count = 0
                     for company_id, vies_enabled in settings.vies_settings.items():
                         try:
-                            company_obj.write([company_id], {"vat_check_vies": vies_enabled})
-                            status = "enabled" if vies_enabled else "disabled"
-                            log.debug(
-                                f"Restored VIES check to {status} for company ID {company_id}"
+                            company_obj.write(
+                                [company_id], {"vat_check_vies": vies_enabled}
                             )
+                            status = "enabled" if vies_enabled else "disabled"
+                            log.debug(f"VIES={status} for company {company_id}")
                             restored_count += 1
                         except Exception as e:
-                            log.error(
-                                f"Failed to restore VIES for company ID {company_id}: {e}"
-                            )
+                            log.error(f"VIES restore failed, company {company_id}: {e}")
                             if _is_retriable_error(e):
                                 retriable_error_occurred = True
                                 last_error = e
@@ -817,7 +819,9 @@ def restore_vat_validation_settings(  # noqa: C901
                             success = False
 
                     if not retriable_error_occurred:
-                        log.info(f"Restored VIES settings for {restored_count} companies")
+                        log.info(
+                            f"Restored VIES settings for {restored_count} companies"
+                        )
 
                 # Restore stdnum settings via ir.config_parameter
                 if settings.stdnum_settings and not retriable_error_occurred:
@@ -826,7 +830,7 @@ def restore_vat_validation_settings(  # noqa: C901
                         for param_name, param_value in settings.stdnum_settings.items():
                             try:
                                 param_obj.set_param(param_name, param_value)
-                                log.debug(f"Restored system param {param_name} = {param_value}")
+                                log.debug(f"Set {param_name} = {param_value}")
                             except Exception as e:
                                 log.error(f"Failed to restore {param_name}: {e}")
                                 if _is_retriable_error(e):
@@ -836,7 +840,8 @@ def restore_vat_validation_settings(  # noqa: C901
                                 success = False
 
                         if not retriable_error_occurred:
-                            log.info(f"Restored {len(settings.stdnum_settings)} stdnum parameters")
+                            num_params = len(settings.stdnum_settings)
+                            log.info(f"Restored {num_params} stdnum parameters")
                     except Exception as e:
                         log.warning(f"Could not restore stdnum settings: {e}")
                         if _is_retriable_error(e):
@@ -1219,7 +1224,9 @@ def run_import_with_vat_validation_disabled(
         # Step 4: Always restore settings, even if import fails
         if original_settings:
             log.info("Import complete, restoring VAT validation settings...")
-            restore_vat_validation_settings(config, original_settings, backup_dir=backup_dir)
+            restore_vat_validation_settings(
+                config, original_settings, backup_dir=backup_dir
+            )
         else:
             log.warning("No original settings to restore")
 
@@ -1260,7 +1267,9 @@ def restore_vat_settings_from_backup(
         log.error(f"Failed to load settings from {backup_path}")
         return False
 
-    log.info(f"Loaded backup from {backup_path} (created: {time.ctime(settings.timestamp)})")
+    log.info(
+        f"Loaded backup from {backup_path} (created: {time.ctime(settings.timestamp)})"
+    )
     log.info(f"  VIES settings for {len(settings.vies_settings)} companies")
     log.info(f"  {len(settings.stdnum_settings)} stdnum parameters")
 

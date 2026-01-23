@@ -644,7 +644,9 @@ class TestCompanySuffix:
 
     def test_normalize_dutch_nv(self) -> None:
         """Test normalizing Dutch NV variations."""
-        assert apply_expr(clean_expr.company_suffix("col"), "Company NV") == "Company N.V."
+        assert (
+            apply_expr(clean_expr.company_suffix("col"), "Company NV") == "Company N.V."
+        )
 
     def test_normalize_german_gmbh(self) -> None:
         """Test normalizing German GmbH variations."""
@@ -654,9 +656,18 @@ class TestCompanySuffix:
 
     def test_normalize_uk_ltd(self) -> None:
         """Test normalizing UK Ltd variations."""
-        assert apply_expr(clean_expr.company_suffix("col"), "Company Ltd") == "Company Ltd."
-        assert apply_expr(clean_expr.company_suffix("col"), "Company ltd") == "Company Ltd."
-        assert apply_expr(clean_expr.company_suffix("col"), "Company LTD") == "Company Ltd."
+        assert (
+            apply_expr(clean_expr.company_suffix("col"), "Company Ltd")
+            == "Company Ltd."
+        )
+        assert (
+            apply_expr(clean_expr.company_suffix("col"), "Company ltd")
+            == "Company Ltd."
+        )
+        assert (
+            apply_expr(clean_expr.company_suffix("col"), "Company LTD")
+            == "Company Ltd."
+        )
 
     def test_normalize_uk_limited(self) -> None:
         """Test normalizing UK Limited to Ltd."""
@@ -665,8 +676,12 @@ class TestCompanySuffix:
 
     def test_normalize_us_llc(self) -> None:
         """Test normalizing US LLC."""
-        assert apply_expr(clean_expr.company_suffix("col"), "Company LLC") == "Company LLC"
-        assert apply_expr(clean_expr.company_suffix("col"), "Company llc") == "Company LLC"
+        assert (
+            apply_expr(clean_expr.company_suffix("col"), "Company LLC") == "Company LLC"
+        )
+        assert (
+            apply_expr(clean_expr.company_suffix("col"), "Company llc") == "Company LLC"
+        )
 
     def test_normalize_french_sarl(self) -> None:
         """Test normalizing French SARL."""

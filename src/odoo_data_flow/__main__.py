@@ -179,9 +179,7 @@ def _execute_post_action(
             socket.setdefaulttimeout(original_timeout)
 
     except (socket.timeout, TimeoutError, ConnectionError) as e:
-        log.warning(
-            f"Post-action '{action_name}' timed out or connection lost: {e}"
-        )
+        log.warning(f"Post-action '{action_name}' timed out or connection lost: {e}")
         log.warning(
             "The operation may have completed on the server. "
             "Proceeding with subsequent steps..."
@@ -228,7 +226,9 @@ def _get_product_ids_from_quants(
         product_ids = list(
             set(q["product_id"][0] for q in quant_data if q.get("product_id"))
         )
-        log.debug(f"Extracted {len(product_ids)} product IDs from {len(quant_ids)} quants")
+        log.debug(
+            f"Extracted {len(product_ids)} product IDs from {len(quant_ids)} quants"
+        )
         return product_ids
 
     except Exception as e:
@@ -339,9 +339,7 @@ def _update_inventory_move_dates(
         # Update the date on these moves
         move_model.write(move_ids, {"date": move_date_str}, context=context)
 
-        log.info(
-            f"Updated date to {move_date_str} on {len(move_ids)} stock move(s)."
-        )
+        log.info(f"Updated date to {move_date_str} on {len(move_ids)} stock move(s).")
 
     except Exception as e:
         log.error(f"Failed to update stock move dates: {e}")
@@ -1174,7 +1172,10 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
             resolved_company_id = int(company_id)
         else:
             # It's an XML ID - resolve it
-            from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
+            from .lib.conf_lib import (
+                get_connection_from_config,
+                get_connection_from_dict,
+            )
 
             try:
                 if isinstance(kwargs["config"], dict):
@@ -1190,17 +1191,20 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
                 else:
                     module, name = "base", company_id
 
-                found = ir_model_data.search([
-                    ("module", "=", module),
-                    ("name", "=", name),
-                    ("model", "=", "res.company"),
-                ])
+                found = ir_model_data.search(
+                    [
+                        ("module", "=", module),
+                        ("name", "=", name),
+                        ("model", "=", "res.company"),
+                    ]
+                )
 
                 if found:
                     data = ir_model_data.read(found[0], ["res_id"])
                     resolved_company_id = data["res_id"]
                     log.info(
-                        f"Resolved company XML ID '{company_id}' to database ID {resolved_company_id}"
+                        f"Resolved company XML ID '{company_id}' "
+                        f"to database ID {resolved_company_id}"
                     )
                 else:
                     log.error(
@@ -1352,10 +1356,12 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
             model_ids = ir_model.search([("model", "=", model)])
             if model_ids:
                 # Find active record rules for this model
-                rule_ids = ir_rule.search([
-                    ("model_id", "=", model_ids[0]),
-                    ("active", "=", True),
-                ])
+                rule_ids = ir_rule.search(
+                    [
+                        ("model_id", "=", model_ids[0]),
+                        ("active", "=", True),
+                    ]
+                )
                 if rule_ids:
                     # Disable the rules
                     ir_rule.write(rule_ids, {"active": False})
@@ -1382,9 +1388,8 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
                     product_ids_for_move_update = _get_product_ids_from_quants(
                         kwargs["config"], quant_ids
                     )
-                    log.info(
-                        f"Extracted {len(product_ids_for_move_update)} unique product IDs"
-                    )
+                    num_products = len(product_ids_for_move_update)
+                    log.info(f"Extracted {num_products} unique product IDs")
 
                 # Execute the post-action (with longer timeout)
                 post_action_ok = _execute_post_action(
@@ -1439,7 +1444,7 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
         if post_action and import_result:
             # Extract product IDs BEFORE post-action while connection is reliable
             # This is needed for --move-date to find the correct moves
-            product_ids_for_move_update: list[int] = []
+            product_ids_for_move_update = []
             if move_date:
                 quant_ids = list(import_result.values())
                 log.info(
@@ -1455,7 +1460,11 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
 
             # Execute the post-action (with longer timeout)
             post_action_ok = _execute_post_action(
-                kwargs["config"], kwargs.get("model"), post_action, import_result, context
+                kwargs["config"],
+                kwargs.get("model"),
+                post_action,
+                import_result,
+                context,
             )
 
             # Update move dates if requested (for opening inventory)
@@ -1613,7 +1622,7 @@ def write_cmd(connection_file: str, **kwargs: Any) -> None:
     "Requires admin rights. Use with --all-companies to export all records "
     "across companies regardless of restrictive record rules.",
 )
-def export_cmd(connection_file: str, **kwargs: Any) -> None:
+def export_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     """Runs the data export process."""
     # Handle protocol option - create config dict if protocol specified
     protocol = kwargs.pop("protocol", None)
@@ -1707,6 +1716,8 @@ def export_cmd(connection_file: str, **kwargs: Any) -> None:
         from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
 
         model = kwargs.get("model")
+        if model is None:
+            raise click.BadParameter("--model is required when using --sudo")
         fields = kwargs.get("fields", "")
         disabled_rule_ids: list[int] = []
         ir_rule = None
@@ -1726,11 +1737,13 @@ def export_cmd(connection_file: str, **kwargs: Any) -> None:
 
             # Find related models from the fields being exported
             model_obj = conn.get_model(model)
-            field_names = [f.split("/")[0].replace(".id", "") for f in fields.split(",")]
+            field_names = [
+                f.split("/")[0].replace(".id", "") for f in fields.split(",")
+            ]
             field_names = [f for f in field_names if f and f != "id"]
             if field_names:
                 fields_meta = model_obj.fields_get(field_names)
-                for field_name, meta in fields_meta.items():
+                for _field_name, meta in fields_meta.items():
                     if meta.get("relation"):
                         models_to_disable.add(meta["relation"])
 
@@ -1738,10 +1751,12 @@ def export_cmd(connection_file: str, **kwargs: Any) -> None:
             for model_name in models_to_disable:
                 model_ids = ir_model.search([("model", "=", model_name)])
                 if model_ids:
-                    rule_ids = ir_rule.search([
-                        ("model_id", "=", model_ids[0]),
-                        ("active", "=", True),
-                    ])
+                    rule_ids = ir_rule.search(
+                        [
+                            ("model_id", "=", model_ids[0]),
+                            ("active", "=", True),
+                        ]
+                    )
                     if rule_ids:
                         ir_rule.write(rule_ids, {"active": False})
                         disabled_rule_ids.extend(rule_ids)
@@ -1765,8 +1780,7 @@ def export_cmd(connection_file: str, **kwargs: Any) -> None:
                 try:
                     ir_rule.write(disabled_rule_ids, {"active": True})
                     log.info(
-                        f"Sudo mode: re-enabled {len(disabled_rule_ids)} "
-                        "record rule(s)"
+                        f"Sudo mode: re-enabled {len(disabled_rule_ids)} record rule(s)"
                     )
                 except Exception as e:
                     log.error(f"Failed to re-enable record rules: {e}")

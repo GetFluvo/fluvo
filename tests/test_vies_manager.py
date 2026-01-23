@@ -804,9 +804,7 @@ class TestRestoreVatValidationSettingsWithRetry:
         mock_get_connection.return_value = mock_connection
 
         # Act
-        result = restore_vat_validation_settings(
-            config, settings, backup_dir=tmp_path
-        )
+        result = restore_vat_validation_settings(config, settings, backup_dir=tmp_path)
 
         # Assert
         assert result is True
@@ -903,9 +901,7 @@ class TestRestoreVatValidationSettingsWithRetry:
         mock_get_connection.return_value = mock_connection
 
         # Act
-        result = restore_vat_validation_settings(
-            config, settings, backup_dir=tmp_path
-        )
+        result = restore_vat_validation_settings(config, settings, backup_dir=tmp_path)
 
         # Assert - should fail immediately without retries
         assert result is False

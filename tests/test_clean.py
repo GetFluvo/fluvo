@@ -38,9 +38,9 @@ class TestCompositionFunctions:
     def test_fallback(self) -> None:
         """Test fallback tries cleaners until success."""
         cleaner = clean.fallback(
-            lambda x: None if x == "skip" else None,
+            lambda _: None,  # First cleaner always returns None
             lambda x: "found" if x == "skip" else None,
-            lambda x: "default",
+            lambda _: "default",
         )
         assert cleaner("skip") == "found"
 
@@ -735,7 +735,9 @@ class TestCountryDetection:
     def test_detect_country_combined(self) -> None:
         """Test combined detection uses phone priority."""
         cities = {"paris": "FR"}
-        result = clean.detect_country(phone="+33 1 234", postal="75001", city="Paris", cities=cities)
+        result = clean.detect_country(
+            phone="+33 1 234", postal="75001", city="Paris", cities=cities
+        )
         assert result == "FR"
 
     def test_detect_country_no_match(self) -> None:

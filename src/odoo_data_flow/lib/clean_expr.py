@@ -20,67 +20,65 @@ row-by-row `clean` module instead.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import polars as pl
 
 __all__ = [
-    # String cleaners
-    "strip",
-    "normalize_space",
-    "lower",
-    "upper",
-    "title",
+    # Constants (extensible)
+    "COMMON_EMAIL_PROVIDERS",
+    "COMMON_FILTER_NAMES",
+    "COMPANY_SUFFIX_CANONICAL",
+    "PHONE_COUNTRY_RULES",
+    "POSTAL_PATTERNS",
+    "SUFFIXES",
+    "TITLES",
+    "VAT_EXEMPT_VALUES",
     "capitalize",
-    "remove",
-    "keep",
-    "replace",
-    "regex_sub",
-    "truncate",
+    # Address cleaners
+    "city_from_combined",
+    # Company cleaners
+    "company_suffix",
     "default",
+    # Numeric cleaners
+    "digits",
+    # Email cleaners
+    "email",
+    "email_domain",
+    "integer",
+    "keep",
+    "lower",
+    "name_clean",
+    "name_filter_common",
+    "name_split_first",
+    "name_split_last",
+    "name_strip_suffix",
+    # Name cleaners
+    "name_strip_title",
+    "normalize_space",
+    "numeric",
     # Phone cleaners
     "phone",
     "phone_digits",
     "phone_normalize",
-    # Email cleaners
-    "email",
-    "email_domain",
+    "postal_from_combined",
+    "regex_sub",
+    "remove",
+    "replace",
+    # String cleaners
+    "strip",
+    "title",
+    "truncate",
+    "upper",
     # URL cleaners
     "url",
-    "url_https",
-    "url_fix_www",
     "url_ensure_scheme",
+    "url_fix_www",
+    "url_https",
     # VAT cleaners
     "vat",
     "vat_or_exempt",
     # Zip cleaners
     "zip_code",
     "zip_strip_prefix",
-    # Address cleaners
-    "city_from_combined",
-    "postal_from_combined",
-    # Name cleaners
-    "name_strip_title",
-    "name_strip_suffix",
-    "name_split_first",
-    "name_split_last",
-    "name_filter_common",
-    "name_clean",
-    # Numeric cleaners
-    "digits",
-    "numeric",
-    "integer",
-    # Company cleaners
-    "company_suffix",
-    # Constants (extensible)
-    "COMMON_EMAIL_PROVIDERS",
-    "COMMON_FILTER_NAMES",
-    "TITLES",
-    "SUFFIXES",
-    "VAT_EXEMPT_VALUES",
-    "PHONE_COUNTRY_RULES",
-    "POSTAL_PATTERNS",
-    "COMPANY_SUFFIX_CANONICAL",
 ]
 
 # =============================================================================
@@ -533,7 +531,7 @@ def phone_digits(field: str) -> pl.Expr:
 def phone_normalize(
     field: str,
     country: str,
-    rules: Optional[dict[str, dict[str, str]]] = None,
+    rules: dict[str, dict[str, str]] | None = None,
 ) -> pl.Expr:
     """Normalize phone number for specific country.
 
@@ -790,7 +788,7 @@ def vat(field: str) -> pl.Expr:
 
 def vat_or_exempt(
     field: str,
-    exempt_values: Optional[set[str]] = None,
+    exempt_values: set[str] | None = None,
     marker: str = "/",
     exempt_output: str = "vat exempt",
 ) -> pl.Expr:
@@ -969,7 +967,7 @@ def street(field: str) -> pl.Expr:
 def city_from_combined(
     field: str,
     country: str,
-    patterns: Optional[dict[str, tuple[str, str]]] = None,
+    patterns: dict[str, tuple[str, str]] | None = None,
 ) -> pl.Expr:
     """Extract city name from a combined city+postal field.
 
@@ -1008,7 +1006,7 @@ def city_from_combined(
 def postal_from_combined(
     field: str,
     country: str,
-    patterns: Optional[dict[str, tuple[str, str]]] = None,
+    patterns: dict[str, tuple[str, str]] | None = None,
 ) -> pl.Expr:
     """Extract postal code from a combined city+postal field.
 
@@ -1047,7 +1045,7 @@ def postal_from_combined(
 # =============================================================================
 
 
-def name_strip_title(field: str, titles: Optional[set[str]] = None) -> pl.Expr:
+def name_strip_title(field: str, titles: set[str] | None = None) -> pl.Expr:
     """Remove common titles from name.
 
     Args:
@@ -1069,7 +1067,7 @@ def name_strip_title(field: str, titles: Optional[set[str]] = None) -> pl.Expr:
     )
 
 
-def name_strip_suffix(field: str, suffixes: Optional[set[str]] = None) -> pl.Expr:
+def name_strip_suffix(field: str, suffixes: set[str] | None = None) -> pl.Expr:
     """Remove common suffixes from name.
 
     Args:
@@ -1115,7 +1113,7 @@ def name_split_last(field: str) -> pl.Expr:
     return pl.col(field).cast(pl.String).str.strip_chars().str.split(" ").list.last()
 
 
-def name_filter_common(field: str, filter_names: Optional[set[str]] = None) -> pl.Expr:
+def name_filter_common(field: str, filter_names: set[str] | None = None) -> pl.Expr:
     """Return null if name is a common placeholder.
 
     Args:
@@ -1140,8 +1138,8 @@ def name_filter_common(field: str, filter_names: Optional[set[str]] = None) -> p
 
 def name_clean(
     field: str,
-    titles: Optional[set[str]] = None,
-    suffixes: Optional[set[str]] = None,
+    titles: set[str] | None = None,
+    suffixes: set[str] | None = None,
 ) -> pl.Expr:
     """All-in-one name cleaner: strip, normalize space, remove titles/suffixes.
 
@@ -1240,7 +1238,7 @@ def integer(field: str) -> pl.Expr:
 
 def company_suffix(
     field: str,
-    suffixes: Optional[dict[str, str]] = None,
+    suffixes: dict[str, str] | None = None,
 ) -> pl.Expr:
     """Normalize company legal suffix (e.g., "BV" → "B.V.", "gmbh" → "GmbH").
 

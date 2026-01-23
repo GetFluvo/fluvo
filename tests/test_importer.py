@@ -147,7 +147,12 @@ class TestFailFilePath:
 
         # Run import with config dict without _config_file
         run_import(
-            config={"hostname": "localhost", "database": "db", "login": "a", "password": "b"},
+            config={
+                "hostname": "localhost",
+                "database": "db",
+                "login": "a",
+                "password": "b",
+            },
             filename=str(source_file),
             model="res.partner",
             deferred_fields=None,

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import zipfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import polars as pl
 
@@ -34,18 +34,18 @@ if TYPE_CHECKING:
     pass
 
 __all__ = [
-    # Data loading
-    "load_cities",
-    "load_postal_codes",
-    "load_alternate_names",
-    # Lookup builders
-    "get_cities_lookup",
-    "get_postal_lookup",
+    # Constants
+    "DATASETS",
     # Download utilities
     "download_dataset",
     "get_cache_dir",
-    # Constants
-    "DATASETS",
+    # Lookup builders
+    "get_cities_lookup",
+    "get_postal_lookup",
+    "load_alternate_names",
+    # Data loading
+    "load_cities",
+    "load_postal_codes",
 ]
 
 # =============================================================================
@@ -157,7 +157,7 @@ def get_cache_dir() -> Path:
     return cache_dir
 
 
-def _get_cached_file(dataset: str) -> Optional[Path]:
+def _get_cached_file(dataset: str) -> Path | None:
     """Check if a dataset is already cached.
 
     Args:
@@ -183,7 +183,7 @@ def _get_cached_file(dataset: str) -> Optional[Path]:
 
 def download_dataset(
     dataset: str = "cities15000",
-    cache_dir: Optional[Path] = None,
+    cache_dir: Path | None = None,
     force: bool = False,
 ) -> Path:
     """Download and extract a GeoNames dataset.
@@ -191,7 +191,8 @@ def download_dataset(
     Args:
         dataset: Dataset name. One of: cities500, cities1000, cities5000,
                  cities15000, alternateNamesV2, allCountries
-        cache_dir: Directory to cache files. Defaults to ~/.cache/odoo-data-flow/geonames/
+        cache_dir: Directory to cache files.
+                   Defaults to ~/.cache/odoo-data-flow/geonames/
         force: Force re-download even if cached.
 
     Returns:
@@ -253,7 +254,7 @@ def download_dataset(
 def load_cities(
     dataset: str = "cities15000",
     min_population: int = 0,
-    cache_dir: Optional[Path] = None,
+    cache_dir: Path | None = None,
 ) -> pl.DataFrame:
     """Load cities data as a Polars DataFrame.
 
@@ -311,8 +312,8 @@ def load_cities(
 
 
 def load_alternate_names(
-    cache_dir: Optional[Path] = None,
-    languages: Optional[list[str]] = None,
+    cache_dir: Path | None = None,
+    languages: list[str] | None = None,
 ) -> pl.DataFrame:
     """Load alternate names data as a Polars DataFrame.
 
@@ -353,8 +354,8 @@ def load_alternate_names(
 
 
 def load_postal_codes(
-    country: Optional[str] = None,
-    cache_dir: Optional[Path] = None,
+    country: str | None = None,
+    cache_dir: Path | None = None,
 ) -> pl.DataFrame:
     """Load postal codes data as a Polars DataFrame.
 
@@ -426,7 +427,7 @@ def get_cities_lookup(
     dataset: str = "cities15000",
     min_population: int = 0,
     include_alternates: bool = True,
-    cache_dir: Optional[Path] = None,
+    cache_dir: Path | None = None,
 ) -> dict[str, str]:
     """Build a city name to country code lookup dictionary.
 
@@ -486,7 +487,7 @@ def get_cities_lookup(
 
 def get_postal_lookup(
     countries: list[str],
-    cache_dir: Optional[Path] = None,
+    cache_dir: Path | None = None,
 ) -> dict[str, dict[str, str]]:
     """Build a postal code lookup dictionary for multiple countries.
 
@@ -525,10 +526,10 @@ def get_postal_lookup(
 
 def get_city_coordinates(
     city: str,
-    country: Optional[str] = None,
+    country: str | None = None,
     dataset: str = "cities15000",
-    cache_dir: Optional[Path] = None,
-) -> Optional[tuple[float, float]]:
+    cache_dir: Path | None = None,
+) -> tuple[float, float] | None:
     """Get latitude/longitude for a city.
 
     Args:
