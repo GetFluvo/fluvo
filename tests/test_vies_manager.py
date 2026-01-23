@@ -602,10 +602,12 @@ class TestBackupFilePath:
         # Colon may be converted to underscore
         assert ":" not in filename or "_" in filename
 
-    def test_backup_path_from_yaml_config(self, tmp_path: Path) -> None:
-        """Test backup path generation from YAML config file."""
-        config_file = tmp_path / "odoo.yaml"
-        config_file.write_text("host: odoo.example.com\ndatabase: production")
+    def test_backup_path_from_ini_config(self, tmp_path: Path) -> None:
+        """Test backup path generation from INI config file."""
+        config_file = tmp_path / "odoo.conf"
+        config_file.write_text(
+            "[Connection]\nhost = odoo.example.com\ndatabase = production"
+        )
 
         backup_path = _get_backup_file_path(str(config_file), backup_dir=tmp_path)
 

@@ -221,13 +221,13 @@ def _get_backup_file_path(
             db_name = config.get("database", "unknown")
             host = config.get("host", "localhost")
         else:
-            # Load config file to get database name
-            import yaml
+            # Load config file to get database name (INI format)
+            import configparser
 
-            with open(config) as f:
-                config_data = yaml.safe_load(f)
-            db_name = config_data.get("database", "unknown")
-            host = config_data.get("host", "localhost")
+            parser = configparser.ConfigParser()
+            parser.read(config)
+            db_name = parser.get("Connection", "database", fallback="unknown")
+            host = parser.get("Connection", "host", fallback="localhost")
 
         # Sanitize for filename
         safe_host = re.sub(r"[^\w\-.]", "_", host)
