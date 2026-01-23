@@ -66,7 +66,9 @@ def _get_fail_filename(model: str, is_fail_run: bool) -> str:
     return f"{model_filename}_fail.csv"
 
 
-def _get_env_from_config(config: Union[str, dict[str, Any]]) -> Optional[str]:
+def _get_env_from_config(
+    config: Optional[Union[str, dict[str, Any]]],
+) -> Optional[str]:
     """Extracts the environment name from a config file path.
 
     Supports patterns like:
@@ -75,11 +77,13 @@ def _get_env_from_config(config: Union[str, dict[str, Any]]) -> Optional[str]:
     - prod_connection.conf -> prod
 
     Args:
-        config: Either a config file path (str) or a config dict.
+        config: Either a config file path (str), a config dict, or None.
 
     Returns:
         The environment name, or None if it cannot be determined.
     """
+    if config is None:
+        return None
     if isinstance(config, dict):
         # Config dict may have _config_file key
         config_file = config.get("_config_file", "")
@@ -169,14 +173,14 @@ def run_import(  # noqa: C901
                 "Invalid Context",
                 "The --context argument must be a valid JSON dictionary string.",
             )
-            return
+            return None
     elif isinstance(context, dict):
         parsed_context = context
     else:
         _show_error_panel(
             "Invalid Context", "The context must be a dictionary or a JSON string."
         )
-        return
+        return None
 
     if not model:
         model = _infer_model_from_filename(filename)
@@ -185,7 +189,7 @@ def run_import(  # noqa: C901
                 "Model Not Found",
                 "Could not infer model from filename. Please use the --model option.",
             )
-            return
+            return None
 
     file_to_process = filename
     # Determine environment-specific output directory from config file name
@@ -207,7 +211,7 @@ def run_import(  # noqa: C901
                     title="[bold green]No Recovery Needed[/bold green]",
                 )
             )
-            return
+            return None
         log.info(
             f"Running in --fail mode. Retrying {line_count - 1} records from: "
             f"{fail_path}"
@@ -238,7 +242,7 @@ def run_import(  # noqa: C901
             check_refs=check_refs,
             encoding=encoding,
         ):
-            return
+            return None
 
     # --- Strategy Execution ---
     sorted_temp_file = None
