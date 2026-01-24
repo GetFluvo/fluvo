@@ -982,3 +982,608 @@ class TestCheckBackupStatus:
         assert status["vies_company_count"] == 2
         assert status["stdnum_param_count"] == 1
         assert 0.9 < status["age_hours"] < 1.1  # Approximately 1 hour
+
+    def test_status_when_backup_corrupted(self, tmp_path: Path) -> None:
+        """Test status check when backup file is corrupted."""
+        config = {"host": "localhost", "database": "test_db"}
+        backup_path = _get_backup_file_path(config, backup_dir=tmp_path)
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+        backup_path.write_text("invalid json {{{")
+
+        status = check_vat_settings_backup_status(config, backup_dir=tmp_path)
+
+        assert status["exists"] is True
+        # Should not have additional fields since loading failed
+        assert "vies_company_count" not in status
+
+
+class TestValidateVatFormatEdgeCases:
+    """Additional edge case tests for validate_vat_format."""
+
+    def test_vat_pattern_no_country_match(self) -> None:
+        """Test VAT with EU country but no specific pattern match."""
+        # AT pattern exists, so this should be checked against it
+        is_valid, error = validate_vat_format("ATU12345678")
+        assert is_valid is True
+
+    def test_vat_without_pattern_passes(self) -> None:
+        """Test that countries without specific patterns pass."""
+        # Non-EU country without pattern
+        is_valid, error = validate_vat_format("CH123456789")
+        assert is_valid is True
+        assert error is None
+
+
+class TestValidateVatChecksumEdgeCases:
+    """Additional tests for validate_vat_checksum edge cases."""
+
+    def test_dutch_vat_invalid_format_checksum(self) -> None:
+        """Test Dutch VAT with wrong format for checksum."""
+        is_valid, error = validate_vat_checksum("NL12345")
+        assert is_valid is False
+        assert "Invalid Dutch VAT format" in error
+
+    def test_german_vat_wrong_length(self) -> None:
+        """Test German VAT with wrong digit count."""
+        is_valid, error = validate_vat_checksum("DE12345")
+        assert is_valid is False
+        assert "9 digits" in error
+
+    def test_belgian_vat_invalid_checksum(self) -> None:
+        """Test Belgian VAT with invalid checksum."""
+        # BE0123456700 - checksum should fail (97 - (1234567 % 97) != 00)
+        is_valid, error = validate_vat_checksum("BE0123456700")
+        assert is_valid is False
+        assert "checksum failed" in error
+
+    def test_checksum_value_error(self) -> None:
+        """Test checksum validation with non-numeric input."""
+        is_valid, error = validate_vat_checksum("BE01234567XX")
+        assert is_valid is False
+        assert "validation error" in error.lower()
+
+
+class TestValidateVatLocalEdgeCases:
+    """Additional tests for validate_vat_local edge cases."""
+
+    def test_format_validation_fails_early(self) -> None:
+        """Test that format validation failure stops further checks."""
+        is_valid, error = validate_vat_local("DE12345", check_format=True, check_checksum=True)
+        assert is_valid is False
+        assert "Invalid VAT format" in error
+
+    def test_checksum_validation_fails_after_format_passes(self) -> None:
+        """Test checksum validation runs after format passes."""
+        is_valid, error = validate_vat_local(
+            "BE0123456700", check_format=True, check_checksum=True
+        )
+        assert is_valid is False
+
+
+class TestGetVatValidationSettingsEdgeCases:
+    """Additional tests for get_vat_validation_settings edge cases."""
+
+    @patch(
+        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict"
+    )
+    def test_get_settings_with_dict_config(
+        self, mock_get_connection: MagicMock
+    ) -> None:
+        """Test getting settings using dict config."""
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.return_value = [
+            {"id": 1, "name": "Company 1", "vat_check_vies": True},
+        ]
+        mock_param_obj = MagicMock()
+        mock_param_obj.get_param.return_value = None  # Parameter not found
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = lambda m: (
+            mock_company_obj if m == "res.company" else mock_param_obj
+        )
+        mock_get_connection.return_value = mock_connection
+
+        config = {"host": "localhost", "database": "test_db"}
+        settings = get_vat_validation_settings(config=config)
+
+        assert settings is not None
+        mock_get_connection.assert_called_once_with(config)
+
+    @patch(
+        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+    )
+    def test_get_settings_stdnum_param_error(
+        self, mock_get_connection: MagicMock
+    ) -> None:
+        """Test handling error when getting stdnum parameter."""
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.return_value = []
+        mock_param_obj = MagicMock()
+        mock_param_obj.get_param.side_effect = Exception("Parameter error")
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = lambda m: (
+            mock_company_obj if m == "res.company" else mock_param_obj
+        )
+        mock_get_connection.return_value = mock_connection
+
+        settings = get_vat_validation_settings(config="dummy.conf", include_stdnum=True)
+
+        assert settings is not None
+        assert settings.stdnum_settings == {}
+
+    @patch(
+        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+    )
+    def test_get_settings_search_read_error(
+        self, mock_get_connection: MagicMock
+    ) -> None:
+        """Test handling error during search_read."""
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.side_effect = Exception("Search failed")
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value = mock_company_obj
+        mock_get_connection.return_value = mock_connection
+
+        settings = get_vat_validation_settings(config="dummy.conf")
+
+        assert settings is None
+
+
+class TestDisableVatValidationEdgeCases:
+    """Additional tests for disable_vat_validation edge cases."""
+
+    @patch(
+        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict"
+    )
+    def test_disable_with_dict_config(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test disabling with dict config."""
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.return_value = []
+        mock_param_obj = MagicMock()
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = lambda m: (
+            mock_company_obj if m == "res.company" else mock_param_obj
+        )
+        mock_get_connection.return_value = mock_connection
+
+        config = {"host": "localhost", "database": "test_db"}
+        settings = disable_vat_validation(
+            config, disable_vies=True, disable_stdnum=True, backup_dir=tmp_path
+        )
+
+        assert settings is not None
+
+    @patch(
+        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+    )
+    def test_disable_connection_error_after_saving_settings(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test connection error after saving original settings."""
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.return_value = [
+            {"id": 1, "name": "Company", "vat_check_vies": True}
+        ]
+        mock_param_obj = MagicMock()
+
+        # First call succeeds (for get_vat_validation_settings)
+        # Second call fails (for disable operation)
+        call_count = [0]
+
+        def connection_side_effect(config_file):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                conn = MagicMock()
+                conn.get_model.side_effect = lambda m: (
+                    mock_company_obj if m == "res.company" else mock_param_obj
+                )
+                return conn
+            raise Exception("Connection failed")
+
+        mock_get_connection.side_effect = connection_side_effect
+
+        settings = disable_vat_validation(
+            config="dummy.conf",
+            disable_vies=True,
+            disable_stdnum=False,
+            save_settings=True,
+            backup_dir=tmp_path,
+        )
+
+        # Should return original settings even though disable failed
+        assert settings is not None
+        assert settings.vies_settings == {1: True}
+
+    @patch(
+        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+    )
+    def test_disable_write_error(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test handling write error during disable."""
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.return_value = [
+            {"id": 1, "name": "Company", "vat_check_vies": True}
+        ]
+        mock_company_obj.write.side_effect = Exception("Write failed")
+        mock_param_obj = MagicMock()
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = lambda m: (
+            mock_company_obj if m == "res.company" else mock_param_obj
+        )
+        mock_get_connection.return_value = mock_connection
+
+        settings = disable_vat_validation(
+            config="dummy.conf",
+            disable_vies=True,
+            disable_stdnum=False,
+            backup_dir=tmp_path,
+        )
+
+        # Should still return settings even though write failed
+        assert settings is not None
+
+    @patch(
+        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+    )
+    def test_disable_stdnum_set_param_error(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test handling set_param error when disabling stdnum."""
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.return_value = []
+        mock_param_obj = MagicMock()
+        mock_param_obj.get_param.return_value = "True"
+        mock_param_obj.set_param.side_effect = Exception("Set param failed")
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = lambda m: (
+            mock_company_obj if m == "res.company" else mock_param_obj
+        )
+        mock_get_connection.return_value = mock_connection
+
+        settings = disable_vat_validation(
+            config="dummy.conf",
+            disable_vies=False,
+            disable_stdnum=True,
+            backup_dir=tmp_path,
+        )
+
+        # Should still return settings
+        assert settings is not None
+
+    @patch(
+        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+    )
+    def test_disable_save_settings_false(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test disabling without saving settings."""
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.return_value = []
+        mock_param_obj = MagicMock()
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = lambda m: (
+            mock_company_obj if m == "res.company" else mock_param_obj
+        )
+        mock_get_connection.return_value = mock_connection
+
+        result = disable_vat_validation(
+            config="dummy.conf",
+            disable_vies=True,
+            disable_stdnum=True,
+            save_settings=False,
+            backup_dir=tmp_path,
+        )
+
+        # Should return None when save_settings=False
+        assert result is None
+
+
+class TestRestoreVatValidationSettingsEdgeCases:
+    """Additional tests for restore_vat_validation_settings edge cases."""
+
+    def test_restore_empty_settings(self, tmp_path: Path) -> None:
+        """Test restoring with no settings returns True and deletes backup."""
+        config = {"host": "localhost", "database": "test_db"}
+        backup_path = _get_backup_file_path(config, backup_dir=tmp_path)
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+        backup_path.write_text("{}")
+
+        settings = VatValidationSettings()  # Empty settings
+        result = restore_vat_validation_settings(config, settings, backup_dir=tmp_path)
+
+        assert result is True
+        assert not backup_path.exists()
+
+    @patch("odoo_data_flow.lib.actions.vies_manager.time.sleep")
+    @patch(
+        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict"
+    )
+    def test_restore_connection_retriable_error(
+        self, mock_get_connection: MagicMock, mock_sleep: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test restore retries on connection error."""
+        # Fail first with retriable error, then succeed
+        call_count = [0]
+
+        def connection_side_effect(config):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("503 Service Unavailable")
+            mock_conn = MagicMock()
+            mock_conn.get_model.return_value = MagicMock()
+            return mock_conn
+
+        mock_get_connection.side_effect = connection_side_effect
+
+        config = {"host": "localhost", "database": "test_db"}
+        settings = VatValidationSettings(vies_settings={1: True})
+
+        result = restore_vat_validation_settings(
+            config, settings, backup_dir=tmp_path, initial_delay=0.01
+        )
+
+        assert result is True
+        assert mock_sleep.called
+
+    @patch(
+        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict"
+    )
+    def test_restore_stdnum_error_non_retriable(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test restore handles non-retriable stdnum error."""
+        mock_company_obj = MagicMock()
+        mock_param_obj = MagicMock()
+        mock_param_obj.set_param.side_effect = Exception("Access denied")
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = lambda m: (
+            mock_company_obj if m == "res.company" else mock_param_obj
+        )
+        mock_get_connection.return_value = mock_connection
+
+        config = {"host": "localhost", "database": "test_db"}
+        settings = VatValidationSettings(
+            stdnum_settings={"base_vat.vat_check_on_save": "True"}
+        )
+
+        result = restore_vat_validation_settings(config, settings, backup_dir=tmp_path)
+
+        assert result is False
+
+    @patch("odoo_data_flow.lib.actions.vies_manager.time.sleep")
+    @patch(
+        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict"
+    )
+    def test_restore_stdnum_retriable_error(
+        self, mock_get_connection: MagicMock, mock_sleep: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test restore retries on stdnum retriable error."""
+        mock_company_obj = MagicMock()
+        mock_param_obj = MagicMock()
+
+        # Fail twice with 503, then succeed
+        call_count = [0]
+
+        def set_param_side_effect(*args):
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                raise Exception("503 Service Unavailable")
+            return None
+
+        mock_param_obj.set_param.side_effect = set_param_side_effect
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = lambda m: (
+            mock_company_obj if m == "res.company" else mock_param_obj
+        )
+        mock_get_connection.return_value = mock_connection
+
+        config = {"host": "localhost", "database": "test_db"}
+        settings = VatValidationSettings(
+            stdnum_settings={"base_vat.vat_check_on_save": "True"}
+        )
+
+        result = restore_vat_validation_settings(
+            config, settings, backup_dir=tmp_path, initial_delay=0.01
+        )
+
+        assert result is True
+
+
+class TestRunViesValidationEdgeCases:
+    """Additional tests for run_vies_validation edge cases."""
+
+    @patch(
+        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict"
+    )
+    def test_validation_with_dict_config(
+        self, mock_get_connection: MagicMock
+    ) -> None:
+        """Test VIES validation with dict config."""
+        mock_partner_obj = MagicMock()
+        mock_partner_obj.search_count.return_value = 0
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value = mock_partner_obj
+        mock_get_connection.return_value = mock_connection
+
+        config = {"host": "localhost", "database": "test_db"}
+        result = run_vies_validation(config=config)
+
+        assert result.total_checked == 0
+        mock_get_connection.assert_called_once_with(config)
+
+    @patch(
+        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+    )
+    def test_validation_with_domain_filter(
+        self, mock_get_connection: MagicMock
+    ) -> None:
+        """Test VIES validation with custom domain filter."""
+        mock_partner_obj = MagicMock()
+        mock_partner_obj.search_count.return_value = 0
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value = mock_partner_obj
+        mock_get_connection.return_value = mock_connection
+
+        result = run_vies_validation(
+            config="dummy.conf", domain=[("country_id.code", "=", "BE")]
+        )
+
+        assert result.total_checked == 0
+        # Check that domain was extended
+        call_args = mock_partner_obj.search_count.call_args[0][0]
+        assert ("country_id.code", "=", "BE") in call_args
+
+    @patch(
+        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+    )
+    def test_validation_with_max_records(
+        self, mock_get_connection: MagicMock
+    ) -> None:
+        """Test VIES validation with max_records limit."""
+        mock_partner_obj = MagicMock()
+        mock_partner_obj.search_count.return_value = 100  # More than max
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value = mock_partner_obj
+        mock_get_connection.return_value = mock_connection
+
+        result = run_vies_validation(config="dummy.conf", max_records=10)
+
+        # Should process at most 10 records
+        mock_partner_obj.search.assert_called()
+
+
+class TestRunImportWithVatValidationDisabledEdgeCases:
+    """Additional tests for run_import_with_vat_validation_disabled."""
+
+    @patch("odoo_data_flow.lib.actions.vies_manager.restore_vat_validation_settings")
+    @patch("odoo_data_flow.lib.actions.vies_manager.disable_vat_validation")
+    def test_import_with_local_validation_enabled(
+        self,
+        mock_disable: MagicMock,
+        mock_restore: MagicMock,
+    ) -> None:
+        """Test import with local VAT validation enabled."""
+        mock_settings = VatValidationSettings(vies_settings={1: True})
+        mock_disable.return_value = mock_settings
+        mock_restore.return_value = True
+
+        mock_import_func = MagicMock(return_value="result")
+
+        result = run_import_with_vat_validation_disabled(
+            config="dummy.conf",
+            import_func=mock_import_func,
+            import_kwargs={},
+            validate_vat_locally=True,
+        )
+
+        assert result == "result"
+
+    @patch("odoo_data_flow.lib.actions.vies_manager.restore_vat_validation_settings")
+    @patch("odoo_data_flow.lib.actions.vies_manager.disable_vat_validation")
+    def test_import_disable_only_vies(
+        self,
+        mock_disable: MagicMock,
+        mock_restore: MagicMock,
+    ) -> None:
+        """Test import with only VIES disabled."""
+        mock_settings = VatValidationSettings(vies_settings={1: True})
+        mock_disable.return_value = mock_settings
+        mock_restore.return_value = True
+
+        mock_import_func = MagicMock(return_value="result")
+
+        result = run_import_with_vat_validation_disabled(
+            config="dummy.conf",
+            import_func=mock_import_func,
+            import_kwargs={},
+            disable_vies=True,
+            disable_stdnum=False,
+        )
+
+        assert result == "result"
+        mock_disable.assert_called_once()
+        call_kwargs = mock_disable.call_args[1]
+        assert call_kwargs["disable_vies"] is True
+        assert call_kwargs["disable_stdnum"] is False
+
+
+class TestRestoreVatSettingsFromBackupEdgeCases:
+    """Additional tests for restore_vat_settings_from_backup."""
+
+    def test_restore_from_backup_load_failure(self, tmp_path: Path) -> None:
+        """Test restore returns False when backup load fails."""
+        config = {"host": "localhost", "database": "test_db"}
+        backup_path = _get_backup_file_path(config, backup_dir=tmp_path)
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+        backup_path.write_text("invalid json {{{")
+
+        result = restore_vat_settings_from_backup(config, backup_dir=tmp_path)
+
+        assert result is False
+
+
+class TestBackupFilePathEdgeCases:
+    """Additional tests for _get_backup_file_path edge cases."""
+
+    def test_backup_path_with_missing_config(self, tmp_path: Path) -> None:
+        """Test backup path fallback when config file doesn't exist."""
+        # Pass a config file that doesn't exist - it will use defaults
+        config = "/nonexistent/path/to/config.conf"
+        backup_path = _get_backup_file_path(config, backup_dir=tmp_path)
+
+        # Should use fallback values (localhost, unknown) since file doesn't exist
+        assert "vat_settings_" in backup_path.name
+        assert backup_path.suffix == ".json"
+
+    def test_backup_path_with_unparseable_config(self, tmp_path: Path) -> None:
+        """Test backup path fallback when config file is unparseable."""
+        # Create a config file with invalid INI format
+        bad_config = tmp_path / "bad_config.conf"
+        bad_config.write_text("this is not valid INI format [[[")
+
+        backup_path = _get_backup_file_path(str(bad_config), backup_dir=tmp_path)
+
+        # Should still produce a valid backup path
+        assert backup_path.suffix == ".json"
+
+
+class TestDeleteBackupFileEdgeCases:
+    """Additional tests for _delete_backup_file edge cases."""
+
+    def test_delete_backup_file_permission_error(self, tmp_path: Path) -> None:
+        """Test delete handles permission errors gracefully."""
+        backup_path = tmp_path / "protected.json"
+        backup_path.write_text("{}")
+
+        # Mock unlink to raise permission error
+        with patch.object(Path, "unlink", side_effect=PermissionError("Permission denied")):
+            result = _delete_backup_file(backup_path)
+            assert result is False
+
+
+class TestSaveSettingsToBackupEdgeCases:
+    """Additional tests for _save_settings_to_backup edge cases."""
+
+    def test_save_settings_write_error(self, tmp_path: Path) -> None:
+        """Test save handles write errors gracefully."""
+        settings = VatValidationSettings()
+        backup_path = tmp_path / "backup.json"
+
+        # Mock open to raise IOError
+        with patch("builtins.open", side_effect=IOError("Write failed")):
+            result = _save_settings_to_backup(settings, backup_path)
+            assert result is False

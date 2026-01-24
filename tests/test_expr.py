@@ -360,3 +360,13 @@ class TestProcessorIntegration:
         assert result["price"].to_list() == [10.5, 20.0]
         assert result["qty"].to_list() == [2.0, 3.0]
         assert result["total"].to_list() == [21.0, 60.0]
+
+
+class TestNumDecimalSeparator:
+    """Tests for expr.num() decimal separator handling."""
+
+    def test_num_with_dot_separator(self) -> None:
+        """Test num with dot decimal separator (covers branch 226->229)."""
+        df = pl.DataFrame({"price": ["10.5", "20.99"]})
+        result = df.select(expr.num("price", decimal_separator=".").alias("price"))
+        assert result["price"].to_list() == [10.5, 20.99]

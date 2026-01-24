@@ -127,6 +127,14 @@ class TestRPCThreadWrite:
             rpc_thread.launch_batch([["data"]], 1)
             mock_spawn.assert_not_called()
 
+    def test_launch_batch_normal(self) -> None:
+        """Tests that launch_batch spawns a thread normally (covers line 140)."""
+        rpc_thread = RPCThreadWrite(1, MagicMock(), [])
+        rpc_thread.abort_flag = False
+        with patch.object(rpc_thread, "spawn_thread") as mock_spawn:
+            rpc_thread.launch_batch([["101", "Test"]], 1)
+            mock_spawn.assert_called_once()
+
     @pytest.mark.parametrize(
         "progress, task_id", [(None, TaskID(1)), (Progress(), None)]
     )

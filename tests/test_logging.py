@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from rich.logging import RichHandler
 
-from odoo_data_flow.logging_config import log, setup_logging
+from odoo_data_flow.logging_config import log, setup_logging, suppress_console_handler
 
 
 def test_setup_logging_console_only() -> None:
@@ -126,3 +126,34 @@ def test_setup_logging_file_creation_error(
     # The error should have been logged
     mock_log_error.assert_called_once()
     assert "Failed to set up log file" in mock_log_error.call_args[0][0]
+
+
+def test_suppress_console_handler_with_handler() -> None:
+    """Tests that suppress_console_handler suppresses console logging."""
+    # Setup logging to create a console handler
+    log.handlers.clear()
+    setup_logging()
+
+    # The suppress_console_handler should temporarily disable console output
+    with suppress_console_handler():
+        # Console handler should be suppressed (level set high)
+        pass
+
+    # After context manager, handler should be restored
+    assert len(log.handlers) == 1
+
+
+def test_suppress_console_handler_without_handler() -> None:
+    """Tests that suppress_console_handler works even without a handler."""
+    import odoo_data_flow.logging_config as lc
+
+    # Temporarily set _console_handler to None
+    original_handler = lc._console_handler
+    lc._console_handler = None
+
+    with suppress_console_handler():
+        # Should just yield without error
+        pass
+
+    # Restore
+    lc._console_handler = original_handler

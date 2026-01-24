@@ -601,3 +601,5 @@ def test_m2o_map_fun_with_skip_and_empty_concat_value_state_passed(
     mock_concat_actual.assert_called_once_with("_", "non_existent_field")
     assert state["concat_calls"] == 1
     mock_to_m2o.assert_not_called()
+
+

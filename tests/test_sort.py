@@ -87,3 +87,36 @@ def test_returns_false_for_non_existent_file() -> None:
         "non_existent.csv", id_column="id", parent_column="parent_id", separator=","
     )
     assert result is False
+
+
+def test_returns_none_for_compute_error(tmp_path: Path) -> None:
+    """Verify that None is returned on ComputeError/ShapeError."""
+    from unittest.mock import patch
+
+    # Create a file that will cause a ComputeError
+    csv_file = tmp_path / "malformed.csv"
+    csv_file.write_text("id,name\n1,test\n")
+
+    with patch("polars.read_csv") as mock_read:
+        mock_read.side_effect = pl.exceptions.ComputeError(
+            "Schema mismatch detected"
+        )
+        result = sort_for_self_referencing(
+            str(csv_file), id_column="id", parent_column="parent_id", separator=","
+        )
+        assert result is None
+
+
+def test_returns_none_for_shape_error(tmp_path: Path) -> None:
+    """Verify that None is returned on ShapeError."""
+    from unittest.mock import patch
+
+    csv_file = tmp_path / "shape_error.csv"
+    csv_file.write_text("id,name\n1,test\n")
+
+    with patch("polars.read_csv") as mock_read:
+        mock_read.side_effect = pl.exceptions.ShapeError("Shape mismatch")
+        result = sort_for_self_referencing(
+            str(csv_file), id_column="id", parent_column="parent_id", separator=","
+        )
+        assert result is None

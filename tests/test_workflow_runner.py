@@ -108,3 +108,22 @@ def test_run_invoice_v9_workflow_connection_fails(
     )
     mock_log_error.assert_called_once()
     assert "Failed to initialize workflow" in mock_log_error.call_args[0][0]
+
+
+@patch("odoo_data_flow.workflow_runner.get_connection_from_config")
+@patch("odoo_data_flow.workflow_runner.log.error")
+def test_run_invoice_v9_workflow_status_map_not_dict(
+    mock_log_error: MagicMock, mock_get_connection: MagicMock
+) -> None:
+    """Tests that a TypeError is raised if status_map is not a dict (covers line 45)."""
+    run_invoice_v9_workflow(
+        actions=["all"],
+        config="dummy.conf",
+        field="x_legacy_status",
+        status_map_str="['a', 'b', 'c']",  # Valid Python literal but not a dict
+        paid_date_field="x_paid_date",
+        payment_journal=1,
+        max_connection=4,
+    )
+    mock_log_error.assert_called_once()
+    assert "Failed to initialize workflow" in mock_log_error.call_args[0][0]

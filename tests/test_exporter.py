@@ -393,3 +393,48 @@ def test_run_export_with_context_as_dict(
         "tracking_disable": True,
     }
     mock_show_success.assert_called_once()
+
+
+@patch("odoo_data_flow.exporter.export_threaded.export_data")
+@patch("odoo_data_flow.exporter._show_error_panel")
+def test_run_export_context_valid_literal_but_not_dict(
+    mock_show_error_panel: MagicMock, mock_export_data: MagicMock
+) -> None:
+    """Tests that run_export handles context that is valid literal but not a dict (covers line 66)."""
+    run_export(
+        config="dummy.conf",
+        model="res.partner",
+        fields="id",
+        output="dummy.csv",
+        context="['a', 'b', 'c']",  # Valid Python literal but not a dict
+    )
+    mock_show_error_panel.assert_called_once()
+    assert "Invalid Context" in mock_show_error_panel.call_args.args[0]
+    mock_export_data.assert_not_called()
+
+
+@patch("odoo_data_flow.exporter.export_threaded.export_data")
+@patch("odoo_data_flow.exporter._show_success_panel")
+def test_run_export_no_output_file(
+    mock_show_success: MagicMock, mock_export_data: MagicMock
+) -> None:
+    """Tests run_export without output file shows success without validation (covers line 126)."""
+    mock_export_data.return_value = (
+        True,
+        "session-123",
+        2,
+        pl.DataFrame({"id": [1, 2]}),
+    )
+
+    run_export(
+        config="dummy.conf",
+        model="res.partner",
+        fields="id,name",
+        output=None,  # No output file - will skip validation
+    )
+
+    mock_export_data.assert_called_once()
+    mock_show_success.assert_called_once()
+    # The message should NOT contain "verified" since there's no file to verify
+    success_message = mock_show_success.call_args.args[0]
+    assert "verified" not in success_message.lower()

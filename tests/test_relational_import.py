@@ -362,6 +362,29 @@ class TestResolveRelatedIds:
 
     @patch("odoo_data_flow.lib.relational_import.cache.load_id_map", return_value=None)
     @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    def test_resolve_related_ids_mixed_valid_invalid(
+        self, mock_get_conn: MagicMock, mock_load_id_map: MagicMock
+    ) -> None:
+        """Test when some IDs are valid and some are invalid (covers branch 50->52)."""
+        mock_data_model = MagicMock()
+        mock_data_model.search_read.return_value = [
+            {"module": "mod", "name": "cat1", "res_id": 11}
+        ]
+        mock_get_conn.return_value.get_model.return_value = mock_data_model
+
+        # Mix of valid and invalid IDs - should log warning but continue
+        result = relational_import._resolve_related_ids(
+            "dummy.conf",
+            "res.partner.category",
+            pl.Series(["mod.cat1", "invalid_no_dot"]),
+        )
+
+        # Should return result because there's at least one valid ID
+        assert result is not None
+        assert len(result) == 1
+
+    @patch("odoo_data_flow.lib.relational_import.cache.load_id_map", return_value=None)
+    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
     def test_resolve_related_ids_bulk_success(
         self, mock_get_conn: MagicMock, mock_load_id_map: MagicMock
     ) -> None:
@@ -592,6 +615,49 @@ class TestRunWriteTupleImportEdgeCases:
         )
 
         assert result is False
+
+
+class TestFieldIdSuffix:
+    """Tests for field/id suffix handling."""
+
+    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("odoo_data_flow.lib.relational_import._resolve_related_ids")
+    def test_run_direct_relational_import_with_id_suffix(
+        self, mock_resolve: MagicMock, mock_get_conn: MagicMock
+    ) -> None:
+        """Test handling when field has /id suffix in column name (covers lines 324-325)."""
+        # Source DataFrame has category_id/id column (with /id suffix)
+        source_df = pl.DataFrame({"id": ["p1"], "category_id/id": ["cat1"]})
+        mock_resolve.return_value = pl.DataFrame(
+            {"external_id": ["cat1"], "db_id": [11]}
+        )
+        mock_conn = MagicMock()
+        mock_get_conn.return_value = mock_conn
+
+        strategy_details = {
+            "relation_table": "partner_category_rel",
+            "relation_field": "partner_id",
+            "relation": "res.partner.category",
+        }
+        progress = Progress()
+        task_id = progress.add_task("test")
+
+        result = relational_import.run_direct_relational_import(
+            "dummy.conf",
+            "res.partner",
+            "category_id",  # Field name without /id - function should find category_id/id
+            strategy_details,
+            source_df,
+            {"p1": 1},
+            1,
+            10,
+            progress,
+            task_id,
+            "source.csv",
+        )
+
+        # Should successfully use the /id suffix column
+        mock_resolve.assert_called_once()
 
 
 class TestRunWriteO2MTupleImportEdgeCases:

@@ -539,3 +539,339 @@ def test_run_import_fail_mode_with_strategies(
     )
     mock_import_data.assert_called_once()
     mock_relational_import.assert_not_called()
+
+
+class TestImporterEdgeCases:
+    """Additional edge case tests for importer module."""
+
+    def test_infer_model_from_filename_no_dot(self) -> None:
+        """Test model inference from filename without dots."""
+        # Single word filename without underscore - should return None
+        assert _infer_model_from_filename("nomodel.csv") is None
+
+    def test_count_lines_file_not_found(self) -> None:
+        """Test line count returns 0 for non-existent file."""
+        assert _count_lines("/nonexistent/file.csv") == 0
+
+    @patch("odoo_data_flow.importer._show_error_panel")
+    def test_run_import_context_type_error(
+        self, mock_show_error: MagicMock
+    ) -> None:
+        """Test run_import handles context that parses to non-dict."""
+        result = run_import(
+            config="dummy.conf",
+            filename="dummy.csv",
+            model="res.partner",
+            context="[1, 2, 3]",  # Valid JSON but not a dict
+            deferred_fields=None,
+            auto_defer=False,
+            unique_id_field=None,
+            no_preflight_checks=True,
+            headless=True,
+            worker=1,
+            batch_size=100,
+            skip=0,
+            fail=False,
+            separator=";",
+            ignore=None,
+            encoding="utf-8",
+            o2m=False,
+            groupby=None,
+        )
+        assert result is None
+        mock_show_error.assert_called_once()
+
+    @patch("odoo_data_flow.importer._show_error_panel")
+    def test_run_import_context_non_string_non_dict(
+        self, mock_show_error: MagicMock
+    ) -> None:
+        """Test run_import handles context that is neither string nor dict."""
+        result = run_import(
+            config="dummy.conf",
+            filename="dummy.csv",
+            model="res.partner",
+            context=12345,  # Neither string nor dict
+            deferred_fields=None,
+            auto_defer=False,
+            unique_id_field=None,
+            no_preflight_checks=True,
+            headless=True,
+            worker=1,
+            batch_size=100,
+            skip=0,
+            fail=False,
+            separator=";",
+            ignore=None,
+            encoding="utf-8",
+            o2m=False,
+            groupby=None,
+        )
+        assert result is None
+        mock_show_error.assert_called_once()
+
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    @patch("odoo_data_flow.importer._run_preflight_checks")
+    def test_run_import_fail_mode_no_records(
+        self,
+        mock_preflight: MagicMock,
+        mock_import_data: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test fail mode when fail file has only header (no records)."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id;name\n1;test\n")
+
+        # Create empty fail file (only header)
+        env_dir = tmp_path / "test"
+        env_dir.mkdir(parents=True)
+        fail_file = env_dir / "res_partner_fail.csv"
+        fail_file.write_text("id;name\n")  # Only header
+
+        result = run_import(
+            config="test_connection.conf",
+            filename=str(source_file),
+            model="res.partner",
+            fail=True,
+            deferred_fields=None,
+            auto_defer=False,
+            unique_id_field=None,
+            no_preflight_checks=True,
+            headless=True,
+            worker=1,
+            batch_size=100,
+            skip=0,
+            separator=";",
+            ignore=None,
+            context={},
+            encoding="utf-8",
+            o2m=False,
+            groupby=None,
+        )
+
+        # Should return None without calling import_data
+        assert result is None
+        mock_import_data.assert_not_called()
+
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    @patch("odoo_data_flow.importer._run_preflight_checks")
+    def test_run_import_fail_mode_adds_error_reason_ignore(
+        self,
+        mock_preflight: MagicMock,
+        mock_import_data: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that _ERROR_REASON is added to ignore list in fail mode."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id;name\n1;test\n")
+
+        env_dir = tmp_path / "test"
+        env_dir.mkdir(parents=True)
+        fail_file = env_dir / "res_partner_fail.csv"
+        fail_file.write_text("id;name;_ERROR_REASON\n1;test;error\n")
+
+        mock_preflight.return_value = True
+        mock_import_data.return_value = (True, {"total_records": 1})
+
+        run_import(
+            config="test_connection.conf",
+            filename=str(source_file),
+            model="res.partner",
+            fail=True,
+            deferred_fields=None,
+            auto_defer=False,
+            unique_id_field=None,
+            no_preflight_checks=False,
+            headless=True,
+            worker=1,
+            batch_size=100,
+            skip=0,
+            separator=";",
+            ignore=None,  # Start with None
+            context={},
+            encoding="utf-8",
+            o2m=False,
+            groupby=None,
+        )
+
+        # Verify _ERROR_REASON is in ignore list
+        call_kwargs = mock_import_data.call_args.kwargs
+        assert "_ERROR_REASON" in call_kwargs.get("ignore", [])
+
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    @patch("odoo_data_flow.importer._run_preflight_checks")
+    def test_run_import_auto_defer_uses_detected_fields(
+        self,
+        mock_preflight: MagicMock,
+        mock_import_data: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that auto_defer uses deferred fields from preflight."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id;name\n1;test\n")
+
+        def preflight_side_effect(*_args: Any, **kwargs: Any) -> bool:
+            kwargs["import_plan"]["deferred_fields"] = ["parent_id", "user_id"]
+            return True
+
+        mock_preflight.side_effect = preflight_side_effect
+        mock_import_data.return_value = (True, {"total_records": 1})
+
+        run_import(
+            config="test.conf",
+            filename=str(source_file),
+            model="res.partner",
+            deferred_fields=None,
+            auto_defer=True,  # Enable auto_defer
+            unique_id_field=None,
+            no_preflight_checks=False,
+            headless=True,
+            worker=1,
+            batch_size=100,
+            skip=0,
+            fail=False,
+            separator=";",
+            ignore=None,
+            context={},
+            encoding="utf-8",
+            o2m=False,
+            groupby=None,
+        )
+
+        call_kwargs = mock_import_data.call_args.kwargs
+        assert call_kwargs["deferred_fields"] == ["parent_id", "user_id"]
+
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    @patch("odoo_data_flow.importer._run_preflight_checks")
+    def test_run_import_deferred_fields_logs_when_detected(
+        self,
+        mock_preflight: MagicMock,
+        mock_import_data: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that detected deferred fields are logged when not applied."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id;name\n1;test\n")
+
+        def preflight_side_effect(*_args: Any, **kwargs: Any) -> bool:
+            kwargs["import_plan"]["deferred_fields"] = ["parent_id"]
+            return True
+
+        mock_preflight.side_effect = preflight_side_effect
+        mock_import_data.return_value = (True, {"total_records": 1})
+
+        run_import(
+            config="test.conf",
+            filename=str(source_file),
+            model="res.partner",
+            deferred_fields=None,
+            auto_defer=False,  # Not using auto_defer
+            unique_id_field=None,
+            no_preflight_checks=False,
+            headless=True,
+            worker=1,
+            batch_size=100,
+            skip=0,
+            fail=False,
+            separator=";",
+            ignore=None,
+            context={},
+            encoding="utf-8",
+            o2m=False,
+            groupby=None,
+        )
+
+        # Should still work but with empty deferred_fields
+        call_kwargs = mock_import_data.call_args.kwargs
+        assert call_kwargs["deferred_fields"] == []
+
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    @patch("odoo_data_flow.importer._show_error_panel")
+    def test_run_import_returns_none_on_failure(
+        self,
+        mock_show_error: MagicMock,
+        mock_import_data: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that run_import returns None and shows error on import failure."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id;name\n1;test\n")
+
+        mock_import_data.return_value = (False, {})  # Import failed
+
+        result = run_import(
+            config="test.conf",
+            filename=str(source_file),
+            model="res.partner",
+            deferred_fields=None,
+            auto_defer=False,
+            unique_id_field=None,
+            no_preflight_checks=True,
+            headless=True,
+            worker=1,
+            batch_size=100,
+            skip=0,
+            fail=False,
+            separator=";",
+            ignore=None,
+            context={},
+            encoding="utf-8",
+            o2m=False,
+            groupby=None,
+        )
+
+        assert result is None
+        mock_show_error.assert_called_once()
+
+    @patch("odoo_data_flow.importer.os.remove")
+    @patch("odoo_data_flow.importer.os.path.exists", return_value=True)
+    @patch("odoo_data_flow.importer.sort.sort_for_self_referencing")
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    @patch("odoo_data_flow.importer._run_preflight_checks")
+    def test_run_import_cleans_up_sorted_temp_file(
+        self,
+        mock_preflight: MagicMock,
+        mock_import_data: MagicMock,
+        mock_sort: MagicMock,
+        mock_exists: MagicMock,
+        mock_remove: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that sorted temp file is cleaned up after import."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id;name\n1;test\n")
+
+        sorted_file = str(tmp_path / "sorted_temp.csv")
+        mock_sort.return_value = sorted_file
+
+        def preflight_side_effect(*_args: Any, **kwargs: Any) -> bool:
+            kwargs["import_plan"]["strategy"] = "sort_and_one_pass_load"
+            kwargs["import_plan"]["id_column"] = "id"
+            kwargs["import_plan"]["parent_column"] = "parent_id"
+            return True
+
+        mock_preflight.side_effect = preflight_side_effect
+        mock_import_data.return_value = (True, {"total_records": 1})
+
+        run_import(
+            config="test.conf",
+            filename=str(source_file),
+            model="res.partner",
+            deferred_fields=None,
+            auto_defer=False,
+            unique_id_field=None,
+            no_preflight_checks=False,
+            headless=True,
+            worker=1,
+            batch_size=100,
+            skip=0,
+            fail=False,
+            separator=";",
+            ignore=None,
+            context={},
+            encoding="utf-8",
+            o2m=False,
+            groupby=None,
+        )
+
+        # Verify temp file was removed
+        mock_remove.assert_called_once_with(sorted_file)

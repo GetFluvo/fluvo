@@ -9,7 +9,7 @@ from rich.panel import Panel
 from rich.progress import Progress, TaskID
 
 from odoo_data_flow import writer
-from odoo_data_flow.lib.writer import write_relational_failures_to_csv
+from odoo_data_flow.lib.writer import _get_env_from_config, write_relational_failures_to_csv
 from odoo_data_flow.write_threaded import RPCThreadWrite
 from odoo_data_flow.writer import _read_data_file, run_write
 
@@ -432,3 +432,78 @@ def test_write_relational_failures_no_records(
 
     # Assert
     mock_open_file.assert_not_called()
+
+
+class TestReadDataFileEdgeCases:
+    """Additional edge case tests for _read_data_file."""
+
+    def test_read_data_file_generic_exception(self) -> None:
+        """Test that _read_data_file handles generic exceptions."""
+        with (
+            patch("builtins.open", side_effect=PermissionError("Access denied")),
+            patch("odoo_data_flow.writer.log.error") as mock_log,
+        ):
+            header, data = _read_data_file("permission_error.csv", ",", "utf-8")
+            assert header == []
+            assert data == []
+            mock_log.assert_called_once()
+            assert "Failed to read file" in mock_log.call_args[0][0]
+
+
+class TestRunWriteEdgeCases:
+    """Additional edge case tests for run_write."""
+
+    @patch("odoo_data_flow.writer.Console")
+    def test_run_write_fail_mode_file_not_exists(
+        self,
+        mock_console_class: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test fail mode when fail file doesn't exist."""
+        source_file = tmp_path / "source.csv"
+        source_file.write_text("id;name\n1;test\n")
+
+        # Don't create the fail file - it doesn't exist
+
+        run_write(
+            config="dummy.conf",
+            filename=str(source_file),
+            model="res.partner",
+            fail=True,
+            separator=";",
+        )
+
+        # Should show "No Recovery Needed" panel
+        mock_console_instance = mock_console_class.return_value
+        mock_console_instance.print.assert_called_once()
+        panel = mock_console_instance.print.call_args[0][0]
+        assert "No Recovery Needed" in str(panel.title)
+
+
+class TestLibWriterGetEnvFromConfig:
+    """Tests for _get_env_from_config from lib/writer.py (covers lines 30, 35)."""
+
+    def test_get_env_from_config_dict_with_config_file(self) -> None:
+        """Test extracting env from dict with _config_file key (covers line 30)."""
+        result = _get_env_from_config({"_config_file": "test_connection.conf"})
+        assert result == "test"
+
+    def test_get_env_from_config_dict_empty_config_file(self) -> None:
+        """Test that dict with empty _config_file returns None (covers line 35)."""
+        result = _get_env_from_config({"_config_file": ""})
+        assert result is None
+
+    def test_get_env_from_config_dict_without_config_file(self) -> None:
+        """Test that dict without _config_file key returns None (covers line 30 & 35)."""
+        result = _get_env_from_config({"hostname": "localhost"})
+        assert result is None
+
+    def test_get_env_from_config_string(self) -> None:
+        """Test extracting env from string config path."""
+        result = _get_env_from_config("uat_connection.conf")
+        assert result == "uat"
+
+    def test_get_env_from_config_none(self) -> None:
+        """Test that None config returns None."""
+        result = _get_env_from_config(None)
+        assert result is None

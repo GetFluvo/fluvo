@@ -181,3 +181,61 @@ def test_run_url_to_image_with_cast(mock_process: MagicMock, tmp_path: Path) -> 
     out = tmp_path / "out.csv"
     run_url_to_image(str(file), "col1", str(out))
     assert out.exists()
+
+
+@patch("odoo_data_flow.converter.Processor.process")
+def test_run_path_to_image_with_object_dtype(
+    mock_process: MagicMock, tmp_path: Path
+) -> None:
+    """Tests run_path_to_image with DataFrame containing Object dtype columns."""
+    # Create a DataFrame and mock the dtype check
+    df = pl.DataFrame({"col1": [1, 2], "obj_col": ["a", "b"]})
+
+    # Mock the DataFrame's column iteration to include Object dtype
+    class MockColumn:
+        def __init__(self, name: str, dtype: pl.DataType) -> None:
+            self.name = name
+            self.dtype = dtype
+
+    mock_df = MagicMock()
+    mock_df.__iter__ = lambda self: iter(
+        [MockColumn("col1", pl.Int64), MockColumn("obj_col", pl.Object)]
+    )
+    mock_df.with_columns.return_value = df
+    mock_df.write_csv = df.write_csv
+
+    mock_process.return_value = mock_df
+    file = tmp_path / "in.csv"
+    file.touch()
+    out = tmp_path / "out.csv"
+    run_path_to_image(str(file), "col1", str(out), str(tmp_path))
+    # The function should complete without error
+
+
+@patch("odoo_data_flow.converter.Processor.process")
+def test_run_url_to_image_with_object_dtype(
+    mock_process: MagicMock, tmp_path: Path
+) -> None:
+    """Tests run_url_to_image with DataFrame containing Object dtype columns."""
+    # Create a DataFrame and mock the dtype check
+    df = pl.DataFrame({"col1": [1, 2], "obj_col": ["a", "b"]})
+
+    # Mock the DataFrame's column iteration to include Object dtype
+    class MockColumn:
+        def __init__(self, name: str, dtype: pl.DataType) -> None:
+            self.name = name
+            self.dtype = dtype
+
+    mock_df = MagicMock()
+    mock_df.__iter__ = lambda self: iter(
+        [MockColumn("col1", pl.Int64), MockColumn("obj_col", pl.Object)]
+    )
+    mock_df.with_columns.return_value = df
+    mock_df.write_csv = df.write_csv
+
+    mock_process.return_value = mock_df
+    file = tmp_path / "in.csv"
+    file.touch()
+    out = tmp_path / "out.csv"
+    run_url_to_image(str(file), "col1", str(out))
+    # The function should complete without error

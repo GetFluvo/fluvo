@@ -317,3 +317,66 @@ class TestBatchScaling:
 
         # Should be back to full size
         assert controller.get_batch_size(100) == 100
+
+
+class TestApplyDelay:
+    """Tests for apply_delay method."""
+
+    def test_apply_delay_zero(self) -> None:
+        """Test apply_delay with zero delay does not add to stats."""
+        controller = throttle.ThrottleController()
+        controller.current_delay = 0.0
+        controller.apply_delay()
+        assert controller.stats.total_delay_added == 0.0
+
+    def test_apply_delay_positive(self) -> None:
+        """Test apply_delay with positive delay adds to stats (covers lines 206-208)."""
+        controller = throttle.ThrottleController()
+        controller.current_delay = 0.01  # Short delay for fast testing
+        controller.apply_delay()
+        assert controller.stats.total_delay_added == 0.01
+
+
+class TestUpdateHealthEmpty:
+    """Tests for _update_health with empty response times."""
+
+    def test_update_health_empty_response_times(self) -> None:
+        """Test _update_health returns early with empty response_times (covers line 117)."""
+        controller = throttle.ThrottleController()
+        # Ensure response_times is empty
+        controller.response_times = []
+        # Call _update_health directly
+        controller._update_health()
+        # Health should remain unchanged
+        assert controller.current_health == throttle.ServerHealth.HEALTHY
+
+
+class TestDisplayThrottleStats:
+    """Tests for display_throttle_stats function."""
+
+    def test_display_throttle_stats(self) -> None:
+        """Test display_throttle_stats function (covers lines 278-300)."""
+        from unittest.mock import MagicMock, patch
+
+        with patch("rich.console.Console") as mock_console_cls:
+            mock_console = MagicMock()
+            mock_console_cls.return_value = mock_console
+
+            stats = throttle.ThrottleStats(
+                total_requests=10,
+                healthy_requests=5,
+                degraded_requests=3,
+                stressed_requests=1,
+                overloaded_requests=1,
+                total_delay_added=2.5,
+                batch_size_reductions=3,
+                health_recoveries=2,
+                min_response_time=0.1,
+                max_response_time=5.0,
+                total_response_time=15.0,
+            )
+
+            throttle.display_throttle_stats(stats)
+
+            # Verify console.print was called
+            mock_console.print.assert_called_once()

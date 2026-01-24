@@ -296,6 +296,16 @@ class TestHelperFunctions:
         assert rec["category"] == "recoverable"
         assert rec["action"] == "skip_or_create"
 
+    def test_get_retry_recommendation_recoverable_investigate(self) -> None:
+        """Test recommendation for other recoverable errors (covers lines 349-350)."""
+        # Use a recoverable pattern that is NOT company, reference, or not_found related
+        # "xmlid" is a recoverable pattern without company/reference/not_found
+        rec = retry.get_retry_recommendation("Invalid xmlid format detected")
+
+        assert rec["category"] == "recoverable"
+        assert rec["action"] == "investigate"
+        assert "Recoverable error" in rec["message"]
+
 
 class TestRetryStats:
     """Tests for RetryStats dataclass."""
@@ -327,3 +337,11 @@ class TestRetryStats:
         assert stats.permanent_errors == 1
         assert stats.error_counts["timeout"] == 2
         assert stats.error_counts["constraint"] == 1
+
+    def test_record_error_recoverable(self) -> None:
+        """Test recording recoverable errors (covers lines 59-60)."""
+        stats = retry.RetryStats()
+        stats.record_error(retry.ErrorCategory.RECOVERABLE, "external id")
+
+        assert stats.recoverable_errors == 1
+        assert stats.error_counts["external id"] == 1

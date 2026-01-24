@@ -470,3 +470,215 @@ class TestDryRunCLI:
         assert result.exit_code == 0
         # Should show validation result
         assert "Validation" in result.output
+
+
+class TestValidateCsvDataEdgeCases:
+    """Additional edge case tests for validate_csv_data."""
+
+    def test_validate_m2m_references(
+        self, temp_dir: str, fields_info: dict[str, Any]
+    ) -> None:
+        """Test validation of many2many reference fields."""
+        # Add m2m field to fields_info
+        fields_info_m2m = dict(fields_info)
+        fields_info_m2m["tag_ids"] = {
+            "type": "many2many",
+            "required": False,
+            "relation": "res.partner.tag",
+        }
+
+        csv_path = Path(temp_dir) / "m2m.csv"
+        csv_path.write_text("id;name;tag_ids/id\n1;Product;base.tag1,base.tag2\n")
+
+        # Mock connection that returns 1 for all reference checks
+        mock_conn = MagicMock()
+        ir_model_data = MagicMock()
+        ir_model_data.search_count.return_value = 1  # References exist
+        mock_conn.get_model.return_value = ir_model_data
+
+        result = val.validate_csv_data(
+            file_path=str(csv_path),
+            model="test.model",
+            fields_info=fields_info_m2m,
+            connection=mock_conn,
+        )
+
+        assert result.is_valid
+
+    def test_validate_relational_field_no_relation_model(
+        self, temp_dir: str
+    ) -> None:
+        """Test handling relational field with missing relation."""
+        fields_info = {
+            "partner_id": {
+                "type": "many2one",
+                "relation": "",  # Empty relation
+            },
+        }
+
+        csv_path = Path(temp_dir) / "no_relation.csv"
+        csv_path.write_text("id;partner_id/id\n1;base.test\n")
+
+        mock_conn = MagicMock()
+
+        result = val.validate_csv_data(
+            file_path=str(csv_path),
+            model="test.model",
+            fields_info=fields_info,
+            connection=mock_conn,
+        )
+
+        # Should not error - just skip validation for this field
+        assert result.is_valid
+
+    def test_validate_caches_reference_lookups(
+        self, temp_dir: str, fields_info: dict[str, Any]
+    ) -> None:
+        """Test that reference lookups are cached."""
+        csv_path = Path(temp_dir) / "cached_refs.csv"
+        csv_path.write_text(
+            "id;name;partner_id/id\n"
+            "1;Product1;base.partner_1\n"
+            "2;Product2;base.partner_1\n"  # Same reference
+            "3;Product3;base.partner_1\n"  # Same reference again
+        )
+
+        mock_conn = MagicMock()
+        ir_model_data = MagicMock()
+        ir_model_data.search_count.return_value = 1
+        mock_conn.get_model.return_value = ir_model_data
+
+        result = val.validate_csv_data(
+            file_path=str(csv_path),
+            model="test.model",
+            fields_info=fields_info,
+            connection=mock_conn,
+        )
+
+        # Reference should only be checked once due to caching
+        assert ir_model_data.search_count.call_count == 1
+        assert result.is_valid
+
+    def test_validate_caches_missing_references(
+        self, temp_dir: str, fields_info: dict[str, Any]
+    ) -> None:
+        """Test that missing references are tracked from cache."""
+        csv_path = Path(temp_dir) / "cached_missing.csv"
+        csv_path.write_text(
+            "id;name;partner_id/id\n"
+            "1;Product1;base.missing\n"
+            "2;Product2;base.missing\n"  # Same missing reference
+        )
+
+        mock_conn = MagicMock()
+        ir_model_data = MagicMock()
+        ir_model_data.search_count.return_value = 0  # Not found
+        mock_conn.get_model.return_value = ir_model_data
+
+        result = val.validate_csv_data(
+            file_path=str(csv_path),
+            model="test.model",
+            fields_info=fields_info,
+            connection=mock_conn,
+        )
+
+        # Both rows should have the missing reference error tracked
+        assert "base.missing" in result.missing_references.get("partner_id/id", set())
+
+    def test_validate_generic_exception(
+        self, temp_dir: str, mock_connection: MagicMock, fields_info: dict[str, Any]
+    ) -> None:
+        """Test handling of generic exceptions during validation."""
+        csv_path = Path(temp_dir) / "error.csv"
+        csv_path.write_text("id;name;state\n1;Product;draft\n")
+
+        # Make csv.reader raise an exception
+        with patch("odoo_data_flow.lib.validation.csv.reader") as mock_reader:
+            mock_reader.side_effect = Exception("Unexpected error")
+
+            result = val.validate_csv_data(
+                file_path=str(csv_path),
+                model="test.model",
+                fields_info=fields_info,
+                connection=mock_connection,
+            )
+
+            assert not result.is_valid
+            assert result.errors[0].error_type == "validation_error"
+
+
+class TestGetSelectionValuesEdgeCases:
+    """Additional edge case tests for _get_selection_values."""
+
+    def test_get_selection_values_non_list_selection(self) -> None:
+        """Test handling non-list selection definition."""
+        fields_info = {
+            "state": {
+                "type": "selection",
+                "selection": "get_states",  # Method name instead of list
+            }
+        }
+        values = val._get_selection_values(fields_info, "state")
+        assert values == set()
+
+
+class TestDisplayValidationResultsEdgeCases:
+    """Additional tests for display_validation_results."""
+
+    def test_display_with_invalid_selections(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test displaying validation with invalid selection values."""
+        result = val.ValidationResult(
+            total_rows=10,
+            valid_rows=8,
+            errors=[
+                val.ValidationError(
+                    5, "state", "bad", "invalid_selection", "Invalid value"
+                ),
+            ],
+            invalid_selections={"state": {"bad", "worse", "awful"}},
+        )
+
+        val.display_validation_results(result, "res.partner")
+
+        captured = capsys.readouterr()
+        assert "Invalid Selection Values" in captured.out
+
+    def test_display_with_many_errors(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test displaying more than 10 errors."""
+        errors = [
+            val.ValidationError(i, "field", "", "err", f"Error {i}")
+            for i in range(15)
+        ]
+        result = val.ValidationResult(
+            total_rows=15,
+            valid_rows=0,
+            errors=errors,
+        )
+
+        val.display_validation_results(result, "res.partner")
+
+        captured = capsys.readouterr()
+        assert "and 5 more errors" in captured.out
+
+    def test_display_error_without_row_number(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test displaying error without row number (row_number=0)."""
+        result = val.ValidationResult(
+            total_rows=0,
+            valid_rows=0,
+            errors=[
+                val.ValidationError(
+                    0, "", "/path/to/file", "file_not_found", "File not found"
+                ),
+            ],
+        )
+
+        val.display_validation_results(result, "res.partner")
+
+        captured = capsys.readouterr()
+        assert "File not found" in captured.out

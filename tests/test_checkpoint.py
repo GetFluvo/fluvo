@@ -271,3 +271,130 @@ class TestCleanupOldCheckpoints:
         # Verify it still exists
         loaded = ckpt.load_checkpoint(sample_csv, "config.conf", "res.partner")
         assert loaded is not None
+
+    def test_cleanup_no_checkpoint_dir(self, temp_dir: str) -> None:
+        """Test cleanup when checkpoint directory doesn't exist."""
+        nonexistent_csv = Path(temp_dir) / "nonexistent.csv"
+        deleted = ckpt.cleanup_old_checkpoints(str(nonexistent_csv))
+        assert deleted == 0
+
+    def test_cleanup_corrupted_checkpoint_file(self, sample_csv: str) -> None:
+        """Test that corrupted checkpoint files are deleted during cleanup."""
+        cp_dir = ckpt.get_checkpoint_dir(sample_csv)
+        cp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create a corrupted checkpoint file
+        corrupted_path = cp_dir / "corrupted.json"
+        corrupted_path.write_text("this is not valid json {{{")
+
+        deleted = ckpt.cleanup_old_checkpoints(sample_csv, max_age_days=7)
+        assert deleted == 1
+        assert not corrupted_path.exists()
+
+
+class TestFileHashLargeFile:
+    """Tests for file hash computation with large files."""
+
+    def test_compute_file_hash_large_file(self, temp_dir: str) -> None:
+        """Test file hash computation for files larger than 2MB."""
+        large_file = Path(temp_dir) / "large_file.csv"
+        # Create a file larger than 2MB (the threshold for reading last 1MB)
+        content = "a" * (3 * 1024 * 1024)  # 3MB
+        large_file.write_text(content)
+
+        file_hash = ckpt._compute_file_hash(str(large_file))
+        assert len(file_hash) == 16
+        assert file_hash != "unknown"
+
+
+class TestConfigHash:
+    """Tests for config hash computation."""
+
+    def test_compute_config_hash_with_non_dict_non_str(self) -> None:
+        """Test config hash with object that is neither dict nor str."""
+        # Pass an object like a dataclass or custom class
+        class CustomConfig:
+            def __str__(self) -> str:
+                return "custom_config_value"
+
+        config = CustomConfig()
+        config_hash = ckpt._compute_config_hash(config)
+        assert len(config_hash) == 16
+
+
+class TestSaveCheckpointEdgeCases:
+    """Tests for save_checkpoint edge cases."""
+
+    def test_save_checkpoint_permission_error(self, sample_csv: str) -> None:
+        """Test that save_checkpoint returns False on write error."""
+        from unittest.mock import patch
+
+        cp = ckpt.CheckpointData(
+            session_id="test",
+            file_path=sample_csv,
+            file_hash="hash",
+            model="res.partner",
+            config_hash="config",
+            last_completed_batch=0,
+            total_batches=1,
+            records_processed=0,
+            records_created=0,
+            records_failed=0,
+        )
+
+        with patch("builtins.open", side_effect=PermissionError("Permission denied")):
+            result = ckpt.save_checkpoint(cp)
+            assert result is False
+
+
+class TestLoadCheckpointEdgeCases:
+    """Tests for load_checkpoint edge cases."""
+
+    def test_load_checkpoint_json_decode_error(self, sample_csv: str) -> None:
+        """Test that corrupted JSON returns None."""
+        session_id = ckpt.generate_session_id(sample_csv, "config.conf", "res.partner")
+
+        # Create checkpoint directory and write corrupted file
+        cp_dir = ckpt.get_checkpoint_dir(sample_csv)
+        cp_dir.mkdir(parents=True, exist_ok=True)
+        cp_path = ckpt.get_checkpoint_path(sample_csv, session_id)
+        cp_path.write_text("this is not valid json {{{")
+
+        loaded = ckpt.load_checkpoint(sample_csv, "config.conf", "res.partner")
+        assert loaded is None
+
+    def test_load_checkpoint_generic_exception(self, sample_csv: str) -> None:
+        """Test that generic exceptions return None."""
+        from unittest.mock import patch
+
+        session_id = ckpt.generate_session_id(sample_csv, "config.conf", "res.partner")
+
+        # Create a valid checkpoint first
+        cp_dir = ckpt.get_checkpoint_dir(sample_csv)
+        cp_dir.mkdir(parents=True, exist_ok=True)
+        cp_path = ckpt.get_checkpoint_path(sample_csv, session_id)
+        cp_path.write_text('{"valid": "json"}')
+
+        with patch("builtins.open", side_effect=IOError("Read error")):
+            loaded = ckpt.load_checkpoint(sample_csv, "config.conf", "res.partner")
+            assert loaded is None
+
+
+class TestDeleteCheckpointEdgeCases:
+    """Tests for delete_checkpoint edge cases."""
+
+    def test_delete_checkpoint_permission_error(self, sample_csv: str) -> None:
+        """Test that delete_checkpoint returns False on permission error."""
+        from unittest.mock import patch
+
+        session_id = ckpt.generate_session_id(sample_csv, "config.conf", "res.partner")
+
+        # Create checkpoint directory and file
+        cp_dir = ckpt.get_checkpoint_dir(sample_csv)
+        cp_dir.mkdir(parents=True, exist_ok=True)
+        cp_path = ckpt.get_checkpoint_path(sample_csv, session_id)
+        cp_path.write_text("{}")
+
+        with patch.object(Path, "unlink", side_effect=PermissionError("Permission denied")):
+            result = ckpt.delete_checkpoint(sample_csv, session_id)
+            assert result is False

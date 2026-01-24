@@ -106,3 +106,67 @@ def test_attribute_line_dict() -> None:
             "val_3",
         ],
     ]
+
+
+def test_attribute_line_dict_no_template_id() -> None:
+    """Test add_line when product_tmpl_id/id is missing (covers line 140)."""
+
+    def id_gen_fun(template_id: str, attributes: dict[str, list[str]]) -> str:
+        return f"id_{template_id}"
+
+    attribute_list_ids = [["att_id_1", "att_name_1"]]
+    aggregator = AttributeLineDict(attribute_list_ids, id_gen_fun)
+    header = ["name", "attribute_id/id", "value_ids/id"]  # No product_tmpl_id/id
+    line = [
+        "Product Name",
+        {"att_name_1": "att_id_1"},
+        {"att_name_1": "val_1"},
+    ]
+
+    aggregator.add_line(line, header)
+
+    # Should have early return, no data added
+    assert aggregator.data == {}
+
+
+def test_attribute_line_dict_duplicate_value() -> None:
+    """Test add_line with duplicate value for same attribute (covers line 150)."""
+
+    def id_gen_fun(template_id: str, attributes: dict[str, list[str]]) -> str:
+        return f"id_{template_id}"
+
+    attribute_list_ids = [["att_id_1", "att_name_1"]]
+    aggregator = AttributeLineDict(attribute_list_ids, id_gen_fun)
+    header = ["product_tmpl_id/id", "attribute_id/id", "value_ids/id"]
+
+    # Add first line
+    line1 = ["template_1", {"att_name_1": "att_id_1"}, {"att_name_1": "val_1"}]
+    aggregator.add_line(line1, header)
+
+    # Add same template with same value - should not duplicate
+    line2 = ["template_1", {"att_name_1": "att_id_1"}, {"att_name_1": "val_1"}]
+    aggregator.add_line(line2, header)
+
+    # Value should appear only once
+    assert len(aggregator.data["template_1"]["att_id_1"]) == 1
+    assert aggregator.data["template_1"]["att_id_1"] == ["val_1"]
+
+
+def test_attribute_line_dict_empty_template_in_data() -> None:
+    """Test generate_line skips empty template_id (covers line 175)."""
+
+    def id_gen_fun(template_id: str, attributes: dict[str, list[str]]) -> str:
+        return f"id_{template_id}"
+
+    attribute_list_ids = [["att_id_1", "att_name_1"]]
+    aggregator = AttributeLineDict(attribute_list_ids, id_gen_fun)
+
+    # Manually add empty template_id and valid template_id
+    aggregator.data[""] = {"att_id_1": ["val_empty"]}
+    aggregator.data["template_1"] = {"att_id_1": ["val_1"]}
+
+    lines_header, lines_out = aggregator.generate_line()
+
+    # Should only have one line (for template_1), empty template_id should be skipped
+    assert len(lines_out) == 1
+    assert lines_out[0][1] == "template_1"

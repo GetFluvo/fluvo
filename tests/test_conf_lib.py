@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from odoo_data_flow.lib.conf_lib import (
+    _read_config_file,
     get_connection_from_config,
     get_connection_from_dict,
 )
@@ -110,3 +111,86 @@ def test_get_connection_from_dict_generic_exception(
     mock_get_connection.side_effect = Exception("Generic connection error")
     with pytest.raises(Exception, match="Generic connection error"):
         get_connection_from_dict(config_dict)
+
+
+# --- Tests for _config_file handling ---
+@patch("odoo_data_flow.lib.conf_lib.odoolib.get_connection")
+def test_get_connection_from_dict_with_config_file_override(
+    mock_get_connection: MagicMock, tmp_path: Path
+) -> None:
+    """Tests that _config_file key loads base config and merges with overrides."""
+    # Create a base config file
+    config_file = tmp_path / "base.conf"
+    config_content = """
+[Connection]
+hostname = base-server
+port = 8069
+database = base-db
+login = base-user
+password = base-pass
+"""
+    config_file.write_text(config_content)
+
+    # Pass config dict with _config_file and override some values
+    config_dict = {
+        "_config_file": str(config_file),
+        "hostname": "override-server",  # This should override base
+        "password": "override-pass",  # This should override base
+    }
+
+    get_connection_from_dict(config_dict)
+    mock_get_connection.assert_called_once()
+    call_kwargs = mock_get_connection.call_args.kwargs
+    # Overridden values
+    assert call_kwargs.get("hostname") == "override-server"
+    assert call_kwargs.get("password") == "override-pass"
+    # Values from base config
+    assert call_kwargs.get("database") == "base-db"
+    assert call_kwargs.get("login") == "base-user"
+
+
+# --- Tests for connection caching ---
+@patch("odoo_data_flow.lib.conf_lib.odoolib.get_connection")
+def test_get_connection_from_config_caches_connection(
+    mock_get_connection: MagicMock, tmp_path: Path
+) -> None:
+    """Tests that connections are cached and reused."""
+    from odoo_data_flow.lib.conf_lib import _connection_cache
+
+    # Clear cache first
+    _connection_cache.clear()
+
+    config_file = tmp_path / "connection.conf"
+    config_content = """
+[Connection]
+hostname = test-server
+database = test-db
+login = test-user
+password = test-pass
+"""
+    config_file.write_text(config_content)
+
+    mock_connection = MagicMock()
+    mock_get_connection.return_value = mock_connection
+
+    # First call creates connection
+    conn1 = get_connection_from_config(str(config_file))
+    assert mock_get_connection.call_count == 1
+
+    # Second call should use cache
+    conn2 = get_connection_from_config(str(config_file))
+    assert mock_get_connection.call_count == 1  # Not called again
+    assert conn1 is conn2
+
+    # Clear cache after test
+    _connection_cache.clear()
+
+
+# --- Tests for _read_config_file ---
+def test_read_config_file_not_found() -> None:
+    """Tests that _read_config_file raises FileNotFoundError for missing file.
+
+    Covers lines 86-87 in conf_lib.py.
+    """
+    with pytest.raises(FileNotFoundError, match="Configuration file not found"):
+        _read_config_file("nonexistent_config_file.conf")

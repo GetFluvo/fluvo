@@ -67,6 +67,13 @@ class TestStringCleaners:
         result = apply_expr(clean_expr.replace("col", "-", "_"), "hello-world")
         assert result == "hello_world"
 
+    def test_replace_regex_mode(self) -> None:
+        """Test string replacement with literal=False (covers line 442)."""
+        result = apply_expr(
+            clean_expr.replace("col", r"\s+", " ", literal=False), "hello   world"
+        )
+        assert result == "hello world"
+
     def test_regex_sub(self) -> None:
         """Test regex substitution."""
         result = apply_expr(clean_expr.regex_sub("col", r"\s+", " "), "hello   world")
@@ -160,6 +167,12 @@ class TestPhoneCleaners:
         """Test phone normalization for Belgium with 00 prefix."""
         result = apply_expr(clean_expr.phone_normalize("col", "BE"), "0032412345678")
         assert result == "+32412345678"
+
+    def test_phone_normalize_country_without_national_prefix(self) -> None:
+        """Test phone normalization for country without national prefix (covers lines 577-578)."""
+        # Spain has empty national_prefix in PHONE_COUNTRY_RULES
+        result = apply_expr(clean_expr.phone_normalize("col", "ES"), "612345678")
+        assert result == "+34612345678"
 
 
 class TestEmailCleaners:
@@ -465,6 +478,16 @@ class TestNumericCleaners:
         result = apply_expr(clean_expr.numeric("col", ".", ","), "1,234.56")
         assert result == "1234.56"
 
+    def test_numeric_no_thousands_separator(self) -> None:
+        """Test numeric without thousands separator (covers branch 1211->1214)."""
+        result = apply_expr(clean_expr.numeric("col", ",", ""), "1234,56")
+        assert result == "1234.56"
+
+    def test_numeric_dot_decimal_separator(self) -> None:
+        """Test numeric with dot as decimal separator (already standard format)."""
+        result = apply_expr(clean_expr.numeric("col", ".", ""), "1234.56")
+        assert result == "1234.56"
+
     def test_integer(self) -> None:
         """Test integer removes decimals."""
         result = apply_expr(clean_expr.integer("col"), "42.99")
@@ -596,6 +619,11 @@ class TestAddressCleaners:
         """Test with unknown country returns original."""
         result = apply_expr(clean_expr.city_from_combined("col", "XX"), "Some Value")
         assert result == "Some Value"
+
+    def test_postal_from_combined_unknown_country(self) -> None:
+        """Test postal_from_combined with unknown country returns empty (covers line 1031)."""
+        result = apply_expr(clean_expr.postal_from_combined("col", "ZZ"), "Some Value")
+        assert result == ""
 
     def test_dataframe_city_postal_separation(self) -> None:
         """Test separating city and postal on a DataFrame."""
