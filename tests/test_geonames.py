@@ -59,7 +59,7 @@ class TestLoadCities:
             "P\tPPLC\tGB\t\tENG\t\t\t\t8961989\t\t25\tEurope/London\t2023-01-01\n"
         )
         cities_file = tmp_path / "cities15000.txt"
-        cities_file.write_text(content)
+        cities_file.write_text(content, encoding="utf-8")
         return cities_file
 
     def test_load_cities_returns_dataframe(self, sample_cities_file: Path) -> None:
@@ -120,7 +120,7 @@ class TestGetCitiesLookup:
             "P\tPPLC\tFR\t\t11\t75\t751\t75056\t2102650\t\t42\tEurope/Paris\t2023-01-01\n"
         )
         cities_file = tmp_path / "cities15000.txt"
-        cities_file.write_text(content)
+        cities_file.write_text(content, encoding="utf-8")
         return cities_file
 
     def test_get_cities_lookup_returns_dict(self, sample_cities_file: Path) -> None:
@@ -181,7 +181,7 @@ class TestDownloadDataset:
         """Test that cached files are reused."""
         # Create a cached file
         cached_file = tmp_path / "cities15000.txt"
-        cached_file.write_text("cached content")
+        cached_file.write_text("cached content", encoding="utf-8")
 
         with mock.patch.object(geonames, "get_cache_dir", return_value=tmp_path):
             result = geonames.download_dataset("cities15000")
@@ -190,7 +190,7 @@ class TestDownloadDataset:
     def test_download_dataset_force_redownload(self, tmp_path: Path) -> None:
         """Test that force=True re-downloads."""
         cached_file = tmp_path / "cities15000.txt"
-        cached_file.write_text("old content")
+        cached_file.write_text("old content", encoding="utf-8")
 
         # Create a mock zip file with new content
         zip_content = b"PK..."  # Minimal zip header
@@ -228,7 +228,7 @@ class TestLoadPostalCodes:
             "NL\t3011\tRotterdam\tZuid-Holland\tZH\t\t\t\t\t51.9225\t4.4792\t4\n"
         )
         postal_file = tmp_path / "postal_NL.txt"
-        postal_file.write_text(content)
+        postal_file.write_text(content, encoding="utf-8")
         return postal_file
 
     def test_load_postal_codes_returns_dataframe(
@@ -253,7 +253,7 @@ class TestGetPostalLookup:
             "NL\t3011 AA\tRotterdam\tZuid-Holland\tZH\t\t\t\t\t51.9225\t4.4792\t4\n"
         )
         nl_file = tmp_path / "postal_NL.txt"
-        nl_file.write_text(nl_content)
+        nl_file.write_text(nl_content, encoding="utf-8")
         return nl_file
 
     def test_get_postal_lookup_normalizes_codes(
@@ -279,7 +279,7 @@ class TestGetCityCoordinates:
             "P\tPPLC\tFR\t\t11\t75\t751\t75056\t2102650\t\t42\tEurope/Paris\t2023-01-01\n"
         )
         cities_file = tmp_path / "cities15000.txt"
-        cities_file.write_text(content)
+        cities_file.write_text(content, encoding="utf-8")
         return cities_file
 
     def test_get_city_coordinates_found(self, sample_cities_file: Path) -> None:
@@ -327,7 +327,7 @@ class TestIntegrationWithClean:
             "P\tPPLC\tFR\t\t11\t75\t751\t75056\t2102650\t\t42\tEurope/Paris\t2023-01-01\n"
         )
         cities_file = tmp_path / "cities15000.txt"
-        cities_file.write_text(content)
+        cities_file.write_text(content, encoding="utf-8")
         return cities_file
 
     def test_cities_lookup_with_detect_country(self, sample_cities_file: Path) -> None:
@@ -351,7 +351,7 @@ class TestGetCachedFile:
         """Test that _get_cached_file returns path when txt file exists."""
         # Create cached txt file
         txt_file = tmp_path / "cities15000.txt"
-        txt_file.write_text("cached content")
+        txt_file.write_text("cached content", encoding="utf-8")
 
         with mock.patch.object(geonames, "get_cache_dir", return_value=tmp_path):
             result = geonames._get_cached_file("cities15000")
@@ -377,7 +377,7 @@ class TestLoadCitiesDownload:
         cities_file = tmp_path / "cities15000.txt"
 
         def mock_download(dataset: str, cache_dir: Path | None = None) -> Path:
-            cities_file.write_text(cities_content)
+            cities_file.write_text(cities_content, encoding="utf-8")
             return cities_file
 
         with (
@@ -402,7 +402,7 @@ class TestLoadAlternateNames:
             "4\t2968815\tit\tParigi\t0\t0\t0\t0\t\t\n"
         )
         alt_file = tmp_path / "alternateNamesV2.txt"
-        alt_file.write_text(content)
+        alt_file.write_text(content, encoding="utf-8")
         return alt_file
 
     def test_load_alternate_names_returns_dataframe(
@@ -433,7 +433,7 @@ class TestLoadAlternateNames:
         alt_file = tmp_path / "alternateNamesV2.txt"
 
         def mock_download(dataset: str, cache_dir: Path | None = None) -> Path:
-            alt_file.write_text(alt_content)
+            alt_file.write_text(alt_content, encoding="utf-8")
             return alt_file
 
         with (
@@ -497,7 +497,7 @@ class TestGetCitiesLookupEdgeCases:
             "P\tPPLA\tNL\t\t\t\t\t\t230000\t\t\t\t2023-01-01\n"
         )
         cities_file = tmp_path / "cities15000.txt"
-        cities_file.write_text(content)
+        cities_file.write_text(content, encoding="utf-8")
         return cities_file
 
     def test_skips_cities_without_country(
@@ -554,8 +554,8 @@ class TestGetPostalLookupMultipleCountries:
         nl_content = "NL\t1012 AB\tAmsterdam\tNoord-Holland\tNH\t\t\t\t\t52.37\t4.89\t4\n"
         be_content = "BE\tB-1000\tBrussels\tBrussels-Capital\tBRU\t\t\t\t\t50.85\t4.35\t4\n"
 
-        (tmp_path / "postal_NL.txt").write_text(nl_content)
-        (tmp_path / "postal_BE.txt").write_text(be_content)
+        (tmp_path / "postal_NL.txt").write_text(nl_content, encoding="utf-8")
+        (tmp_path / "postal_BE.txt").write_text(be_content, encoding="utf-8")
 
         with mock.patch.object(geonames, "get_cache_dir", return_value=tmp_path):
             lookup = geonames.get_postal_lookup(["NL", "BE"], cache_dir=tmp_path)
