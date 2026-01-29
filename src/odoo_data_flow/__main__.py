@@ -1226,7 +1226,14 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     # Handle tracking_disable option
     tracking_disable = kwargs.pop("tracking_disable", True)
     context["tracking_disable"] = tracking_disable
-    if not tracking_disable:
+    if tracking_disable:
+        # Additional context keys to fully suppress mail/chatter messages
+        # These prevent tracking on related records (e.g., res.partner when
+        # importing res.partner.bank)
+        context["mail_create_nolog"] = True  # Don't log record creation
+        context["mail_notrack"] = True  # Don't track field changes
+        context["mail_activity_automation_skip"] = True  # Skip activity automation
+    else:
         log.info("Mail tracking enabled for this import")
 
     # Handle defer_parent_store option
@@ -1534,6 +1541,15 @@ def write_cmd(connection_file: str, **kwargs: Any) -> None:
     except (ValueError, SyntaxError) as e:
         log.error(f"Invalid --context dictionary provided: {e}")
         return
+
+    # Add extra mail tracking suppression flags if tracking_disable is set
+    context = kwargs.get("context", {})
+    if context.get("tracking_disable", False):
+        context["mail_create_nolog"] = True
+        context["mail_notrack"] = True
+        context["mail_activity_automation_skip"] = True
+        kwargs["context"] = context
+
     run_write(**kwargs)
 
 

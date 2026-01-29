@@ -493,7 +493,12 @@ def run_import_for_migration(
             model=model,
             unique_id_field="id",  # Migration import assumes 'id'
             file_csv=tmp_path,
-            context={"tracking_disable": True},
+            context={
+                "tracking_disable": True,
+                "mail_create_nolog": True,
+                "mail_notrack": True,
+                "mail_activity_automation_skip": True,
+            },
             max_connection=int(worker),
             batch_size=int(batch_size),
         )

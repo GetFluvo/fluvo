@@ -1493,7 +1493,12 @@ def _execute_load_batch(  # noqa: C901
     """
     model, context, progress = (
         thread_state["model"],
-        thread_state.get("context", {"tracking_disable": True}),
+        thread_state.get("context", {
+            "tracking_disable": True,
+            "mail_create_nolog": True,
+            "mail_notrack": True,
+            "mail_activity_automation_skip": True,
+        }),
         thread_state["progress"],
     )
     connection = thread_state.get("connection")
@@ -2855,7 +2860,12 @@ def import_data(  # noqa: C901
         critical, process-halting errors, False otherwise.
     """
     context, deferred, ignore = (
-        context or {"tracking_disable": True},
+        context or {
+            "tracking_disable": True,
+            "mail_create_nolog": True,
+            "mail_notrack": True,
+            "mail_activity_automation_skip": True,
+        },
         deferred_fields or [],
         ignore or [],
     )
