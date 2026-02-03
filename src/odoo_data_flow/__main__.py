@@ -1381,12 +1381,12 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
             # Run import with rules disabled
             import_result = run_import(**kwargs)
 
-            # Execute post-action if specified and import succeeded
-            if post_action and import_result:
+            # Execute post-action if specified and any records were imported
+            if post_action and import_result is not None:
                 # Extract product IDs BEFORE post-action while connection is reliable
                 # This is needed for --move-date to find the correct moves
                 product_ids_for_move_update: list[int] = []
-                if move_date:
+                if move_date and import_result:
                     quant_ids = list(import_result.values())
                     log.info(
                         f"Extracting product IDs from {len(quant_ids)} imported quants "
@@ -1447,12 +1447,12 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     else:
         import_result = run_import(**kwargs)
 
-        # Execute post-action if specified and import succeeded
-        if post_action and import_result:
+        # Execute post-action if specified and any records were imported
+        if post_action and import_result is not None:
             # Extract product IDs BEFORE post-action while connection is reliable
             # This is needed for --move-date to find the correct moves
             product_ids_for_move_update = []
-            if move_date:
+            if move_date and import_result:
                 quant_ids = list(import_result.values())
                 log.info(
                     f"Extracting product IDs from {len(quant_ids)} imported quants "

@@ -337,101 +337,112 @@ def run_import(  # noqa: C901
     fail_file_was_created = _count_lines(fail_output_file) > 1
     is_truly_successful = success and not fail_file_was_created
 
-    if is_truly_successful:
-        id_map = cast(dict[str, int], stats.get("id_map", {}))
-        if id_map:
-            if isinstance(config, str):
-                cache.save_id_map(config, model, id_map)
+    id_map = cast(dict[str, int], stats.get("id_map", {}))
 
-        # --- Pass 2: Relational Strategies ---
-        if import_plan.get("strategies") and not fail:
-            source_df = pl.read_csv(
-                filename,
-                separator=separator,
-                truncate_ragged_lines=True,
-                infer_schema_length=0,  # Read all columns as strings
-            )
-            with suppress_console_handler(), Progress() as progress:
-                task_id = progress.add_task(
-                    "Pass 2/2: Relational fields",
-                    total=len(import_plan["strategies"]),
-                )
-                for field, strategy_info in import_plan["strategies"].items():
-                    if strategy_info["strategy"] == "direct_relational_import":
-                        import_details = relational_import.run_direct_relational_import(
-                            config,
-                            model,
-                            field,
-                            strategy_info,
-                            source_df,
-                            id_map,
-                            max_conn,
-                            batch_size_run,
-                            progress,
-                            task_id,
-                            filename,
-                        )
-                        if import_details:
-                            import_threaded.import_data(
-                                config=config,
-                                model=import_details["model"],
-                                unique_id_field=import_details["unique_id_field"],
-                                file_csv=import_details["file_csv"],
-                                max_connection=max_conn,
-                                batch_size=batch_size_run,
-                            )
-                            Path(import_details["file_csv"]).unlink()
-                    elif strategy_info["strategy"] == "write_tuple":
-                        result = relational_import.run_write_tuple_import(
-                            config,
-                            model,
-                            field,
-                            strategy_info,
-                            source_df,
-                            id_map,
-                            max_conn,
-                            batch_size_run,
-                            progress,
-                            task_id,
-                            filename,
-                        )
-                        if not result:
-                            log.warning(
-                                f"Write tuple import failed for field '{field}'. "
-                                "Check logs for details."
-                            )
-                    elif strategy_info["strategy"] == "write_o2m_tuple":
-                        result = relational_import.run_write_o2m_tuple_import(
-                            config,
-                            model,
-                            field,
-                            strategy_info,
-                            source_df,
-                            id_map,
-                            max_conn,
-                            batch_size_run,
-                            progress,
-                            task_id,
-                            filename,
-                        )
-                        if not result:
-                            log.warning(
-                                f"Write O2M tuple import failed for field '{field}'. "
-                                "Check logs for details."
-                            )
-                    progress.update(task_id, advance=1)
-
-        log.info(
-            f"{stats.get('total_records', 0)} records processed. "
-            f"Total time: {elapsed:.2f}s."
+    if not success:
+        # Critical failure - the import process itself failed
+        _show_error_panel(
+            "Import Failed",
+            "The import process failed. Check logs for details.",
         )
+        return None
+
+    if id_map:
+        if isinstance(config, str):
+            cache.save_id_map(config, model, id_map)
+
+    # --- Pass 2: Relational Strategies ---
+    if is_truly_successful and import_plan.get("strategies") and not fail:
+        source_df = pl.read_csv(
+            filename,
+            separator=separator,
+            truncate_ragged_lines=True,
+            infer_schema_length=0,  # Read all columns as strings
+        )
+        with suppress_console_handler(), Progress() as progress:
+            task_id = progress.add_task(
+                "Pass 2/2: Relational fields",
+                total=len(import_plan["strategies"]),
+            )
+            for field, strategy_info in import_plan["strategies"].items():
+                if strategy_info["strategy"] == "direct_relational_import":
+                    import_details = relational_import.run_direct_relational_import(
+                        config,
+                        model,
+                        field,
+                        strategy_info,
+                        source_df,
+                        id_map,
+                        max_conn,
+                        batch_size_run,
+                        progress,
+                        task_id,
+                        filename,
+                    )
+                    if import_details:
+                        import_threaded.import_data(
+                            config=config,
+                            model=import_details["model"],
+                            unique_id_field=import_details["unique_id_field"],
+                            file_csv=import_details["file_csv"],
+                            max_connection=max_conn,
+                            batch_size=batch_size_run,
+                        )
+                        Path(import_details["file_csv"]).unlink()
+                elif strategy_info["strategy"] == "write_tuple":
+                    result = relational_import.run_write_tuple_import(
+                        config,
+                        model,
+                        field,
+                        strategy_info,
+                        source_df,
+                        id_map,
+                        max_conn,
+                        batch_size_run,
+                        progress,
+                        task_id,
+                        filename,
+                    )
+                    if not result:
+                        log.warning(
+                            f"Write tuple import failed for field '{field}'. "
+                            "Check logs for details."
+                        )
+                elif strategy_info["strategy"] == "write_o2m_tuple":
+                    result = relational_import.run_write_o2m_tuple_import(
+                        config,
+                        model,
+                        field,
+                        strategy_info,
+                        source_df,
+                        id_map,
+                        max_conn,
+                        batch_size_run,
+                        progress,
+                        task_id,
+                        filename,
+                    )
+                    if not result:
+                        log.warning(
+                            f"Write O2M tuple import failed for field '{field}'. "
+                            "Check logs for details."
+                        )
+                progress.update(task_id, advance=1)
+
+    log.info(
+        f"{stats.get('total_records', 0)} records processed. "
+        f"Total time: {elapsed:.2f}s."
+    )
+    if is_truly_successful:
         if final_deferred:  # It was a two-pass import
             summary = (
                 f"Records: {stats.get('total_records', 0)}, "
                 f"Created: {stats.get('created_records', 0)}, "
                 f"Updated: {stats.get('updated_relations', 0)}"
             )
-            title = f"[bold green]Import Complete for [cyan]{model}[/cyan][/bold green]"
+            title = (
+                f"[bold green]Import Complete for [cyan]{model}[/cyan][/bold green]"
+            )
             Console().print(
                 Panel(
                     summary,
@@ -446,13 +457,20 @@ def run_import(  # noqa: C901
                     title="[bold green]Import Complete[/bold green]",
                 )
             )
-        return id_map
     else:
-        _show_error_panel(
-            "Import Failed",
-            "The import process failed. Check logs for details.",
+        num_imported = len(id_map)
+        num_failed = _count_lines(fail_output_file) - 1  # Subtract header
+        Console().print(
+            Panel(
+                f"Partial import for [cyan]{model}[/cyan]: "
+                f"[green]{num_imported}[/green] succeeded, "
+                f"[red]{num_failed}[/red] failed. "
+                f"See {fail_output_file} for failed records.",
+                title="[bold yellow]Import Partially Complete[/bold yellow]",
+            )
         )
-        return None
+
+    return id_map
 
 
 def run_import_for_migration(
