@@ -89,40 +89,69 @@ class RPCThreadExport(RpcThread):
         raw_data: list[dict[str, Any]],
         enrichment_tasks: list[dict[str, Any]],
     ) -> None:
-        """Fetch XML IDs for related fields and enrich the raw_data in-place."""
+        """Fetch XML IDs for related fields and enrich the raw_data in-place.
+
+        Handles both many2one and many2many/one2many fields:
+        - many2one: Returns a single XML ID string
+        - many2many/one2many: Returns comma-separated XML IDs for all related records
+        """
         ir_model_data = self.connection.get_model("ir.model.data")
         for task in enrichment_tasks:
             relation_model = task["relation"]
             source_field = task["source_field"]
+            relation_type = task.get("relation_type", "many2one")
             if not relation_model or not isinstance(source_field, str):
                 continue
 
-            related_ids = list(
-                {
-                    rec[source_field][0]
-                    for rec in raw_data
-                    if isinstance(rec.get(source_field), (list, tuple))
-                    and rec.get(source_field)
-                }
-            )
+            # Collect all related IDs based on field type
+            related_ids: set[int] = set()
+            for rec in raw_data:
+                val = rec.get(source_field)
+                if not val:
+                    continue
+                if relation_type in ("many2many", "one2many"):
+                    # many2many/one2many: list of IDs [id1, id2, ...]
+                    if isinstance(val, list):
+                        related_ids.update(val)
+                else:
+                    # many2one: tuple (id, display_name)
+                    if isinstance(val, (list, tuple)) and val:
+                        related_ids.add(val[0])
+
             if not related_ids:
                 continue
 
             xml_id_data = ir_model_data.search_read(
-                [("model", "=", relation_model), ("res_id", "in", related_ids)],
+                [("model", "=", relation_model), ("res_id", "in", list(related_ids))],
                 ["res_id", "module", "name"],
             )
-            db_id_to_xml_id = {
-                item["res_id"]: f"{item['module']}.{item['name']}"
-                for item in xml_id_data
-            }
+            # Build mapping - for records with multiple XML IDs, keep the first one
+            db_id_to_xml_id: dict[int, str] = {}
+            for item in xml_id_data:
+                res_id = item["res_id"]
+                if res_id not in db_id_to_xml_id:
+                    db_id_to_xml_id[res_id] = f"{item['module']}.{item['name']}"
 
+            # Assign XML IDs to records
             for record in raw_data:
                 related_val = record.get(source_field)
-                xml_id = None
-                if isinstance(related_val, (list, tuple)) and related_val:
-                    xml_id = db_id_to_xml_id.get(related_val[0])
-                record[task["target_field"]] = xml_id
+                if relation_type in ("many2many", "one2many"):
+                    # many2many/one2many: join all XML IDs with comma
+                    if isinstance(related_val, list) and related_val:
+                        xml_ids = [
+                            db_id_to_xml_id[rid]
+                            for rid in related_val
+                            if rid in db_id_to_xml_id
+                        ]
+                        record[task["target_field"]] = ",".join(xml_ids) if xml_ids else None
+                    else:
+                        record[task["target_field"]] = None
+                else:
+                    # many2one: single XML ID
+                    xml_id = None
+                    if isinstance(related_val, (list, tuple)) and related_val:
+                        xml_id = db_id_to_xml_id.get(related_val[0])
+                    record[task["target_field"]] = xml_id
 
     def _format_batch_results(
         self, raw_data: list[dict[str, Any]]
@@ -237,6 +266,9 @@ class RPCThreadExport(RpcThread):
                             "source_field": base_field,
                             "target_field": field,
                             "relation": self.fields_info[field].get("relation"),
+                            "relation_type": self.fields_info[field].get(
+                                "relation_type", "many2one"
+                            ),
                         }
                     )
             # Ensure 'id' is always present for session tracking
@@ -359,6 +391,9 @@ def _initialize_export(
             fields_info[original_field] = {"type": field_type}
             if meta and meta.get("relation"):
                 fields_info[original_field]["relation"] = meta["relation"]
+            # Store the original relation type for proper handling in enrichment
+            if meta and meta.get("type") in ("many2one", "many2many", "one2many"):
+                fields_info[original_field]["relation_type"] = meta["type"]
         log.debug(f"Successfully initialized metadata. Fields info: {fields_info}")
         return connection, model_obj, fields_info
     except Exception as e:

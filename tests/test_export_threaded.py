@@ -783,6 +783,181 @@ class TestExportData:
         )
         assert_frame_equal(result_df, expected_df)
 
+    def test_export_hybrid_mode_many2many_xml_ids(
+        self, mock_conf_lib: MagicMock
+    ) -> None:
+        """Test hybrid mode with many2many field returns all XML IDs.
+
+        Tests that the hybrid export mode correctly fetches and returns
+        all XML IDs for a many2many field, comma-separated.
+        """
+        # --- Arrange ---
+        header = [".id", "value_ids/id"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.search.return_value = [171]
+
+        # 1. Mock the metadata call (_initialize_export)
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "value_ids": {
+                "type": "many2many",
+                "relation": "product.attribute.value",
+            },
+        }
+
+        # 2. Mock the primary read() call - many2many returns list of IDs
+        mock_model.read.return_value = [
+            {"id": 171, "value_ids": [37, 8, 38, 10]}
+        ]
+
+        # 3. Mock the secondary XML ID lookup on 'ir.model.data'
+        mock_ir_model_data = MagicMock()
+        mock_ir_model_data.search_read.return_value = [
+            {"res_id": 37, "module": "product", "name": "attr_val_red"},
+            {"res_id": 8, "module": "product", "name": "attr_val_blue"},
+            {"res_id": 38, "module": "product", "name": "attr_val_green"},
+            {"res_id": 10, "module": "product", "name": "attr_val_yellow"},
+        ]
+        mock_conf_lib.return_value.get_model.side_effect = [
+            mock_model,
+            mock_ir_model_data,
+        ]
+
+        # --- Act ---
+        _, _, _, result_df = export_data(
+            config="dummy.conf",
+            model="product.template.attribute.line",
+            domain=[],
+            header=header,
+            output=None,
+        )
+
+        # --- Assert ---
+        assert result_df is not None
+        expected_df = pl.DataFrame(
+            {
+                ".id": [171],
+                "value_ids/id": [
+                    "product.attr_val_red,product.attr_val_blue,"
+                    "product.attr_val_green,product.attr_val_yellow"
+                ],
+            },
+            schema={".id": pl.Int64, "value_ids/id": pl.String},
+        )
+        assert_frame_equal(result_df, expected_df)
+
+    def test_export_hybrid_mode_many2many_partial_xml_ids(
+        self, mock_conf_lib: MagicMock
+    ) -> None:
+        """Test hybrid mode with many2many when some records lack XML IDs.
+
+        Tests that the export correctly handles cases where some related
+        records don't have XML IDs - only the ones with XML IDs are included.
+        """
+        # --- Arrange ---
+        header = [".id", "tag_ids/id"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.search.return_value = [1]
+
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "tag_ids": {
+                "type": "many2many",
+                "relation": "res.partner.category",
+            },
+        }
+
+        # many2many returns list of IDs
+        mock_model.read.return_value = [
+            {"id": 1, "tag_ids": [10, 20, 30]}  # 3 tags
+        ]
+
+        # Only 2 of 3 tags have XML IDs
+        mock_ir_model_data = MagicMock()
+        mock_ir_model_data.search_read.return_value = [
+            {"res_id": 10, "module": "base", "name": "tag_customer"},
+            {"res_id": 30, "module": "base", "name": "tag_supplier"},
+            # Note: res_id 20 has no XML ID
+        ]
+        mock_conf_lib.return_value.get_model.side_effect = [
+            mock_model,
+            mock_ir_model_data,
+        ]
+
+        # --- Act ---
+        _, _, _, result_df = export_data(
+            config="dummy.conf",
+            model="res.partner",
+            domain=[],
+            header=header,
+            output=None,
+        )
+
+        # --- Assert ---
+        assert result_df is not None
+        # Only tags with XML IDs are included, in original order
+        expected_df = pl.DataFrame(
+            {
+                ".id": [1],
+                "tag_ids/id": ["base.tag_customer,base.tag_supplier"],
+            },
+            schema={".id": pl.Int64, "tag_ids/id": pl.String},
+        )
+        assert_frame_equal(result_df, expected_df)
+
+    def test_export_hybrid_mode_many2many_empty(
+        self, mock_conf_lib: MagicMock
+    ) -> None:
+        """Test hybrid mode with empty many2many field returns None.
+
+        Tests that an empty many2many field correctly returns None.
+        """
+        # --- Arrange ---
+        header = [".id", "tag_ids/id"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.search.return_value = [1]
+
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "tag_ids": {
+                "type": "many2many",
+                "relation": "res.partner.category",
+            },
+        }
+
+        # Empty many2many
+        mock_model.read.return_value = [
+            {"id": 1, "tag_ids": []}
+        ]
+
+        # No XML ID lookup needed for empty list
+        mock_ir_model_data = MagicMock()
+        mock_ir_model_data.search_read.return_value = []
+        mock_conf_lib.return_value.get_model.side_effect = [
+            mock_model,
+            mock_ir_model_data,
+        ]
+
+        # --- Act ---
+        _, _, _, result_df = export_data(
+            config="dummy.conf",
+            model="res.partner",
+            domain=[],
+            header=header,
+            output=None,
+        )
+
+        # --- Assert ---
+        assert result_df is not None
+        expected_df = pl.DataFrame(
+            {
+                ".id": [1],
+                "tag_ids/id": [None],
+            },
+            schema={".id": pl.Int64, "tag_ids/id": pl.String},
+        )
+        assert_frame_equal(result_df, expected_df)
+
     def test_export_id_in_export_data_mode(self, mock_conf_lib: MagicMock) -> None:
         """Test export id in export data.
 
@@ -1052,3 +1227,132 @@ class TestExportData:
 
         # Sort by name to ensure consistent order for comparison
         assert_frame_equal(result_df.sort("name"), expected_df.sort("name"))
+
+    def test_export_many2many_xml_ids_to_file(
+        self, mock_conf_lib: MagicMock, tmp_path: Path
+    ) -> None:
+        """E2E test: Export many2many XML IDs to CSV file.
+
+        Tests the complete export flow including file writing for many2many
+        fields with /id format, verifying all XML IDs are correctly exported
+        as comma-separated values.
+        """
+        # --- Arrange ---
+        output_file = tmp_path / "attribute_lines.csv"
+        header = [".id", "name", "value_ids/id"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.search.return_value = [171, 172]
+
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+            "value_ids": {
+                "type": "many2many",
+                "relation": "product.attribute.value",
+            },
+        }
+
+        # Two records with different numbers of related values
+        mock_model.read.return_value = [
+            {"id": 171, "name": "Color", "value_ids": [37, 8, 38]},
+            {"id": 172, "name": "Size", "value_ids": [50, 51]},
+        ]
+
+        # XML IDs for all related values
+        mock_ir_model_data = MagicMock()
+        mock_ir_model_data.search_read.return_value = [
+            {"res_id": 37, "module": "product", "name": "attr_red"},
+            {"res_id": 8, "module": "product", "name": "attr_blue"},
+            {"res_id": 38, "module": "product", "name": "attr_green"},
+            {"res_id": 50, "module": "product", "name": "attr_small"},
+            {"res_id": 51, "module": "product", "name": "attr_large"},
+        ]
+        mock_conf_lib.return_value.get_model.side_effect = [
+            mock_model,
+            mock_ir_model_data,
+        ]
+
+        # --- Act ---
+        success, _, count, _ = export_data(
+            config="dummy.conf",
+            model="product.template.attribute.line",
+            domain=[],
+            header=header,
+            output=str(output_file),
+            separator=";",
+        )
+
+        # --- Assert ---
+        assert success is True
+        assert count == 2
+        assert output_file.exists()
+
+        # Read the file and verify contents
+        on_disk_df = pl.read_csv(output_file, separator=";")
+        expected_df = pl.DataFrame(
+            {
+                ".id": [171, 172],
+                "name": ["Color", "Size"],
+                "value_ids/id": [
+                    "product.attr_red,product.attr_blue,product.attr_green",
+                    "product.attr_small,product.attr_large",
+                ],
+            },
+            schema={".id": pl.Int64, "name": pl.String, "value_ids/id": pl.String},
+        )
+        assert_frame_equal(on_disk_df.sort(".id"), expected_df.sort(".id"))
+
+    def test_export_one2many_xml_ids(self, mock_conf_lib: MagicMock) -> None:
+        """Test one2many field with /id format returns all XML IDs.
+
+        Tests that one2many fields are handled the same as many2many,
+        returning all related XML IDs comma-separated.
+        """
+        # --- Arrange ---
+        header = [".id", "line_ids/id"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.search.return_value = [1]
+
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "line_ids": {
+                "type": "one2many",
+                "relation": "sale.order.line",
+            },
+        }
+
+        # one2many returns list of IDs just like many2many
+        mock_model.read.return_value = [
+            {"id": 1, "line_ids": [100, 101, 102]}
+        ]
+
+        mock_ir_model_data = MagicMock()
+        mock_ir_model_data.search_read.return_value = [
+            {"res_id": 100, "module": "sale", "name": "sol_001"},
+            {"res_id": 101, "module": "sale", "name": "sol_002"},
+            {"res_id": 102, "module": "sale", "name": "sol_003"},
+        ]
+        mock_conf_lib.return_value.get_model.side_effect = [
+            mock_model,
+            mock_ir_model_data,
+        ]
+
+        # --- Act ---
+        _, _, _, result_df = export_data(
+            config="dummy.conf",
+            model="sale.order",
+            domain=[],
+            header=header,
+            output=None,
+        )
+
+        # --- Assert ---
+        assert result_df is not None
+        expected_df = pl.DataFrame(
+            {
+                ".id": [1],
+                "line_ids/id": ["sale.sol_001,sale.sol_002,sale.sol_003"],
+            },
+            schema={".id": pl.Int64, "line_ids/id": pl.String},
+        )
+        assert_frame_equal(result_df, expected_df)
