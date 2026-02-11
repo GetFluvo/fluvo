@@ -145,18 +145,23 @@ class RPCThreadExport(RpcThread):
                         new_record[".id"] = record.get("id")
                     elif field.endswith("/.id"):
                         # Handle different relational field types:
-                        # - many2one: returns (id, name) tuple - take first element
+                        # - many2one: returns [id, name] list - take first element
                         # - many2many/one2many: returns [id1, id2, ...] list - join all
-                        if isinstance(value, tuple) and len(value) == 2:
-                            # many2one: (id, display_name) - extract the ID
-                            new_record[field] = value[0] if value else None
-                        elif isinstance(value, list):
-                            # many2many/one2many: list of IDs - join with comma
-                            new_record[field] = (
-                                ",".join(str(v) for v in value) if value else None
-                            )
+                        if isinstance(value, (list, tuple)) and value:
+                            # Check if it's many2one: [id, display_name] format
+                            # many2one has exactly 2 elements with second being str
+                            if (
+                                len(value) == 2
+                                and isinstance(value[0], int)
+                                and isinstance(value[1], str)
+                            ):
+                                # many2one: extract just the ID
+                                new_record[field] = value[0]
+                            else:
+                                # many2many/one2many: list of IDs - join with comma
+                                new_record[field] = ",".join(str(v) for v in value)
                         else:
-                            new_record[field] = value
+                            new_record[field] = value if value else None
                     else:
                         new_record[field] = None
             processed_data.append(new_record)
