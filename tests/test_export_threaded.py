@@ -687,6 +687,52 @@ class TestExportData:
 
         assert_frame_equal(result_df, expected_df)
 
+    def test_export_many2many_raw_id_returns_all_ids(
+        self, mock_conf_lib: MagicMock
+    ) -> None:
+        """Test many2many /.id export returns all IDs.
+
+        Tests that requesting a many2many field with '/.id' returns all related
+        database IDs as a comma-separated string, not just the first one.
+        """
+        # --- Arrange ---
+        header = [".id", "value_ids/.id"]
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.search.return_value = [171]
+
+        # Odoo read() returns list of IDs for many2many fields
+        mock_model.read.return_value = [
+            {
+                "id": 171,
+                "value_ids": [37, 8, 38, 10],  # 4 values
+            },
+        ]
+
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "value_ids": {"type": "many2many", "relation": "product.attribute.value"},
+        }
+
+        # --- Act ---
+        _, _, _, result_df = export_data(
+            config="dummy.conf",
+            model="product.template.attribute.line",
+            domain=[],
+            header=header,
+            output=None,
+        )
+
+        # --- Assert ---
+        assert result_df is not None
+        expected_df = pl.DataFrame(
+            {
+                ".id": [171],
+                "value_ids/.id": ["37,8,38,10"],  # All IDs, comma-separated
+            },
+            schema={".id": pl.Int64, "value_ids/.id": pl.String},
+        )
+        assert_frame_equal(result_df, expected_df)
+
     def test_export_hybrid_mode_success(self, mock_conf_lib: MagicMock) -> None:
         """Test the hybrid mode.
 

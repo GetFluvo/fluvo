@@ -144,11 +144,19 @@ class RPCThreadExport(RpcThread):
                     if field == ".id":
                         new_record[".id"] = record.get("id")
                     elif field.endswith("/.id"):
-                        new_record[field] = (
-                            value[0]
-                            if isinstance(value, (list, tuple)) and value
-                            else None
-                        )
+                        # Handle different relational field types:
+                        # - many2one: returns (id, name) tuple - take first element
+                        # - many2many/one2many: returns [id1, id2, ...] list - join all
+                        if isinstance(value, tuple) and len(value) == 2:
+                            # many2one: (id, display_name) - extract the ID
+                            new_record[field] = value[0] if value else None
+                        elif isinstance(value, list):
+                            # many2many/one2many: list of IDs - join with comma
+                            new_record[field] = (
+                                ",".join(str(v) for v in value) if value else None
+                            )
+                        else:
+                            new_record[field] = value
                     else:
                         new_record[field] = None
             processed_data.append(new_record)
@@ -332,8 +340,15 @@ def _initialize_export(
             field_type = "char"
             if meta:
                 field_type = meta["type"]
-            if original_field == ".id" or original_field.endswith("/.id"):
+            if original_field == ".id":
                 field_type = "integer"
+            elif original_field.endswith("/.id"):
+                # For many2many/one2many, /.id returns comma-separated IDs (string)
+                # For many2one, /.id returns a single integer
+                if meta and meta.get("type") in ("many2many", "one2many"):
+                    field_type = "char"
+                else:
+                    field_type = "integer"
             elif original_field == "id":
                 field_type = "integer" if technical_names else "char"
             fields_info[original_field] = {"type": field_type}
