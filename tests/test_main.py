@@ -475,8 +475,8 @@ def test_company_id_flag_sets_context(
         mock_run_import.assert_called_once()
         call_kwargs = mock_run_import.call_args.kwargs
         # Verify allowed_company_ids was set to single company
+        # Note: force_company is no longer set (deprecated in Odoo 18+)
         assert call_kwargs["context"]["allowed_company_ids"] == [5]
-        assert call_kwargs["context"]["force_company"] == 5
 
 
 @patch("odoo_data_flow.__main__.run_export")

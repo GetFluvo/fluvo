@@ -1218,9 +1218,8 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
 
         if resolved_company_id is not None:
             # Set allowed_company_ids to enable cross-company access
+            # Note: force_company is deprecated in Odoo 18+ and causes warnings
             context["allowed_company_ids"] = [resolved_company_id]
-            # Also set force_company for compatibility with older Odoo versions
-            context["force_company"] = resolved_company_id
             log.info(f"Multicompany mode enabled for company ID: {resolved_company_id}")
 
     # Handle tracking_disable option
