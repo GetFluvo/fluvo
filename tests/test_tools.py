@@ -165,7 +165,7 @@ def test_attribute_line_dict_empty_template_in_data() -> None:
     aggregator.data[""] = {"att_id_1": ["val_empty"]}
     aggregator.data["template_1"] = {"att_id_1": ["val_1"]}
 
-    lines_header, lines_out = aggregator.generate_line()
+    _lines_header, lines_out = aggregator.generate_line()
 
     # Should only have one line (for template_1), empty template_id should be skipped
     assert len(lines_out) == 1

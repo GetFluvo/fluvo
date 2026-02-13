@@ -400,7 +400,7 @@ def test_run_export_with_context_as_dict(
 def test_run_export_context_valid_literal_but_not_dict(
     mock_show_error_panel: MagicMock, mock_export_data: MagicMock
 ) -> None:
-    """Tests that run_export handles context that is valid literal but not a dict (covers line 66)."""
+    """Tests that run_export handles context that is valid literal but not a dict."""
     run_export(
         config="dummy.conf",
         model="res.partner",
@@ -418,7 +418,7 @@ def test_run_export_context_valid_literal_but_not_dict(
 def test_run_export_no_output_file(
     mock_show_success: MagicMock, mock_export_data: MagicMock
 ) -> None:
-    """Tests run_export without output file shows success without validation (covers line 126)."""
+    """Tests run_export without output file shows success without validation."""
     mock_export_data.return_value = (
         True,
         "session-123",

@@ -505,9 +505,7 @@ class TestValidateCsvDataEdgeCases:
 
         assert result.is_valid
 
-    def test_validate_relational_field_no_relation_model(
-        self, temp_dir: str
-    ) -> None:
+    def test_validate_relational_field_no_relation_model(self, temp_dir: str) -> None:
         """Test handling relational field with missing relation."""
         fields_info = {
             "partner_id": {
@@ -645,13 +643,10 @@ class TestDisplayValidationResultsEdgeCases:
         captured = capsys.readouterr()
         assert "Invalid Selection Values" in captured.out
 
-    def test_display_with_many_errors(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_display_with_many_errors(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test displaying more than 10 errors."""
         errors = [
-            val.ValidationError(i, "field", "", "err", f"Error {i}")
-            for i in range(15)
+            val.ValidationError(i, "field", "", "err", f"Error {i}") for i in range(15)
         ]
         result = val.ValidationResult(
             total_rows=15,

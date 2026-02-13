@@ -625,7 +625,7 @@ class TestFieldIdSuffix:
     def test_run_direct_relational_import_with_id_suffix(
         self, mock_resolve: MagicMock, mock_get_conn: MagicMock
     ) -> None:
-        """Test handling when field has /id suffix in column name (covers lines 324-325)."""
+        """Test handling when field has /id suffix in column name."""
         # Source DataFrame has category_id/id column (with /id suffix)
         source_df = pl.DataFrame({"id": ["p1"], "category_id/id": ["cat1"]})
         mock_resolve.return_value = pl.DataFrame(
@@ -642,10 +642,11 @@ class TestFieldIdSuffix:
         progress = Progress()
         task_id = progress.add_task("test")
 
-        result = relational_import.run_direct_relational_import(
+        # Field name without /id - function should find category_id/id column
+        relational_import.run_direct_relational_import(
             "dummy.conf",
             "res.partner",
-            "category_id",  # Field name without /id - function should find category_id/id
+            "category_id",
             strategy_details,
             source_df,
             {"p1": 1},

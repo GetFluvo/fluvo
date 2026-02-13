@@ -9,7 +9,10 @@ from rich.panel import Panel
 from rich.progress import Progress, TaskID
 
 from odoo_data_flow import writer
-from odoo_data_flow.lib.writer import _get_env_from_config, write_relational_failures_to_csv
+from odoo_data_flow.lib.writer import (
+    _get_env_from_config,
+    write_relational_failures_to_csv,
+)
 from odoo_data_flow.write_threaded import RPCThreadWrite
 from odoo_data_flow.writer import _read_data_file, run_write
 
@@ -494,7 +497,7 @@ class TestLibWriterGetEnvFromConfig:
         assert result is None
 
     def test_get_env_from_config_dict_without_config_file(self) -> None:
-        """Test that dict without _config_file key returns None (covers line 30 & 35)."""
+        """Test that dict without _config_file key returns None."""
         result = _get_env_from_config({"hostname": "localhost"})
         assert result is None
 

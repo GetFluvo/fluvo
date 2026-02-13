@@ -1003,7 +1003,7 @@ class TestValidateVatFormatEdgeCases:
     def test_vat_pattern_no_country_match(self) -> None:
         """Test VAT with EU country but no specific pattern match."""
         # AT pattern exists, so this should be checked against it
-        is_valid, error = validate_vat_format("ATU12345678")
+        is_valid, _error = validate_vat_format("ATU12345678")
         assert is_valid is True
 
     def test_vat_without_pattern_passes(self) -> None:
@@ -1048,13 +1048,15 @@ class TestValidateVatLocalEdgeCases:
 
     def test_format_validation_fails_early(self) -> None:
         """Test that format validation failure stops further checks."""
-        is_valid, error = validate_vat_local("DE12345", check_format=True, check_checksum=True)
+        is_valid, error = validate_vat_local(
+            "DE12345", check_format=True, check_checksum=True
+        )
         assert is_valid is False
         assert "Invalid VAT format" in error
 
     def test_checksum_validation_fails_after_format_passes(self) -> None:
         """Test checksum validation runs after format passes."""
-        is_valid, error = validate_vat_local(
+        is_valid, _error = validate_vat_local(
             "BE0123456700", check_format=True, check_checksum=True
         )
         assert is_valid is False
@@ -1063,9 +1065,7 @@ class TestValidateVatLocalEdgeCases:
 class TestGetVatValidationSettingsEdgeCases:
     """Additional tests for get_vat_validation_settings edge cases."""
 
-    @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict"
-    )
+    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_get_settings_with_dict_config(
         self, mock_get_connection: MagicMock
     ) -> None:
@@ -1134,9 +1134,7 @@ class TestGetVatValidationSettingsEdgeCases:
 class TestDisableVatValidationEdgeCases:
     """Additional tests for disable_vat_validation edge cases."""
 
-    @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict"
-    )
+    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_disable_with_dict_config(
         self, mock_get_connection: MagicMock, tmp_path: Path
     ) -> None:
@@ -1304,9 +1302,7 @@ class TestRestoreVatValidationSettingsEdgeCases:
         assert not backup_path.exists()
 
     @patch("odoo_data_flow.lib.actions.vies_manager.time.sleep")
-    @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict"
-    )
+    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_restore_connection_retriable_error(
         self, mock_get_connection: MagicMock, mock_sleep: MagicMock, tmp_path: Path
     ) -> None:
@@ -1334,9 +1330,7 @@ class TestRestoreVatValidationSettingsEdgeCases:
         assert result is True
         assert mock_sleep.called
 
-    @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict"
-    )
+    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_restore_stdnum_error_non_retriable(
         self, mock_get_connection: MagicMock, tmp_path: Path
     ) -> None:
@@ -1361,9 +1355,7 @@ class TestRestoreVatValidationSettingsEdgeCases:
         assert result is False
 
     @patch("odoo_data_flow.lib.actions.vies_manager.time.sleep")
-    @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict"
-    )
+    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_restore_stdnum_retriable_error(
         self, mock_get_connection: MagicMock, mock_sleep: MagicMock, tmp_path: Path
     ) -> None:
@@ -1403,12 +1395,8 @@ class TestRestoreVatValidationSettingsEdgeCases:
 class TestRunViesValidationEdgeCases:
     """Additional tests for run_vies_validation edge cases."""
 
-    @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict"
-    )
-    def test_validation_with_dict_config(
-        self, mock_get_connection: MagicMock
-    ) -> None:
+    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    def test_validation_with_dict_config(self, mock_get_connection: MagicMock) -> None:
         """Test VIES validation with dict config."""
         mock_partner_obj = MagicMock()
         mock_partner_obj.search_count.return_value = 0
@@ -1449,9 +1437,7 @@ class TestRunViesValidationEdgeCases:
     @patch(
         "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
-    def test_validation_with_max_records(
-        self, mock_get_connection: MagicMock
-    ) -> None:
+    def test_validation_with_max_records(self, mock_get_connection: MagicMock) -> None:
         """Test VIES validation with max_records limit."""
         mock_partner_obj = MagicMock()
         mock_partner_obj.search_count.return_value = 100  # More than max
@@ -1460,7 +1446,7 @@ class TestRunViesValidationEdgeCases:
         mock_connection.get_model.return_value = mock_partner_obj
         mock_get_connection.return_value = mock_connection
 
-        result = run_vies_validation(config="dummy.conf", max_records=10)
+        run_vies_validation(config="dummy.conf", max_records=10)
 
         # Should process at most 10 records
         mock_partner_obj.search.assert_called()
@@ -1570,7 +1556,9 @@ class TestDeleteBackupFileEdgeCases:
         backup_path.write_text("{}")
 
         # Mock unlink to raise permission error
-        with patch.object(Path, "unlink", side_effect=PermissionError("Permission denied")):
+        with patch.object(
+            Path, "unlink", side_effect=PermissionError("Permission denied")
+        ):
             result = _delete_backup_file(backup_path)
             assert result is False
 
@@ -1584,6 +1572,6 @@ class TestSaveSettingsToBackupEdgeCases:
         backup_path = tmp_path / "backup.json"
 
         # Mock open to raise IOError
-        with patch("builtins.open", side_effect=IOError("Write failed")):
+        with patch("builtins.open", side_effect=OSError("Write failed")):
             result = _save_settings_to_backup(settings, backup_path)
             assert result is False

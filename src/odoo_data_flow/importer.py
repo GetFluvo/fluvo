@@ -442,9 +442,7 @@ def run_import(  # noqa: C901
                 f"Created: {stats.get('created_records', 0)}, "
                 f"Updated: {stats.get('updated_relations', 0)}"
             )
-            title = (
-                f"[bold green]Import Complete for [cyan]{model}[/cyan][/bold green]"
-            )
+            title = f"[bold green]Import Complete for [cyan]{model}[/cyan][/bold green]"
             Console().print(
                 Panel(
                     summary,

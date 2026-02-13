@@ -806,9 +806,7 @@ class TestExportData:
         }
 
         # 2. Mock the primary read() call - many2many returns list of IDs
-        mock_model.read.return_value = [
-            {"id": 171, "value_ids": [37, 8, 38, 10]}
-        ]
+        mock_model.read.return_value = [{"id": 171, "value_ids": [37, 8, 38, 10]}]
 
         # 3. Mock the secondary XML ID lookup on 'ir.model.data'
         mock_ir_model_data = MagicMock()
@@ -905,9 +903,7 @@ class TestExportData:
         )
         assert_frame_equal(result_df, expected_df)
 
-    def test_export_hybrid_mode_many2many_empty(
-        self, mock_conf_lib: MagicMock
-    ) -> None:
+    def test_export_hybrid_mode_many2many_empty(self, mock_conf_lib: MagicMock) -> None:
         """Test hybrid mode with empty many2many field returns None.
 
         Tests that an empty many2many field correctly returns None.
@@ -926,9 +922,7 @@ class TestExportData:
         }
 
         # Empty many2many
-        mock_model.read.return_value = [
-            {"id": 1, "tag_ids": []}
-        ]
+        mock_model.read.return_value = [{"id": 1, "tag_ids": []}]
 
         # No XML ID lookup needed for empty list
         mock_ir_model_data = MagicMock()
@@ -1322,9 +1316,7 @@ class TestExportData:
         }
 
         # one2many returns list of IDs just like many2many
-        mock_model.read.return_value = [
-            {"id": 1, "line_ids": [100, 101, 102]}
-        ]
+        mock_model.read.return_value = [{"id": 1, "line_ids": [100, 101, 102]}]
 
         mock_ir_model_data = MagicMock()
         mock_ir_model_data.search_read.return_value = [

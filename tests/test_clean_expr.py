@@ -169,7 +169,7 @@ class TestPhoneCleaners:
         assert result == "+32412345678"
 
     def test_phone_normalize_country_without_national_prefix(self) -> None:
-        """Test phone normalization for country without national prefix (covers lines 577-578)."""
+        """Test phone normalization for country without national prefix."""
         # Spain has empty national_prefix in PHONE_COUNTRY_RULES
         result = apply_expr(clean_expr.phone_normalize("col", "ES"), "612345678")
         assert result == "+34612345678"
@@ -621,7 +621,7 @@ class TestAddressCleaners:
         assert result == "Some Value"
 
     def test_postal_from_combined_unknown_country(self) -> None:
-        """Test postal_from_combined with unknown country returns empty (covers line 1031)."""
+        """Test postal_from_combined with unknown country returns empty."""
         result = apply_expr(clean_expr.postal_from_combined("col", "ZZ"), "Some Value")
         assert result == ""
 

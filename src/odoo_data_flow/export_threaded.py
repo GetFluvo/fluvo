@@ -84,7 +84,7 @@ class RPCThreadExport(RpcThread):
         self.has_failures = False
         self.failed_ids: list[int] = []
 
-    def _enrich_with_xml_ids(
+    def _enrich_with_xml_ids(  # noqa: C901
         self,
         raw_data: list[dict[str, Any]],
         enrichment_tasks: list[dict[str, Any]],
@@ -143,7 +143,9 @@ class RPCThreadExport(RpcThread):
                             for rid in related_val
                             if rid in db_id_to_xml_id
                         ]
-                        record[task["target_field"]] = ",".join(xml_ids) if xml_ids else None
+                        record[task["target_field"]] = (
+                            ",".join(xml_ids) if xml_ids else None
+                        )
                     else:
                         record[task["target_field"]] = None
                 else:
@@ -341,7 +343,7 @@ class RPCThreadExport(RpcThread):
         self.spawn_thread(self._execute_batch, [data_ids, batch_number])
 
 
-def _initialize_export(
+def _initialize_export(  # noqa: C901
     config: Union[str, dict[str, Any]],
     model_name: str,
     header: list[str],

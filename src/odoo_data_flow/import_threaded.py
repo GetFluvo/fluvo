@@ -1563,12 +1563,15 @@ def _execute_load_batch(  # noqa: C901
     """
     model, context, progress = (
         thread_state["model"],
-        thread_state.get("context", {
-            "tracking_disable": True,
-            "mail_create_nolog": True,
-            "mail_notrack": True,
-            "mail_activity_automation_skip": True,
-        }),
+        thread_state.get(
+            "context",
+            {
+                "tracking_disable": True,
+                "mail_create_nolog": True,
+                "mail_notrack": True,
+                "mail_activity_automation_skip": True,
+            },
+        ),
         thread_state["progress"],
     )
     connection = thread_state.get("connection")
@@ -2527,6 +2530,7 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
     batch_size: int,
     batch_delay: float,
     total_records: int,
+    max_batch_bytes: int = DEFAULT_MAX_BATCH_BYTES,
 ) -> dict[str, Any]:
     """Orchestrates a streaming Pass 1 import without loading all data into memory.
 
@@ -2553,6 +2557,7 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
         batch_size: The number of records to process in each batch.
         batch_delay: Delay in seconds between batch submissions.
         total_records: Total number of records for progress display.
+        max_batch_bytes: Maximum estimated payload size per batch in bytes.
 
     Returns:
         dict[str, Any]: A dictionary containing the results of the pass,
@@ -2780,8 +2785,7 @@ def _orchestrate_pass_2(  # noqa: C901
         # Check if adding this operation would exceed limits
         # Always include at least one operation per batch
         count_limit_exceeded = (
-            current_record_count + op_record_count > batch_size
-            and current_super_batch
+            current_record_count + op_record_count > batch_size and current_super_batch
         )
         size_limit_exceeded = (
             max_batch_bytes > 0
@@ -2928,6 +2932,8 @@ def import_data(  # noqa: C901
         batch_size (int): The number of records to process in each batch.
         batch_delay (float): Delay in seconds between batch submissions to
             reduce server load. Use 0.5-2.0 for busy servers.
+        max_batch_bytes (int): Maximum estimated payload size per batch in bytes.
+            When a batch exceeds this size, it is split regardless of record count.
         skip (int): The number of lines to skip at the top of the source file.
         force_create (bool): If True, uses single-record load instead of
             batch load. Used for fail mode to get accurate per-record errors.
@@ -2954,7 +2960,8 @@ def import_data(  # noqa: C901
         critical, process-halting errors, False otherwise.
     """
     context, deferred, ignore = (
-        context or {
+        context
+        or {
             "tracking_disable": True,
             "mail_create_nolog": True,
             "mail_notrack": True,
@@ -3228,6 +3235,7 @@ def import_data(  # noqa: C901
                     batch_size,
                     batch_delay,
                     record_count,
+                    max_batch_bytes,
                 )
                 # Streaming mode doesn't support Pass 2
                 pass_2_successful = True

@@ -510,9 +510,7 @@ class TestGetCitiesLookupEdgeCases:
             cities = geonames.get_cities_lookup()
             assert "unknowncity" not in cities
 
-    def test_handles_empty_city_name(
-        self, sample_cities_with_edge_cases: Path
-    ) -> None:
+    def test_handles_empty_city_name(self, sample_cities_with_edge_cases: Path) -> None:
         """Test that empty city names are handled gracefully."""
         with mock.patch.object(
             geonames, "_get_cached_file", return_value=sample_cities_with_edge_cases
@@ -551,8 +549,12 @@ class TestGetPostalLookupMultipleCountries:
     def test_get_postal_lookup_multiple_countries(self, tmp_path: Path) -> None:
         """Test building postal lookup for multiple countries."""
         # Create postal files for NL and BE (all 12 columns as per POSTAL_COLUMNS)
-        nl_content = "NL\t1012 AB\tAmsterdam\tNoord-Holland\tNH\t\t\t\t\t52.37\t4.89\t4\n"
-        be_content = "BE\tB-1000\tBrussels\tBrussels-Capital\tBRU\t\t\t\t\t50.85\t4.35\t4\n"
+        nl_content = (
+            "NL\t1012 AB\tAmsterdam\tNoord-Holland\tNH\t\t\t\t\t52.37\t4.89\t4\n"
+        )
+        be_content = (
+            "BE\tB-1000\tBrussels\tBrussels-Capital\tBRU\t\t\t\t\t50.85\t4.35\t4\n"
+        )
 
         (tmp_path / "postal_NL.txt").write_text(nl_content, encoding="utf-8")
         (tmp_path / "postal_BE.txt").write_text(be_content, encoding="utf-8")

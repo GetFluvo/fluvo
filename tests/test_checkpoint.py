@@ -312,6 +312,7 @@ class TestConfigHash:
 
     def test_compute_config_hash_with_non_dict_non_str(self) -> None:
         """Test config hash with object that is neither dict nor str."""
+
         # Pass an object like a dataclass or custom class
         class CustomConfig:
             def __str__(self) -> str:
@@ -375,7 +376,7 @@ class TestLoadCheckpointEdgeCases:
         cp_path = ckpt.get_checkpoint_path(sample_csv, session_id)
         cp_path.write_text('{"valid": "json"}')
 
-        with patch("builtins.open", side_effect=IOError("Read error")):
+        with patch("builtins.open", side_effect=OSError("Read error")):
             loaded = ckpt.load_checkpoint(sample_csv, "config.conf", "res.partner")
             assert loaded is None
 
@@ -395,6 +396,8 @@ class TestDeleteCheckpointEdgeCases:
         cp_path = ckpt.get_checkpoint_path(sample_csv, session_id)
         cp_path.write_text("{}")
 
-        with patch.object(Path, "unlink", side_effect=PermissionError("Permission denied")):
+        with patch.object(
+            Path, "unlink", side_effect=PermissionError("Permission denied")
+        ):
             result = ckpt.delete_checkpoint(sample_csv, session_id)
             assert result is False

@@ -98,9 +98,7 @@ def test_returns_none_for_compute_error(tmp_path: Path) -> None:
     csv_file.write_text("id,name\n1,test\n")
 
     with patch("polars.read_csv") as mock_read:
-        mock_read.side_effect = pl.exceptions.ComputeError(
-            "Schema mismatch detected"
-        )
+        mock_read.side_effect = pl.exceptions.ComputeError("Schema mismatch detected")
         result = sort_for_self_referencing(
             str(csv_file), id_column="id", parent_column="parent_id", separator=","
         )

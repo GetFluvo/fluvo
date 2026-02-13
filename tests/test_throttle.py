@@ -341,7 +341,7 @@ class TestUpdateHealthEmpty:
     """Tests for _update_health with empty response times."""
 
     def test_update_health_empty_response_times(self) -> None:
-        """Test _update_health returns early with empty response_times (covers line 117)."""
+        """Test _update_health returns early with empty response_times."""
         controller = throttle.ThrottleController()
         # Ensure response_times is empty
         controller.response_times = []

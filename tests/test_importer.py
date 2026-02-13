@@ -554,9 +554,7 @@ class TestImporterEdgeCases:
         assert _count_lines("/nonexistent/file.csv") == 0
 
     @patch("odoo_data_flow.importer._show_error_panel")
-    def test_run_import_context_type_error(
-        self, mock_show_error: MagicMock
-    ) -> None:
+    def test_run_import_context_type_error(self, mock_show_error: MagicMock) -> None:
         """Test run_import handles context that parses to non-dict."""
         result = run_import(
             config="dummy.conf",

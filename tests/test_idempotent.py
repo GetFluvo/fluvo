@@ -317,7 +317,7 @@ class TestFindUnchangedRecordsEdgeCases:
         csv_data = [{"id": "base.test", "name": "Test"}]
         existing = {"base.test": {"id": 1, "name": "Test", "extra": "field"}}
 
-        changed, unchanged, stats = idempotent.find_unchanged_records(
+        _changed, unchanged, _stats = idempotent.find_unchanged_records(
             csv_data, existing, compare_fields=["name", "description"]
         )
 
@@ -329,7 +329,7 @@ class TestFindUnchangedRecordsEdgeCases:
         csv_data = [{"id": "base.test", "name": "Test", "extra": "value"}]
         existing = {"base.test": {"id": 1, "name": "Test"}}  # No "extra" field
 
-        changed, unchanged, stats = idempotent.find_unchanged_records(
+        _changed, unchanged, _stats = idempotent.find_unchanged_records(
             csv_data, existing, compare_fields=["name", "extra"]
         )
 
@@ -338,6 +338,7 @@ class TestFindUnchangedRecordsEdgeCases:
 
     def test_comparison_error(self) -> None:
         """Test handling of comparison errors."""
+
         # Create a value that will raise an exception during comparison
         class BadValue:
             def __str__(self) -> str:
@@ -346,7 +347,9 @@ class TestFindUnchangedRecordsEdgeCases:
         csv_data = [{"id": "base.test", "name": BadValue()}]
         existing = {"base.test": {"id": 1, "name": "Test"}}
 
-        changed, unchanged, stats = idempotent.find_unchanged_records(csv_data, existing)
+        changed, _unchanged, stats = idempotent.find_unchanged_records(
+            csv_data, existing
+        )
 
         # Should be marked as changed due to comparison error
         assert len(changed) == 1
@@ -357,7 +360,9 @@ class TestFindUnchangedRecordsEdgeCases:
         csv_data = [{"id": "", "name": "Test"}]
         existing = {"base.test": {"id": 1, "name": "Test"}}
 
-        changed, unchanged, stats = idempotent.find_unchanged_records(csv_data, existing)
+        changed, _unchanged, stats = idempotent.find_unchanged_records(
+            csv_data, existing
+        )
 
         # Should be treated as new
         assert len(changed) == 1
@@ -375,7 +380,7 @@ class TestFilterUnchangedRowsEdgeCases:
         header = ["id", "name"]
         existing = {"base.test": {"id": 1, "name": "Test"}}
 
-        filtered, stats = idempotent.filter_unchanged_rows(rows, header, existing)
+        filtered, _stats = idempotent.filter_unchanged_rows(rows, header, existing)
 
         # Should include the row despite being short
         assert len(filtered) == 1
@@ -388,7 +393,7 @@ class TestFilterUnchangedRowsEdgeCases:
         header = ["id", "name"]
         existing = {"base.test": {"id": 1, "name": "Test"}}
 
-        filtered, stats = idempotent.filter_unchanged_rows(rows, header, existing)
+        filtered, _stats = idempotent.filter_unchanged_rows(rows, header, existing)
 
         # Should be unchanged because field comparison is skipped
         assert len(filtered) == 0
@@ -403,13 +408,14 @@ class TestFilterUnchangedRowsEdgeCases:
             "base.test": {"id": 1, "partner_id": (5, "Partner Name")},
         }
 
-        filtered, stats = idempotent.filter_unchanged_rows(rows, header, existing)
+        filtered, _stats = idempotent.filter_unchanged_rows(rows, header, existing)
 
         # Should be unchanged because partner_id matches
         assert len(filtered) == 0
 
     def test_comparison_error_in_filter(self) -> None:
         """Test handling comparison error in filter_unchanged_rows."""
+
         # Create a value that will raise an exception during comparison
         class BadValue:
             def __str__(self) -> str:
