@@ -938,6 +938,15 @@ def vat_validate_cmd(
     help="Delay in seconds between batches to reduce server load. "
     "Use 0.5-2.0 for busy servers. Default: 0 (no delay).",
 )
+@click.option(
+    "--max-batch-bytes",
+    default=5 * 1024 * 1024,
+    type=int,
+    help="Maximum estimated payload size per batch in bytes. "
+    "When a batch exceeds this size, it is split regardless of record count. "
+    "Useful for imports with large binary fields like images. "
+    "Default: 5242880 (5MB). Set to 0 to disable size-based batching.",
+)
 @click.option("--skip", default=0, type=int, help="Number of initial lines to skip.")
 @click.option(
     "--fail",

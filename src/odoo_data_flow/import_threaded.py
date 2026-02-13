@@ -159,6 +159,55 @@ def _warn_empty_ids(
     return empty_count
 
 
+# Default maximum batch size in bytes (5MB)
+DEFAULT_MAX_BATCH_BYTES = 5 * 1024 * 1024
+
+
+def _estimate_payload_size(data: Any) -> int:
+    """Estimate the size in bytes of data when serialized for RPC.
+
+    This function provides a rough estimate of how large the data will be
+    when sent over the network. It's used to implement size-based batching
+    to prevent timeouts when importing records with large binary fields
+    (like images).
+
+    Args:
+        data: The data to estimate size for. Can be a dict, list, or primitive.
+
+    Returns:
+        Estimated size in bytes.
+    """
+    import json
+
+    try:
+        # JSON serialization is a reasonable proxy for RPC payload size
+        return len(json.dumps(data, default=str).encode("utf-8"))
+    except (TypeError, ValueError):
+        # Fallback: estimate based on string representation
+        return len(str(data).encode("utf-8"))
+
+
+def _estimate_row_size(row: list[Any]) -> int:
+    """Estimate the size in bytes of a single CSV row.
+
+    Args:
+        row: A list of values from a CSV row.
+
+    Returns:
+        Estimated size in bytes.
+    """
+    total = 0
+    for value in row:
+        if value is None:
+            total += 4  # "null"
+        elif isinstance(value, str):
+            # String values - account for quotes and escaping
+            total += len(value.encode("utf-8")) + 2
+        else:
+            total += len(str(value))
+    return total
+
+
 def _read_data_file(
     file_path: str, separator: str, encoding: str, skip: int
 ) -> tuple[list[str], list[list[Any]]]:
@@ -243,6 +292,7 @@ def _stream_csv_batches(
     skip: int,
     batch_size: int,
     ignore: list[str],
+    max_batch_bytes: int = DEFAULT_MAX_BATCH_BYTES,
 ) -> Generator[tuple[list[str], int, list[list[Any]]], None, None]:
     """Streams CSV data in batches without loading the entire file into memory.
 
@@ -250,13 +300,19 @@ def _stream_csv_batches(
     the header. It is memory-efficient for large files as it only keeps
     one batch in memory at a time.
 
+    Batching is controlled by both record count (batch_size) and payload size
+    (max_batch_bytes). A new batch is started when either limit is reached.
+    This prevents timeouts when importing records with large binary fields.
+
     Args:
         file_path: The full path to the source CSV file.
         separator: The delimiter character used to separate columns.
         encoding: The character encoding of the file.
         skip: The number of lines to skip at the top of the file.
-        batch_size: The number of records to include in each batch.
+        batch_size: The maximum number of records to include in each batch.
         ignore: A list of column names to ignore during import.
+        max_batch_bytes: Maximum estimated payload size per batch in bytes.
+            Defaults to 5MB. Set to 0 to disable size-based batching.
 
     Yields:
         Tuples of (header, batch_number, batch_data) where:
@@ -290,6 +346,7 @@ def _stream_csv_batches(
             filtered_header = header
 
         current_batch: list[list[Any]] = []
+        current_batch_bytes = 0
         batch_number = 0
 
         for row in reader:
@@ -300,12 +357,25 @@ def _stream_csv_batches(
                     continue
                 row = [row[i] for i in indices_to_keep]
 
-            current_batch.append(row)
+            row_size = _estimate_row_size(row)
 
-            if len(current_batch) >= batch_size:
+            # Check if adding this row would exceed limits
+            # Always include at least one row per batch
+            size_limit_exceeded = (
+                max_batch_bytes > 0
+                and current_batch_bytes + row_size > max_batch_bytes
+                and current_batch
+            )
+            count_limit_exceeded = len(current_batch) >= batch_size
+
+            if size_limit_exceeded or count_limit_exceeded:
                 batch_number += 1
                 yield filtered_header, batch_number, current_batch
                 current_batch = []
+                current_batch_bytes = 0
+
+            current_batch.append(row)
+            current_batch_bytes += row_size
 
         # Yield any remaining rows
         if current_batch:
@@ -2512,7 +2582,7 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
 
     try:
         batch_generator = _stream_csv_batches(
-            file_csv, separator, encoding, skip, batch_size, ignore
+            file_csv, separator, encoding, skip, batch_size, ignore, max_batch_bytes
         )
 
         # Track cumulative row count for proper row numbering in streaming mode
@@ -2608,6 +2678,7 @@ def _orchestrate_pass_2(  # noqa: C901
     max_connection: int,
     batch_size: int,
     throttle_controller: Optional[throttle_lib.ThrottleController] = None,
+    max_batch_bytes: int = DEFAULT_MAX_BATCH_BYTES,
 ) -> tuple[bool, int]:
     """Orchestrates the multi-threaded Pass 2 (write).
 
@@ -2615,6 +2686,10 @@ def _orchestrate_pass_2(  # noqa: C901
     the data for updating relational fields by using the ID map from Pass 1.
     It then groups records that have the exact same update payload and runs
     the `write` operations in parallel batches for maximum efficiency.
+
+    Batching is controlled by both record count (batch_size) and payload size
+    (max_batch_bytes). This prevents timeouts when updating records with large
+    binary fields like images.
 
     Args:
         progress (Progress): The rich Progress instance for updating the UI.
@@ -2629,9 +2704,11 @@ def _orchestrate_pass_2(  # noqa: C901
         fail_writer (Optional[Any]): The CSV writer for the fail file.
         fail_handle (Optional[TextIO]): The file handle for the fail file.
         max_connection (int): The number of parallel worker threads to use.
-        batch_size (int): The number of records per write batch.
+        batch_size (int): The maximum number of records per write batch.
         throttle_controller: Optional controller for adaptive throttling based
             on server response times.
+        max_batch_bytes: Maximum estimated payload size per batch in bytes.
+            Defaults to 5MB. Set to 0 to disable size-based batching.
 
     Returns:
         bool: True if the pass completed without any critical (abort-level)
@@ -2687,24 +2764,40 @@ def _orchestrate_pass_2(  # noqa: C901
     # sequentially by a single worker thread. This dramatically reduces the number
     # of thread spawns and network round-trips.
     #
-    # Target: ~batch_size total records per super-batch (summing all operations)
+    # Batching is controlled by both record count (batch_size) and payload size
+    # (max_batch_bytes). This prevents timeouts when updating records with large
+    # binary fields like images.
     pass_2_batches: list[list[tuple[list[int], dict[str, Any]]]] = []
     current_super_batch: list[tuple[list[int], dict[str, Any]]] = []
     current_record_count = 0
+    current_batch_bytes = 0
 
     for write_op in individual_writes:
         ids, vals = write_op
-        op_size = len(ids)
+        op_record_count = len(ids)
+        op_size_bytes = _estimate_payload_size({"ids": ids, "vals": vals})
 
-        # If adding this operation would exceed batch_size, start a new super-batch
-        # (unless current_super_batch is empty - always include at least one op)
-        if current_record_count + op_size > batch_size and current_super_batch:
+        # Check if adding this operation would exceed limits
+        # Always include at least one operation per batch
+        count_limit_exceeded = (
+            current_record_count + op_record_count > batch_size
+            and current_super_batch
+        )
+        size_limit_exceeded = (
+            max_batch_bytes > 0
+            and current_batch_bytes + op_size_bytes > max_batch_bytes
+            and current_super_batch
+        )
+
+        if count_limit_exceeded or size_limit_exceeded:
             pass_2_batches.append(current_super_batch)
             current_super_batch = []
             current_record_count = 0
+            current_batch_bytes = 0
 
         current_super_batch.append(write_op)
-        current_record_count += op_size
+        current_record_count += op_record_count
+        current_batch_bytes += op_size_bytes
 
     # Don't forget the last super-batch
     if current_super_batch:
@@ -2800,6 +2893,7 @@ def import_data(  # noqa: C901
     skip_unchanged: bool = False,
     skip_existing: bool = False,
     adaptive_throttle: bool = True,
+    max_batch_bytes: int = DEFAULT_MAX_BATCH_BYTES,
 ) -> tuple[bool, dict[str, int]]:
     """Orchestrates a robust, multi-threaded, two-pass import process.
 
@@ -3236,6 +3330,7 @@ def import_data(  # noqa: C901
                         max_connection,
                         batch_size,
                         throttle_controller,
+                        max_batch_bytes,
                     )
 
         finally:
