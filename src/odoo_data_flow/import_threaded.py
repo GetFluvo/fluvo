@@ -482,13 +482,31 @@ def _prepare_pass_2_data(  # noqa: C901
 
     # Pre-calculate a map of deferred field names to their actual index in the header
     # Also track if the column is an external ID column (ends with /id)
-    deferred_field_indices: dict[str, tuple[int, bool]] = {}
+    # and if the field is a many2many type (requires special value formatting)
+    deferred_field_indices: dict[str, tuple[int, bool, bool]] = {}
+
+    # Get field type information from the model to identify many2many fields
+    many2many_fields: set[str] = set()
+    if model_obj is not None:
+        try:
+            # Get field names we need to check
+            field_names_to_check = list(deferred_fields_normalized.keys())
+            fields_info = model_obj.fields_get(field_names_to_check)
+            for field_name, field_meta in fields_info.items():
+                if field_meta.get("type") == "many2many":
+                    many2many_fields.add(field_name)
+            if many2many_fields:
+                log.debug(f"Detected many2many deferred fields: {many2many_fields}")
+        except Exception as e:
+            log.debug(f"Could not get field types for deferred fields: {e}")
+
     for i, column_name in enumerate(header):
         field_base_name = column_name.split("/")[0]
         if field_base_name in deferred_fields_normalized:
-            # Store (index, is_external_id_column)
+            # Store (index, is_external_id_column, is_many2many)
             is_ext_id_col = column_name.endswith("/id")
-            deferred_field_indices[field_base_name] = (i, is_ext_id_col)
+            is_m2m = field_base_name in many2many_fields
+            deferred_field_indices[field_base_name] = (i, is_ext_id_col, is_m2m)
 
     if not deferred_field_indices:
         log.warning(
@@ -574,66 +592,115 @@ def _prepare_pass_2_data(  # noqa: C901
 
         update_vals = {}
         # Use the pre-calculated map to find the values to write.
-        for field_name, (field_index, is_ext_id_col) in deferred_field_indices.items():
+        for field_name, (field_index, is_ext_id_col, is_m2m) in deferred_field_indices.items():
             if field_index < len(row):
                 field_value = row[field_index]
                 if field_value:  # Ensure there is a value
-                    # First, always try id_map lookup (for self-referencing fields)
-                    # Sanitize field_value to match id_map key format
-                    sanitized_field_value = to_xmlid(field_value)
-                    related_db_id = id_map.get(sanitized_field_value)
+                    # For many2many fields, handle multiple comma-separated values
+                    if is_m2m:
+                        # Split by comma if multiple values
+                        raw_values = [v.strip() for v in str(field_value).split(",") if v.strip()]
+                        resolved_ids: list[int] = []
 
-                    if related_db_id:
-                        # Value found in id_map - use the database ID
-                        update_vals[field_name] = related_db_id
-                        found_in_idmap += 1
-                        log.debug(
-                            f"Resolved self-reference '{field_name}': "
-                            f"'{field_value}' -> db_id {related_db_id}"
-                        )
-                    elif is_ext_id_col:
-                        # External ID column (e.g., responsible_id/id)
-                        # Try XML-ID resolution for non-self-referencing fields
-                        not_in_idmap += 1
-                        if ir_model_data_proxy:
-                            # Check cache first to avoid repeated RPC calls
-                            if field_value in external_id_cache:
-                                cache_hits += 1
-                                resolved_id = external_id_cache[field_value]
-                            else:
-                                rpc_lookups += 1
-                                resolved_id = _resolve_external_id_for_pass2(
-                                    ir_model_data_proxy, field_value
-                                )
-                                # Cache the result (even if None)
-                                external_id_cache[field_value] = resolved_id
+                        for raw_val in raw_values:
+                            # Try id_map lookup first
+                            sanitized_val = to_xmlid(raw_val)
+                            db_id_resolved = id_map.get(sanitized_val)
 
-                            if resolved_id:
-                                update_vals[field_name] = resolved_id
-                                log.debug(
-                                    f"Resolved external ID '{field_name}': "
-                                    f"'{field_value}' -> db_id {resolved_id}"
-                                )
+                            if db_id_resolved:
+                                resolved_ids.append(db_id_resolved)
+                                found_in_idmap += 1
+                            elif is_ext_id_col and ir_model_data_proxy:
+                                # Try XML-ID resolution
+                                not_in_idmap += 1
+                                if raw_val in external_id_cache:
+                                    cache_hits += 1
+                                    cached_id = external_id_cache[raw_val]
+                                    if cached_id:
+                                        resolved_ids.append(cached_id)
+                                else:
+                                    rpc_lookups += 1
+                                    ext_resolved = _resolve_external_id_for_pass2(
+                                        ir_model_data_proxy, raw_val
+                                    )
+                                    external_id_cache[raw_val] = ext_resolved
+                                    if ext_resolved:
+                                        resolved_ids.append(ext_resolved)
+                                    else:
+                                        log.warning(
+                                            f"Missing m2m reference for '{field_name}': "
+                                            f"'{raw_val}' not found (source_id={source_id})"
+                                        )
                             else:
                                 log.warning(
-                                    f"Missing reference for '{field_name}': "
-                                    f"'{field_value}' not in id_map/ir.model.data "
+                                    f"Cannot resolve m2m '{field_name}': '{raw_val}' "
+                                    f"not in id_map (source_id={source_id})"
+                                )
+
+                        if resolved_ids:
+                            # Use Odoo's (6, 0, [ids]) command to replace the m2m relation
+                            update_vals[field_name] = [(6, 0, resolved_ids)]
+                            log.debug(
+                                f"Resolved many2many '{field_name}': "
+                                f"{len(resolved_ids)} IDs -> {resolved_ids}"
+                            )
+                    else:
+                        # Non-many2many field: original logic for many2one and other fields
+                        # Sanitize field_value to match id_map key format
+                        sanitized_field_value = to_xmlid(field_value)
+                        related_db_id = id_map.get(sanitized_field_value)
+
+                        if related_db_id:
+                            # Value found in id_map - use the database ID
+                            update_vals[field_name] = related_db_id
+                            found_in_idmap += 1
+                            log.debug(
+                                f"Resolved self-reference '{field_name}': "
+                                f"'{field_value}' -> db_id {related_db_id}"
+                            )
+                        elif is_ext_id_col:
+                            # External ID column (e.g., responsible_id/id)
+                            # Try XML-ID resolution for non-self-referencing fields
+                            not_in_idmap += 1
+                            if ir_model_data_proxy:
+                                # Check cache first to avoid repeated RPC calls
+                                if field_value in external_id_cache:
+                                    cache_hits += 1
+                                    resolved_id = external_id_cache[field_value]
+                                else:
+                                    rpc_lookups += 1
+                                    resolved_id = _resolve_external_id_for_pass2(
+                                        ir_model_data_proxy, field_value
+                                    )
+                                    # Cache the result (even if None)
+                                    external_id_cache[field_value] = resolved_id
+
+                                if resolved_id:
+                                    update_vals[field_name] = resolved_id
+                                    log.debug(
+                                        f"Resolved external ID '{field_name}': "
+                                        f"'{field_value}' -> db_id {resolved_id}"
+                                    )
+                                else:
+                                    log.warning(
+                                        f"Missing reference for '{field_name}': "
+                                        f"'{field_value}' not in id_map/ir.model.data "
+                                        f"(source_id={source_id})"
+                                    )
+                            else:
+                                log.warning(
+                                    f"Cannot resolve '{field_name}': '{field_value}' "
+                                    f"not in id_map and no ir.model.data proxy available "
                                     f"(source_id={source_id})"
                                 )
                         else:
-                            log.warning(
-                                f"Cannot resolve '{field_name}': '{field_value}' "
-                                f"not in id_map and no ir.model.data proxy available "
-                                f"(source_id={source_id})"
-                            )
-                    else:
-                        # Non-relational deferred field (e.g., image_1920)
-                        # Not in id_map and not an external ID column
-                        # Use value directly - likely base64 binary data
-                        update_vals[field_name] = field_value
-                        val_len = len(str(field_value))
-                        log.debug(
-                            f"Direct value for '{field_name}' "
+                            # Non-relational deferred field (e.g., image_1920)
+                            # Not in id_map and not an external ID column
+                            # Use value directly - likely base64 binary data
+                            update_vals[field_name] = field_value
+                            val_len = len(str(field_value))
+                            log.debug(
+                                f"Direct value for '{field_name}' "
                             f"(source={source_id}, len={val_len})"
                         )
 

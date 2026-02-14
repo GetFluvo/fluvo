@@ -19,6 +19,7 @@ from odoo_data_flow.import_threaded import (
     _load_batch_with_binary_fallback,
     _orchestrate_pass_1,
     _orchestrate_pass_2,
+    _prepare_pass_2_data,
     _read_data_file,
     _setup_fail_file,
     _stream_csv_batches,
@@ -2224,3 +2225,262 @@ class TestSkipExisting:
         # Assert - should succeed with 0 created records
         assert success is True
         assert stats.get("created_records", 0) == 0
+
+
+class TestPreparePass2DataMany2Many:
+    """Tests for many2many field handling in _prepare_pass_2_data."""
+
+    def test_many2many_field_detection(self) -> None:
+        """Test that many2many fields are detected via fields_get()."""
+        # Arrange
+        header = ["id", "name", "tag_ids/id"]
+        all_data = [
+            ["rec1", "Record 1", "tag.tag1"],
+        ]
+        id_map = {"rec1": 101, "tag.tag1": 201}
+        deferred_fields = ["tag_ids/id"]
+
+        mock_model = MagicMock()
+        mock_model.fields_get.return_value = {
+            "tag_ids": {"type": "many2many", "relation": "res.partner.category"}
+        }
+
+        # Act
+        result = _prepare_pass_2_data(
+            all_data, header, 0, id_map, deferred_fields, model_obj=mock_model
+        )
+
+        # Assert - should wrap in [(6, 0, [ids])] format
+        assert len(result) == 1
+        assert result[0][0] == 101  # db_id
+        assert result[0][1]["tag_ids"] == [(6, 0, [201])]
+
+    def test_many2many_multiple_values(self) -> None:
+        """Test that comma-separated many2many values are split and resolved."""
+        # Arrange
+        header = ["id", "name", "tag_ids/id"]
+        all_data = [
+            ["rec1", "Record 1", "tag.tag1,tag.tag2,tag.tag3"],
+        ]
+        id_map = {"rec1": 101, "tag.tag1": 201, "tag.tag2": 202, "tag.tag3": 203}
+        deferred_fields = ["tag_ids/id"]
+
+        mock_model = MagicMock()
+        mock_model.fields_get.return_value = {
+            "tag_ids": {"type": "many2many", "relation": "res.partner.category"}
+        }
+
+        # Act
+        result = _prepare_pass_2_data(
+            all_data, header, 0, id_map, deferred_fields, model_obj=mock_model
+        )
+
+        # Assert - all three IDs should be in the list
+        assert len(result) == 1
+        assert result[0][0] == 101
+        assert result[0][1]["tag_ids"] == [(6, 0, [201, 202, 203])]
+
+    def test_many2many_single_value(self) -> None:
+        """Test that single many2many value is properly wrapped in list."""
+        # Arrange
+        header = ["id", "name", "accessory_product_ids/id"]
+        all_data = [
+            ["prod1", "Product 1", "PRODUCT_TEMPLATE.12345"],
+        ]
+        id_map = {"prod1": 501, "PRODUCT_TEMPLATE.12345": 789}
+        deferred_fields = ["accessory_product_ids/id"]
+
+        mock_model = MagicMock()
+        mock_model.fields_get.return_value = {
+            "accessory_product_ids": {
+                "type": "many2many",
+                "relation": "product.template",
+            }
+        }
+
+        # Act
+        result = _prepare_pass_2_data(
+            all_data, header, 0, id_map, deferred_fields, model_obj=mock_model
+        )
+
+        # Assert - single ID should still be wrapped correctly
+        assert len(result) == 1
+        assert result[0][0] == 501
+        assert result[0][1]["accessory_product_ids"] == [(6, 0, [789])]
+
+    def test_many2one_not_wrapped_in_list(self) -> None:
+        """Test that many2one fields are NOT wrapped in [(6, 0, [])] format."""
+        # Arrange
+        header = ["id", "name", "parent_id/id"]
+        all_data = [
+            ["rec1", "Record 1", "parent1"],
+        ]
+        id_map = {"rec1": 101, "parent1": 50}
+        deferred_fields = ["parent_id/id"]
+
+        mock_model = MagicMock()
+        mock_model.fields_get.return_value = {
+            "parent_id": {"type": "many2one", "relation": "res.partner"}
+        }
+
+        # Act
+        result = _prepare_pass_2_data(
+            all_data, header, 0, id_map, deferred_fields, model_obj=mock_model
+        )
+
+        # Assert - many2one should be a single integer, not wrapped
+        assert len(result) == 1
+        assert result[0][0] == 101
+        assert result[0][1]["parent_id"] == 50
+
+    def test_many2many_with_whitespace(self) -> None:
+        """Test that whitespace around comma-separated values is handled."""
+        # Arrange
+        header = ["id", "name", "tag_ids/id"]
+        all_data = [
+            ["rec1", "Record 1", "  tag.tag1 , tag.tag2 ,  tag.tag3  "],
+        ]
+        id_map = {"rec1": 101, "tag.tag1": 201, "tag.tag2": 202, "tag.tag3": 203}
+        deferred_fields = ["tag_ids/id"]
+
+        mock_model = MagicMock()
+        mock_model.fields_get.return_value = {
+            "tag_ids": {"type": "many2many", "relation": "res.partner.category"}
+        }
+
+        # Act
+        result = _prepare_pass_2_data(
+            all_data, header, 0, id_map, deferred_fields, model_obj=mock_model
+        )
+
+        # Assert - whitespace should be trimmed
+        assert len(result) == 1
+        assert result[0][1]["tag_ids"] == [(6, 0, [201, 202, 203])]
+
+    def test_many2many_partial_resolution(self) -> None:
+        """Test that only resolvable many2many IDs are included."""
+        # Arrange
+        header = ["id", "name", "tag_ids/id"]
+        all_data = [
+            ["rec1", "Record 1", "tag.found1,tag.missing,tag.found2"],
+        ]
+        # tag.missing is not in id_map
+        id_map = {"rec1": 101, "tag.found1": 201, "tag.found2": 203}
+        deferred_fields = ["tag_ids/id"]
+
+        # Use spec to restrict attributes - no connection/client attrs
+        mock_model = MagicMock(spec=["fields_get"])
+        mock_model.fields_get.return_value = {
+            "tag_ids": {"type": "many2many", "relation": "res.partner.category"}
+        }
+
+        # Act
+        result = _prepare_pass_2_data(
+            all_data, header, 0, id_map, deferred_fields, model_obj=mock_model
+        )
+
+        # Assert - only found IDs should be included
+        assert len(result) == 1
+        assert result[0][1]["tag_ids"] == [(6, 0, [201, 203])]
+
+    def test_many2many_no_resolvable_values(self) -> None:
+        """Test that empty result when no many2many values can be resolved."""
+        # Arrange
+        header = ["id", "name", "tag_ids/id"]
+        all_data = [
+            ["rec1", "Record 1", "tag.missing1,tag.missing2"],
+        ]
+        # None of the tags are in id_map
+        id_map = {"rec1": 101}
+        deferred_fields = ["tag_ids/id"]
+
+        # Use spec to restrict attributes - no connection/client attrs
+        mock_model = MagicMock(spec=["fields_get"])
+        mock_model.fields_get.return_value = {
+            "tag_ids": {"type": "many2many", "relation": "res.partner.category"}
+        }
+
+        # Act
+        result = _prepare_pass_2_data(
+            all_data, header, 0, id_map, deferred_fields, model_obj=mock_model
+        )
+
+        # Assert - no update for this record since all tags are missing
+        assert len(result) == 0
+
+    def test_fields_get_exception_handled(self) -> None:
+        """Test that exception in fields_get is handled gracefully."""
+        # Arrange
+        header = ["id", "name", "tag_ids/id"]
+        all_data = [
+            ["rec1", "Record 1", "tag.tag1"],
+        ]
+        id_map = {"rec1": 101, "tag.tag1": 201}
+        deferred_fields = ["tag_ids/id"]
+
+        mock_model = MagicMock()
+        mock_model.fields_get.side_effect = Exception("Connection error")
+
+        # Act - should not raise, should fall back to non-m2m handling
+        result = _prepare_pass_2_data(
+            all_data, header, 0, id_map, deferred_fields, model_obj=mock_model
+        )
+
+        # Assert - without type info, it falls back to treating as regular field
+        # This returns the integer ID directly, not wrapped in [(6, 0, [])]
+        assert len(result) == 1
+        assert result[0][0] == 101
+        # Without many2many detection, it resolves as many2one (single ID)
+        assert result[0][1]["tag_ids"] == 201
+
+    def test_no_model_object(self) -> None:
+        """Test Pass 2 works without model_obj (no type detection)."""
+        # Arrange
+        header = ["id", "name", "parent_id/id"]
+        all_data = [
+            ["rec1", "Record 1", "parent1"],
+        ]
+        id_map = {"rec1": 101, "parent1": 50}
+        deferred_fields = ["parent_id/id"]
+
+        # Act - no model_obj provided
+        result = _prepare_pass_2_data(
+            all_data, header, 0, id_map, deferred_fields, model_obj=None
+        )
+
+        # Assert - should work with basic ID resolution
+        assert len(result) == 1
+        assert result[0][0] == 101
+        assert result[0][1]["parent_id"] == 50
+
+    def test_mixed_field_types(self) -> None:
+        """Test handling both many2many and many2one in same record."""
+        # Arrange
+        header = ["id", "name", "parent_id/id", "tag_ids/id"]
+        all_data = [
+            ["rec1", "Record 1", "parent1", "tag.tag1,tag.tag2"],
+        ]
+        id_map = {
+            "rec1": 101,
+            "parent1": 50,
+            "tag.tag1": 201,
+            "tag.tag2": 202,
+        }
+        deferred_fields = ["parent_id/id", "tag_ids/id"]
+
+        mock_model = MagicMock()
+        mock_model.fields_get.return_value = {
+            "parent_id": {"type": "many2one", "relation": "res.partner"},
+            "tag_ids": {"type": "many2many", "relation": "res.partner.category"},
+        }
+
+        # Act
+        result = _prepare_pass_2_data(
+            all_data, header, 0, id_map, deferred_fields, model_obj=mock_model
+        )
+
+        # Assert - both fields should be handled correctly
+        assert len(result) == 1
+        assert result[0][0] == 101
+        assert result[0][1]["parent_id"] == 50  # many2one = integer
+        assert result[0][1]["tag_ids"] == [(6, 0, [201, 202])]  # m2m = wrapped
