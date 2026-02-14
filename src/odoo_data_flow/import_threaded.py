@@ -2808,11 +2808,32 @@ def _orchestrate_pass_2(  # noqa: C901
     # --- Grouping Logic ---
     from collections import defaultdict
 
+    def _make_hashable(val: Any) -> Any:
+        """Convert lists to tuples recursively to make values hashable."""
+        if isinstance(val, list):
+            return tuple(_make_hashable(v) for v in val)
+        elif isinstance(val, tuple):
+            # Also recurse into tuples to convert nested lists
+            return tuple(_make_hashable(v) for v in val)
+        return val
+
+    def _make_unhashable(val: Any) -> Any:
+        """Convert tuples back to lists recursively for Odoo RPC."""
+        if isinstance(val, tuple) and len(val) == 3 and val[0] == 6 and val[1] == 0:
+            # This is an Odoo m2m command (6, 0, ids) - convert inner to list
+            return [val[0], val[1], list(_make_unhashable(v) for v in val[2])]
+        elif isinstance(val, tuple):
+            return [_make_unhashable(v) for v in val]
+        return val
+
     grouped_writes = defaultdict(list)
     for db_id, vals in pass_2_data_to_write:
-        # The key must be hashable, so we convert the dict to a frozenset of items.
-        vals_key = frozenset(vals.items())
-        grouped_writes[vals_key].append(db_id)
+        # The key must be hashable. Convert lists (e.g., m2m commands) to tuples.
+        # Sort by key only (string comparison is safe) to ensure consistent ordering.
+        hashable_items = tuple(
+            (k, _make_hashable(vals[k])) for k in sorted(vals.keys())
+        )
+        grouped_writes[hashable_items].append(db_id)
 
     progress.console.print(
         f"[blue]INFO:[/blue] Pass 2: Grouped into {len(grouped_writes)} unique "
@@ -2823,7 +2844,8 @@ def _orchestrate_pass_2(  # noqa: C901
     # Create individual write operations first
     individual_writes: list[tuple[list[int], dict[str, Any]]] = []
     for vals_key, ids in grouped_writes.items():
-        vals = dict(vals_key)
+        # Convert back from hashable tuple format to dict with lists
+        vals = {k: _make_unhashable(v) for k, v in vals_key}
         # Chunk the list of IDs into sub-batches of the desired size.
         for id_chunk in batch(ids, batch_size):
             individual_writes.append((list(id_chunk), vals))
