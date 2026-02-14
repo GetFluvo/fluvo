@@ -193,7 +193,7 @@ def test_run_path_to_image_with_object_dtype(
 
     # Mock the DataFrame's column iteration to include Object dtype
     class MockColumn:
-        def __init__(self, name: str, dtype: pl.DataType) -> None:
+        def __init__(self, name: str, dtype: type[pl.DataType]) -> None:
             self.name = name
             self.dtype = dtype
 
@@ -222,7 +222,7 @@ def test_run_url_to_image_with_object_dtype(
 
     # Mock the DataFrame's column iteration to include Object dtype
     class MockColumn:
-        def __init__(self, name: str, dtype: pl.DataType) -> None:
+        def __init__(self, name: str, dtype: type[pl.DataType]) -> None:
             self.name = name
             self.dtype = dtype
 

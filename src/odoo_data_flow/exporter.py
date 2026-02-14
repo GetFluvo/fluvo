@@ -33,7 +33,7 @@ def run_export(
     config: Union[str, dict[str, Any]],
     model: str,
     fields: str,
-    output: str,
+    output: Optional[str],
     domain: str = "[]",
     worker: int = 1,
     batch_size: int = 1000,

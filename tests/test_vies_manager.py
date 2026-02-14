@@ -2,7 +2,7 @@
 
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1021,12 +1021,14 @@ class TestValidateVatChecksumEdgeCases:
         """Test Dutch VAT with wrong format for checksum."""
         is_valid, error = validate_vat_checksum("NL12345")
         assert is_valid is False
+        assert error is not None
         assert "Invalid Dutch VAT format" in error
 
     def test_german_vat_wrong_length(self) -> None:
         """Test German VAT with wrong digit count."""
         is_valid, error = validate_vat_checksum("DE12345")
         assert is_valid is False
+        assert error is not None
         assert "9 digits" in error
 
     def test_belgian_vat_invalid_checksum(self) -> None:
@@ -1034,12 +1036,14 @@ class TestValidateVatChecksumEdgeCases:
         # BE0123456700 - checksum should fail (97 - (1234567 % 97) != 00)
         is_valid, error = validate_vat_checksum("BE0123456700")
         assert is_valid is False
+        assert error is not None
         assert "checksum failed" in error
 
     def test_checksum_value_error(self) -> None:
         """Test checksum validation with non-numeric input."""
         is_valid, error = validate_vat_checksum("BE01234567XX")
         assert is_valid is False
+        assert error is not None
         assert "validation error" in error.lower()
 
 
@@ -1052,6 +1056,7 @@ class TestValidateVatLocalEdgeCases:
             "DE12345", check_format=True, check_checksum=True
         )
         assert is_valid is False
+        assert error is not None
         assert "Invalid VAT format" in error
 
     def test_checksum_validation_fails_after_format_passes(self) -> None:
@@ -1173,7 +1178,7 @@ class TestDisableVatValidationEdgeCases:
         # Second call fails (for disable operation)
         call_count = [0]
 
-        def connection_side_effect(config_file):
+        def connection_side_effect(config_file: str) -> MagicMock:
             call_count[0] += 1
             if call_count[0] == 1:
                 conn = MagicMock()
@@ -1310,7 +1315,7 @@ class TestRestoreVatValidationSettingsEdgeCases:
         # Fail first with retriable error, then succeed
         call_count = [0]
 
-        def connection_side_effect(config):
+        def connection_side_effect(config: dict[str, Any]) -> MagicMock:
             call_count[0] += 1
             if call_count[0] == 1:
                 raise Exception("503 Service Unavailable")
@@ -1366,7 +1371,7 @@ class TestRestoreVatValidationSettingsEdgeCases:
         # Fail twice with 503, then succeed
         call_count = [0]
 
-        def set_param_side_effect(*args):
+        def set_param_side_effect(*args: Any) -> None:
             call_count[0] += 1
             if call_count[0] <= 2:
                 raise Exception("503 Service Unavailable")

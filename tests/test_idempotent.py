@@ -374,7 +374,7 @@ class TestFilterUnchangedRowsEdgeCases:
 
     def test_row_shorter_than_id_index(self) -> None:
         """Test handling rows shorter than the id field index."""
-        rows = [
+        rows: list[list[str]] = [
             [],  # Empty row
         ]
         header = ["id", "name"]
