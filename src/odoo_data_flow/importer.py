@@ -436,6 +436,24 @@ def run_import(  # noqa: C901
         f"{stats.get('total_records', 0)} records processed. "
         f"Total time: {elapsed:.2f}s."
     )
+
+    # Check for unaccounted records and warn the user
+    unaccounted = stats.get("unaccounted_records", 0)
+    if unaccounted > 0:
+        Console(stderr=True).print(
+            Panel(
+                f"[yellow]Warning:[/yellow] {unaccounted} records were not accounted "
+                f"for in the import results.\n"
+                f"This may indicate records with duplicate IDs (expected) or "
+                f"records dropped due to malformed data or transient errors.\n"
+                f"Total: {stats.get('total_records', 0)}, "
+                f"Created: {stats.get('created_records', 0)}, "
+                f"Failed: {stats.get('failed_records', 0)}",
+                title="[bold yellow]Record Reconciliation Warning[/bold yellow]",
+                border_style="yellow",
+            )
+        )
+
     if is_truly_successful:
         if final_deferred:  # It was a two-pass import
             summary = (

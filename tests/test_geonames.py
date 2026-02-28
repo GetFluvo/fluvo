@@ -2,6 +2,7 @@
 
 import zipfile
 from pathlib import Path
+from typing import Optional
 from unittest import mock
 
 import polars as pl
@@ -376,7 +377,7 @@ class TestLoadCitiesDownload:
         )
         cities_file = tmp_path / "cities15000.txt"
 
-        def mock_download(dataset: str, cache_dir: Path | None = None) -> Path:
+        def mock_download(dataset: str, cache_dir: Optional[Path] = None) -> Path:
             cities_file.write_text(cities_content, encoding="utf-8")
             return cities_file
 
@@ -432,7 +433,7 @@ class TestLoadAlternateNames:
         alt_content = "1\t2759794\ten\tAmsterdam\t1\t0\t0\t0\t\t\n"
         alt_file = tmp_path / "alternateNamesV2.txt"
 
-        def mock_download(dataset: str, cache_dir: Path | None = None) -> Path:
+        def mock_download(dataset: str, cache_dir: Optional[Path] = None) -> Path:
             alt_file.write_text(alt_content, encoding="utf-8")
             return alt_file
 

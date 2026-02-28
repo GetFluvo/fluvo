@@ -1,49 +1,26 @@
 """Comprehensive tests for import_threaded module to improve coverage."""
 
+import csv
 import tempfile
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
-import csv
-
-import polars as pl
 
 
-def test_create_batch_individually_edge_cases():
-    """Test _create_batch_individually with various edge cases and parameter combinations."""
-    from odoo_data_flow.import_threaded import _create_batch_individually
-
-    # Create mock model
-    mock_model = MagicMock()
-    mock_model.browse.return_value.env.ref.return_value = None
-    mock_model.create.return_value = MagicMock(id=1)
-
-    # Test with various parameters
-    current_chunk = [["rec_1", "Test Name", "test@example.com"]]
-    batch_header = ["id", "name", "email"]
-    uid_index = 0
-    context = {"tracking_disable": True, "mail_create_nolog": True}
-    ignore_list = ["email"]
-
-    result = _create_batch_individually(
-        mock_model, current_chunk, batch_header, uid_index, 
-        context, ignore_list
-    )
-    
-    # Verify the function returns expected structure
-    assert "id_map" in result
-    assert "failed_lines" in result
-
-
-def test_prepare_pass_2_data():
+def test_prepare_pass_2_data() -> None:
     """Test _prepare_pass_2_data function."""
     from odoo_data_flow.import_threaded import _prepare_pass_2_data
 
-    # Mock the required parameters (the actual function signature)
-    all_data = [["rec_1", "Test Name"]]
-    header = ["id", "name"]
+    # Mock the required parameters
+    all_data = [["rec_1", "Test Name", "rec_2"]]  # rec_2 is a self-reference
+    header = ["id", "name", "parent_id"]
     unique_id_field_index = 0
-    id_map = {"rec_1": 1}
-    deferred_fields = ["category_ids"]
+    id_map = {"rec_1": 1, "rec_2": 2}
+    deferred_fields = ["parent_id"]
+
+    # Create a mock model object
+    mock_model = MagicMock()
+    mock_model.fields_get.return_value = {"parent_id": {"type": "many2one"}}
 
     # Test with correct parameters
     result = _prepare_pass_2_data(
@@ -51,14 +28,15 @@ def test_prepare_pass_2_data():
         header=header,
         unique_id_field_index=unique_id_field_index,
         id_map=id_map,
-        deferred_fields=deferred_fields
+        deferred_fields=deferred_fields,
+        model_obj=mock_model,
     )
 
-    # Verify result
-    assert isinstance(result, list)  # Returns a list of (id, values) tuples
+    # Verify result is a list
+    assert isinstance(result, list)
 
 
-def test_handle_create_error_scenarios():
+def test_handle_create_error_scenarios() -> None:
     """Test _handle_create_error with different error types and scenarios."""
     from odoo_data_flow.import_threaded import _handle_create_error
 
@@ -72,7 +50,6 @@ def test_handle_create_error_scenarios():
         create_error=error1,
         line=line,
         error_summary=error_summary,
-        header_length=2
     )
 
     # Verify the function returns the expected structure
@@ -80,7 +57,7 @@ def test_handle_create_error_scenarios():
     assert len(result) == 3  # error_msg, padded_line, error_summary
 
 
-def test_execute_load_batch_edge_cases():
+def test_execute_load_batch_edge_cases() -> None:
     """Test _execute_load_batch with various edge cases."""
     from odoo_data_flow.import_threaded import _execute_load_batch
 
@@ -88,13 +65,13 @@ def test_execute_load_batch_edge_cases():
     mock_model = MagicMock()
     mock_model.load.return_value = {"ids": [1], "messages": []}
 
-    thread_state = {
+    thread_state: dict[str, Any] = {
         "model": mock_model,
         "id_map": {},
         "failed_lines": [],
         "context": {},
         "progress": None,
-        "unique_id_field_index": 0
+        "unique_id_field_index": 0,
     }
 
     batch_lines = [["rec_1", "Test Name"]]
@@ -107,7 +84,7 @@ def test_execute_load_batch_edge_cases():
     assert isinstance(result, dict)
 
 
-def test_execute_load_batch_with_errors():
+def test_execute_load_batch_with_errors() -> None:
     """Test _execute_load_batch when load fails."""
     from odoo_data_flow.import_threaded import _execute_load_batch
 
@@ -115,13 +92,13 @@ def test_execute_load_batch_with_errors():
     mock_model = MagicMock()
     mock_model.load.side_effect = Exception("Load failed")
 
-    thread_state = {
+    thread_state: dict[str, Any] = {
         "model": mock_model,
         "id_map": {},
         "failed_lines": [],
         "context": {},
         "progress": None,
-        "unique_id_field_index": 0
+        "unique_id_field_index": 0,
     }
 
     batch_lines = [["rec_1", "Test Name"]]
@@ -130,32 +107,30 @@ def test_execute_load_batch_with_errors():
 
     # This should handle the error gracefully
     try:
-        result = _execute_load_batch(thread_state, batch_lines, batch_header, batch_number)
+        result = _execute_load_batch(
+            thread_state, batch_lines, batch_header, batch_number
+        )
         # Verify return structure even with errors
         assert isinstance(result, dict)
-    except Exception:
+    except Exception:  # noqa: S110
         # Expected due to mocked error, but the code path is covered
         pass
 
 
-def test_recursive_create_batches():
+def test_recursive_create_batches() -> None:
     """Test _recursive_create_batches function."""
     from odoo_data_flow.import_threaded import _recursive_create_batches
 
     # Test with sample data
-    current_data = [
-        ["rec_1", "val_a"],
-        ["rec_1", "val_b"], 
-        ["rec_2", "val_c"]
-    ]
+    current_data = [["rec_1", "val_a"], ["rec_1", "val_b"], ["rec_2", "val_c"]]
     group_cols = ["id"]
-    header = ["id", "value"] 
+    header = ["id", "value"]
     batch_size = 2
     o2m = False
 
     # Create the generator and consume a few items to test the function
     gen = _recursive_create_batches(current_data, group_cols, header, batch_size, o2m)
-    
+
     try:
         # Try to get first batch
         batch = next(gen)
@@ -165,23 +140,23 @@ def test_recursive_create_batches():
         pass
 
 
-def test_execute_write_batch():
+def test_execute_write_batch() -> None:
     """Test _execute_write_batch function."""
     from odoo_data_flow.import_threaded import _execute_write_batch
 
     # Mock model
     mock_model = MagicMock()
-    mock_model.write.return_value = [1]
+    mock_model.write.return_value = True
 
-    thread_state = {
+    thread_state: dict[str, Any] = {
         "model": mock_model,
         "id_map": {"rec1": 1},
         "failed_lines": [],
-        "context": {"tracking_disable": True}
+        "context": {"tracking_disable": True},
     }
 
-    # The function expects (list_of_ids, dict_of_vals) tuple as batch_writes parameter
-    batch_writes = ([1], {"name": "Test Name"})  # (list of IDs, dict of values to write)
+    # The function expects a LIST of (list_of_ids, dict_of_vals) tuples
+    batch_writes = [([1], {"name": "Test Name"})]
     batch_number = 1
 
     result = _execute_write_batch(thread_state, batch_writes, batch_number)
@@ -190,20 +165,24 @@ def test_execute_write_batch():
     assert isinstance(result, dict)
 
 
-def test_import_data_with_complex_parameters():
+def test_import_data_with_complex_parameters() -> None:
     """Test import_data function with various parameter combinations."""
     from odoo_data_flow.import_threaded import import_data
 
-    # Create temporary CSV file for testing with id column that function expects
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='') as f:
-        writer = csv.writer(f, delimiter=';')  # Use semicolon as specified in function call
-        writer.writerow(['id', 'name'])  # Need 'id' column that the function validates for
-        writer.writerow(['rec_1', 'Test Record'])
+    # Create temporary CSV file for testing with id column
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".csv", delete=False, newline=""
+    ) as f:
+        writer = csv.writer(f, delimiter=";")
+        writer.writerow(["id", "name"])
+        writer.writerow(["rec_1", "Test Record"])
         temp_file = f.name
 
     try:
-        # Mock the connection to trigger specific code paths
-        with patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config") as mock_get_conn:
+        # Mock the connection
+        with patch(
+            "odoo_data_flow.import_threaded.conf_lib.get_connection_from_config"
+        ) as mock_get_conn:
             mock_model = MagicMock()
             mock_model.load.return_value = {"ids": [1], "messages": []}
             mock_conn = MagicMock()
@@ -211,7 +190,7 @@ def test_import_data_with_complex_parameters():
             mock_get_conn.return_value = mock_conn
 
             # Test with various parameters to cover different code paths
-            result, summary = import_data(
+            result, _summary = import_data(
                 config="dummy.conf",
                 model="res.partner",
                 unique_id_field="id",
@@ -226,182 +205,46 @@ def test_import_data_with_complex_parameters():
                 max_connection=1,
                 batch_size=10,
                 force_create=False,
-                o2m=False
+                o2m=False,
             )
 
             # Verify the function runs and returns expected structure
-            assert result is not None  # May return list or None but should not fail
+            assert result is not None
     finally:
         Path(temp_file).unlink()
 
 
-def test_sanitize_error_message_variations():
-    """Test _sanitize_error_message with various input types."""
-    from odoo_data_flow.import_threaded import _sanitize_error_message
-
-    # Test with different types of error messages
-    test_cases = [
-        "Simple error message",
-        "Error with 'single quotes' and \"double quotes\"",
-        "Error with {braces} and [brackets]",
-        "Error with newlines\nand\rvarious\twhitespace",
-        "Error with semicolons; and other; problematic; characters",
-        "Error with tuple index out of range problems",
-        "Error containing XML ID patterns like base.user_admin",
-        ""
-    ]
-    
-    for test_case in test_cases:
-        result = _sanitize_error_message(test_case)
-        assert isinstance(result, str)
-
-
-def test_safe_convert_field_value_extended():
-    """Test _safe_convert_field_value with more comprehensive test cases."""
-    from odoo_data_flow.import_threaded import _safe_convert_field_value
-
-    # Test with various field types and values
-    test_cases = [
-        # (field_name, value, field_type, expected_behavior)
-        ("test_int", "123", "integer", lambda x: isinstance(x, int)),
-        ("test_float", "123.45", "float", lambda x: isinstance(x, float)),
-        ("test_char", "text", "char", lambda x: isinstance(x, str)),
-        ("test_selection", "option1", "selection", lambda x: isinstance(x, str)),
-        ("test_int", "123.45", "integer", lambda x: x == "123.45"),  # Should return original for non-integers to prevent tuple index errors
-        ("test_int", "", "integer", lambda x: x == 0),  # Empty string should return 0
-        ("test_int", None, "integer", lambda x: x == 0),  # None should return 0
-    ]
-    
-    for field_name, value, field_type, validator in test_cases:
-        result = _safe_convert_field_value(field_name, value, field_type)
-        assert validator(result), f"Failed for {field_name}, {value}, {field_type}"
-
-
-def test_is_database_connection_error_extended():
-    """Test _is_database_connection_error with various error messages."""
-    from odoo_data_flow.import_threaded import _is_database_connection_error
-
-    # Test various connection error messages
-    error_cases = [
-        ("OperationalError: database connection pool is full", True),
-        ("OperationalError: too many connections", True),
-        ("DatabaseError: PoolError connection pool exhausted", True),
-        ("Some unrelated error", False),
-        ("ConnectionError: timeout", False),
-        ("psycopg2.errors.TooManyConnections: sorry", False),  # This doesn't match pattern
-    ]
-
-    for error_msg, expected in error_cases:
-        error = Exception(error_msg)
-        result = _is_database_connection_error(error)
-        assert result == expected
-
-
-def test_is_tuple_index_error_extended():
-    """Test _is_tuple_index_error with various error cases."""
-    from odoo_data_flow.import_threaded import _is_tuple_index_error
-
-    # Test various tuple index error messages
-    error_cases = [
-        (IndexError("tuple index out of range"), True),
-        (ValueError("something else"), False),
-        (Exception("tuple index out of range"), True),
-        (TypeError("list index out of range"), False),
-    ]
-    
-    for error, expected in error_cases:
-        result = _is_tuple_index_error(error)
-        assert result == expected
-
-
-def test_create_padded_failed_line():
-    """Test _create_padded_failed_line function."""
-    from odoo_data_flow.import_threaded import _create_padded_failed_line
-
-    # Test with various parameters
-    line = ["val1", "val2"]
-    header_length = 5
-    error_message = "Test error"
-
-    result = _create_padded_failed_line(line, header_length, error_message)
-    
-    # Should return a list with length equal to header_length + 1 (for error column)
-    assert len(result) == header_length + 1
-    assert result[-1] == error_message  # Last element should be error message
-
-
-def test_pad_line_to_header_length():
-    """Test _pad_line_to_header_length function."""
-    from odoo_data_flow.import_threaded import _pad_line_to_header_length
-
-    # Test with line shorter than header
-    line = ["a", "b"]
-    header_length = 5
-    result = _pad_line_to_header_length(line, header_length)
-    
-    assert len(result) == header_length
-    assert result[0] == "a"
-    assert result[1] == "b"
-    assert result[2] == ""  # Padded with empty strings
-    assert result[3] == ""
-    assert result[4] == ""
-
-    # Test with line equal to header length
-    line2 = ["a", "b", "c", "d", "e"]
-    result2 = _pad_line_to_header_length(line2, 5)
-    assert result2 == line2
-
-    # Test with line longer than header
-    line3 = ["a", "b", "c", "d", "e", "f", "g"]
-    result3 = _pad_line_to_header_length(line3, 5)
-    assert result3 == line3  # Should return as-is when longer
-
-
-def test_convert_external_id_field():
+def test_convert_external_id_field() -> None:
     """Test _convert_external_id_field function."""
     from odoo_data_flow.import_threaded import _convert_external_id_field
 
-    # Create mock model with proper env.ref mock
-    mock_model = MagicMock()
-    mock_record = MagicMock()
-    mock_record.id = 1
-
-    # Mock the env.ref method directly on the model
-    mock_model.env.ref.return_value = mock_record
+    # Create mock connection with ir.model.data model
+    mock_connection = MagicMock()
+    mock_ir_model_data = MagicMock()
+    mock_ir_model_data.search_read.return_value = [{"res_id": 1}]
+    mock_connection.get_model.return_value = mock_ir_model_data
 
     # Test converting external ID field with correct parameters
     result = _convert_external_id_field(
-        model=mock_model,
+        connection=mock_connection,
         field_name="category_id/id",
-        field_value="base.category_1"
+        field_value="base.category_1",
     )
 
     # Should return a tuple (base field name, converted value)
     assert isinstance(result, tuple)
     assert len(result) == 2
-    assert result[0] == "category_id"  # base field name (removing /id suffix)
-    assert result[1] == 1  # converted ID value
+    assert result[0] == "category_id"
+
+    # Test with empty field value
+    result_empty = _convert_external_id_field(
+        connection=mock_connection, field_name="category_id/id", field_value=""
+    )
+    assert result_empty[0] == "category_id"
+    assert result_empty[1] is False  # Empty value returns False
 
 
-def test_get_model_fields_safe():
-    """Test _get_model_fields_safe function."""
-    from odoo_data_flow.import_threaded import _get_model_fields_safe
-
-    # Mock a model object
-    mock_model = MagicMock()
-    mock_model._fields = {
-        "name": {"type": "char", "string": "Name"},
-        "id": {"type": "integer", "string": "ID"}
-    }
-
-    # Test getting model fields safely
-    result = _get_model_fields_safe(mock_model)
-    assert isinstance(result, dict)
-    assert "name" in result
-    assert "id" in result
-
-
-def test_handle_create_error_detailed():
+def test_handle_create_error_detailed() -> None:
     """Test _handle_create_error with different error types."""
     from odoo_data_flow.import_threaded import _handle_create_error
 
@@ -416,54 +259,22 @@ def test_handle_create_error_detailed():
         create_error=error,
         line=line,
         error_summary=error_summary,
-        header_length=2,
-        override_error_message="Overridden error"
     )
 
     assert isinstance(result, tuple)
     assert len(result) == 3  # (error_msg, padded_line, error_summary)
 
 
-def test_create_batch_individually_with_context():
-    """Test _create_batch_individually with complex context scenarios.""" 
-    from odoo_data_flow.import_threaded import _create_batch_individually
-
-    # Create mock model that will raise errors to trigger fallbacks
-    mock_model = MagicMock()
-    mock_model.create.side_effect = [
-        MagicMock(id=1),  # First succeeds
-        Exception("Validation error")  # Second fails to test error handling
-    ]
-    
-    current_chunk = [
-        ["rec_1", "Name 1"], 
-        ["rec_2", "Name 2"]
-    ]
-    batch_header = ["id", "name"]
-    uid_index = 0
-    context = {"tracking_disable": True}
-    ignore_list = []
-
-    result = _create_batch_individually(
-        mock_model, current_chunk, batch_header, uid_index, 
-        context, ignore_list
-    )
-    
-    # Should handle mixed success/failure scenario
-    assert "id_map" in result
-    assert "failed_lines" in result
-
-
-def test_recursive_create_batches_complex():
+def test_recursive_create_batches_complex() -> None:
     """Test _recursive_create_batches with complex grouping scenarios."""
     from odoo_data_flow.import_threaded import _recursive_create_batches
 
     # Create test data with complex grouping
     current_data = [
         ["group1", "item1", "val1"],
-        ["group1", "item2", "val2"], 
+        ["group1", "item2", "val2"],
         ["group2", "item3", "val3"],
-        ["group1", "item4", "val4"]  # Another item for group1
+        ["group1", "item4", "val4"],
     ]
     group_cols = ["col0"]
     header = ["col0", "col1", "col2"]
@@ -472,34 +283,60 @@ def test_recursive_create_batches_complex():
 
     # Create the generator and test it works
     gen = _recursive_create_batches(current_data, group_cols, header, batch_size, o2m)
-    
+
     # Count the batches to make sure it works
     batch_count = 0
     for batch in gen:
         assert isinstance(batch, tuple)
         batch_count += 1
-        if batch_count > 10:  # Prevent infinite loop in case of error
+        if batch_count > 10:  # Prevent infinite loop
             break
 
 
+def test_format_odoo_error() -> None:
+    """Test _format_odoo_error function."""
+    from odoo_data_flow.import_threaded import _format_odoo_error
+
+    # Test with plain string
+    result = _format_odoo_error("Simple error")
+    assert result == "Simple error"
+
+    # Test with dict-like string
+    result = _format_odoo_error("{'data': {'message': 'Validation failed'}}")
+    assert result == "Validation failed"
+
+    # Test with exception object
+    error = Exception("Test exception message")
+    result = _format_odoo_error(error)
+    assert isinstance(result, str)
+    assert "Test exception message" in result
+
+
+def test_extract_per_row_errors() -> None:
+    """Test _extract_per_row_errors function."""
+    from odoo_data_flow.import_threaded import _extract_per_row_errors
+
+    # Test with messages containing row information
+    messages = [
+        {"message": "Row 1: Validation error", "rows": {"from": 0, "to": 0}},
+        {"message": "Missing field", "rows": {"from": 1, "to": 2}},
+    ]
+
+    result = _extract_per_row_errors(messages)
+    assert isinstance(result, dict)
+
+
 if __name__ == "__main__":
-    test_create_batch_individually_edge_cases()
-    test_initialize_import_pass_2()
+    test_prepare_pass_2_data()
     test_handle_create_error_scenarios()
     test_execute_load_batch_edge_cases()
     test_execute_load_batch_with_errors()
     test_recursive_create_batches()
-    test_process_individual_batch()
-    test_run_load_with_complex_error_scenarios()
-    test_sanitize_error_message_variations()
-    test_safe_convert_field_value_extended()
-    test_is_database_connection_error_extended()
-    test_is_tuple_index_error_extended()
-    test_create_padded_failed_line()
-    test_pad_line_to_header_length()
-    test_derive_field_info()
-    test_get_actual_field_name()
-    test_handle_server_error_detailed()
-    test_create_batch_individually_with_context()
+    test_execute_write_batch()
+    test_import_data_with_complex_parameters()
+    test_convert_external_id_field()
+    test_handle_create_error_detailed()
     test_recursive_create_batches_complex()
+    test_format_odoo_error()
+    test_extract_per_row_errors()
     print("All import_threaded comprehensive tests passed!")

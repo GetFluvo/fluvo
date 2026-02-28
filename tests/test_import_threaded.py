@@ -1259,8 +1259,10 @@ class TestLoadRecordsIndividuallyEdgeCases:
             mock_model, mock_connection, batch_lines, batch_header, 0, {}, []
         )
 
-        # Serialization errors should not add to failed_lines (retryable)
-        assert len(result["failed_lines"]) == 0
+        # Serialization errors should be tracked in failed_lines (fix for #178)
+        # Previously these were silently dropped, causing record reconciliation issues
+        assert len(result["failed_lines"]) == 1
+        assert "serialization conflict" in result["failed_lines"][0][-1]
 
     def test_load_records_individually_connection_pool_error(self) -> None:
         """Test handling of connection pool exhaustion errors."""

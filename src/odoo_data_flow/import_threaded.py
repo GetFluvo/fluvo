@@ -349,11 +349,17 @@ def _stream_csv_batches(
         current_batch_bytes = 0
         batch_number = 0
 
+        row_number = 0
         for row in reader:
+            row_number += 1
             # Apply column filtering if needed
             if indices_to_keep is not None:
                 if len(row) < max(indices_to_keep) + 1:
-                    # Skip malformed rows
+                    # Skip malformed rows with warning
+                    log.warning(
+                        f"Skipping malformed row {row_number + skip + 1}: "
+                        f"has {len(row)} columns, expected {max(indices_to_keep) + 1}."
+                    )
                     continue
                 row = [row[i] for i in indices_to_keep]
 
@@ -592,14 +598,20 @@ def _prepare_pass_2_data(  # noqa: C901
 
         update_vals = {}
         # Use the pre-calculated map to find the values to write.
-        for field_name, (field_index, is_ext_id_col, is_m2m) in deferred_field_indices.items():
+        for field_name, (
+            field_index,
+            is_ext_id_col,
+            is_m2m,
+        ) in deferred_field_indices.items():
             if field_index < len(row):
                 field_value = row[field_index]
                 if field_value:  # Ensure there is a value
                     # For many2many fields, handle multiple comma-separated values
                     if is_m2m:
                         # Split by comma if multiple values
-                        raw_values = [v.strip() for v in str(field_value).split(",") if v.strip()]
+                        raw_values = [
+                            v.strip() for v in str(field_value).split(",") if v.strip()
+                        ]
                         resolved_ids: list[int] = []
 
                         for raw_val in raw_values:
@@ -628,8 +640,8 @@ def _prepare_pass_2_data(  # noqa: C901
                                         resolved_ids.append(ext_resolved)
                                     else:
                                         log.warning(
-                                            f"Missing m2m reference for '{field_name}': "
-                                            f"'{raw_val}' not found (source_id={source_id})"
+                                            f"Missing m2m ref '{field_name}': "
+                                            f"'{raw_val}' not found (id={source_id})"
                                         )
                             else:
                                 log.warning(
@@ -638,14 +650,14 @@ def _prepare_pass_2_data(  # noqa: C901
                                 )
 
                         if resolved_ids:
-                            # Use Odoo's (6, 0, [ids]) command to replace the m2m relation
+                            # Use Odoo's (6, 0, [ids]) command to replace m2m
                             update_vals[field_name] = [(6, 0, resolved_ids)]
                             log.debug(
                                 f"Resolved many2many '{field_name}': "
                                 f"{len(resolved_ids)} IDs -> {resolved_ids}"
                             )
                     else:
-                        # Non-many2many field: original logic for many2one and other fields
+                        # Non-m2m field: original logic for many2one/other fields
                         # Sanitize field_value to match id_map key format
                         sanitized_field_value = to_xmlid(field_value)
                         related_db_id = id_map.get(sanitized_field_value)
@@ -690,7 +702,7 @@ def _prepare_pass_2_data(  # noqa: C901
                             else:
                                 log.warning(
                                     f"Cannot resolve '{field_name}': '{field_value}' "
-                                    f"not in id_map and no ir.model.data proxy available "
+                                    f"not in id_map, no ir.model.data proxy "
                                     f"(source_id={source_id})"
                                 )
                         else:
@@ -701,8 +713,8 @@ def _prepare_pass_2_data(  # noqa: C901
                             val_len = len(str(field_value))
                             log.debug(
                                 f"Direct value for '{field_name}' "
-                            f"(source={source_id}, len={val_len})"
-                        )
+                                f"(source={source_id}, len={val_len})"
+                            )
 
         if update_vals:
             pass_2_data_to_write.append((db_id, update_vals))
@@ -1359,7 +1371,11 @@ def _load_records_individually(  # noqa: C901
                     f"This is often caused by concurrent processes. "
                     f"Continuing with other records."
                 )
-                # Don't add to failed lines for retryable errors
+                error_message = (
+                    f"Retryable error (serialization conflict) for record "
+                    f"{source_id_str}: {load_error}"
+                )
+                failed_lines.append([*line, error_message])
                 continue
 
             error_message, new_failed_line, error_summary = _handle_create_error(
@@ -3435,12 +3451,32 @@ def import_data(  # noqa: C901
                 fail_handle.close()
 
     overall_success = pass_1_successful and pass_2_successful
+
+    # Get failed records count from pass_1_results
+    failed_records = len(pass_1_results.get("failed_lines", []))
+
     stats = {
         "total_records": record_count,
         "created_records": len(id_map),
+        "failed_records": failed_records,
         "updated_relations": updates_made,
         "id_map": id_map,
     }
+
+    # --- Reconciliation Check ---
+    # Verify that created + failed == total (accounting for duplicates)
+    accounted_records = len(id_map) + failed_records
+    if record_count > 0 and accounted_records < record_count:
+        unaccounted = record_count - accounted_records
+        log.warning(
+            f"Record reconciliation discrepancy detected: "
+            f"{record_count} total records, {len(id_map)} created, "
+            f"{failed_records} failed = {accounted_records} accounted. "
+            f"{unaccounted} records unaccounted for. "
+            f"This may indicate records with duplicate IDs (expected) or "
+            f"records dropped due to malformed data or transient errors."
+        )
+        stats["unaccounted_records"] = unaccounted
 
     # Add idempotent stats if available
     if idempotent_stats:
