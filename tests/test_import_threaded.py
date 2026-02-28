@@ -2486,3 +2486,154 @@ class TestPreparePass2DataMany2Many:
         assert result[0][0] == 101
         assert result[0][1]["parent_id"] == 50  # many2one = integer
         assert result[0][1]["tag_ids"] == [(6, 0, [201, 202])]  # m2m = wrapped
+
+
+class TestPreparePass2DataCrossModelResolution:
+    """Tests for cross-model XML ID resolution in Pass 2 (#179)."""
+
+    def test_cross_model_xml_id_resolution_many2one(self) -> None:
+        """Test that cross-model references are resolved via ir.model.data.
+
+        When a deferred field references another model (e.g., user_id on
+        res.partner references res.users), the value won't be in id_map
+        (which only contains res.partner records). The code should fall
+        back to XML ID resolution via ir.model.data.
+        """
+        # Arrange
+        header = ["id", "name", "user_id/id"]
+        all_data = [
+            ["rec1", "Record 1", "base.user_admin"],
+        ]
+        # id_map only contains records from current model (res.partner)
+        # NOT res.users records
+        id_map = {"rec1": 101}
+        deferred_fields = ["user_id/id"]
+
+        mock_model = MagicMock()
+        mock_model.fields_get.return_value = {
+            "user_id": {"type": "many2one", "relation": "res.users"}
+        }
+
+        # Mock ir.model.data connection for XML ID resolution
+        mock_ir_model_data = MagicMock()
+        mock_ir_model_data.search_read.return_value = [{"res_id": 2}]
+
+        # Mock getting model from connection (code tries conn.model first)
+        mock_connection = MagicMock()
+        mock_connection.model.return_value = mock_ir_model_data
+        mock_model.connection = mock_connection
+
+        # Act
+        result = _prepare_pass_2_data(
+            all_data, header, 0, id_map, deferred_fields, model_obj=mock_model
+        )
+
+        # Assert - user_id should be resolved via XML ID lookup
+        assert len(result) == 1
+        assert result[0][0] == 101  # db_id of the record
+        assert "user_id" in result[0][1]
+        # The value should be the resolved db_id from ir.model.data
+        assert result[0][1]["user_id"] == 2
+
+    def test_cross_model_xml_id_resolution_without_id_suffix(self) -> None:
+        """Test XML ID resolution when column doesn't have /id suffix.
+
+        If the CSV column is named 'state_id' (not 'state_id/id') but
+        contains XML ID values like 'base.state_us_ca', the code should
+        detect this and try XML ID resolution.
+        """
+        # Arrange - column without /id suffix but contains XML ID values
+        header = ["id", "name", "state_id"]
+        all_data = [
+            ["rec1", "Record 1", "base.state_us_ca"],
+        ]
+        id_map = {"rec1": 101}
+        deferred_fields = ["state_id"]  # No /id suffix
+
+        mock_model = MagicMock()
+        mock_model.fields_get.return_value = {
+            "state_id": {"type": "many2one", "relation": "res.country.state"}
+        }
+
+        # Mock ir.model.data - should be called because value contains '.'
+        mock_ir_model_data = MagicMock()
+        mock_ir_model_data.search_read.return_value = [{"res_id": 42}]
+        mock_connection = MagicMock()
+        mock_connection.model.return_value = mock_ir_model_data
+        mock_model.connection = mock_connection
+
+        # Act
+        result = _prepare_pass_2_data(
+            all_data, header, 0, id_map, deferred_fields, model_obj=mock_model
+        )
+
+        # Assert - state_id should be resolved even without /id suffix
+        assert len(result) == 1
+        assert result[0][0] == 101
+        assert "state_id" in result[0][1]
+        assert result[0][1]["state_id"] == 42
+
+    def test_cross_model_many2many_xml_id_resolution(self) -> None:
+        """Test XML ID resolution for many2many cross-model references."""
+        # Arrange
+        header = ["id", "name", "category_ids"]
+        all_data = [
+            ["rec1", "Record 1", "product.cat_electronics,product.cat_phones"],
+        ]
+        id_map = {"rec1": 101}  # category IDs NOT in id_map
+        deferred_fields = ["category_ids"]
+
+        mock_model = MagicMock()
+        mock_model.fields_get.return_value = {
+            "category_ids": {"type": "many2many", "relation": "product.category"}
+        }
+
+        # Mock ir.model.data for XML ID resolution
+        mock_ir_model_data = MagicMock()
+        mock_ir_model_data.search_read.side_effect = [
+            [{"res_id": 10}],  # product.cat_electronics
+            [{"res_id": 20}],  # product.cat_phones
+        ]
+        mock_connection = MagicMock()
+        mock_connection.model.return_value = mock_ir_model_data
+        mock_model.connection = mock_connection
+
+        # Act
+        result = _prepare_pass_2_data(
+            all_data, header, 0, id_map, deferred_fields, model_obj=mock_model
+        )
+
+        # Assert - both category IDs should be resolved
+        assert len(result) == 1
+        assert result[0][0] == 101
+        assert "category_ids" in result[0][1]
+        assert result[0][1]["category_ids"] == [(6, 0, [10, 20])]
+
+    def test_value_without_dot_not_treated_as_xml_id(self) -> None:
+        """Test that values without dots are not treated as XML IDs.
+
+        If a deferred field value doesn't contain a dot (e.g., it's base64
+        image data), it should be used directly, not resolved as XML ID.
+        """
+        # Arrange - deferred field with non-XML ID value
+        header = ["id", "name", "image_data"]
+        all_data = [
+            ["rec1", "Record 1", "SGVsbG8gV29ybGQ="],  # base64 without dots
+        ]
+        id_map = {"rec1": 101}
+        deferred_fields = ["image_data"]
+
+        mock_model = MagicMock()
+        mock_model.fields_get.return_value = {
+            "image_data": {"type": "binary"}
+        }
+
+        # Act
+        result = _prepare_pass_2_data(
+            all_data, header, 0, id_map, deferred_fields, model_obj=mock_model
+        )
+
+        # Assert - value should be used directly (not resolved)
+        assert len(result) == 1
+        assert result[0][0] == 101
+        assert result[0][1]["image_data"] == "SGVsbG8gV29ybGQ="
