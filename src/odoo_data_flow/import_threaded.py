@@ -643,6 +643,25 @@ def _prepare_pass_2_data(  # noqa: C901
                                             f"Missing m2m ref '{field_name}': "
                                             f"'{raw_val}' not found (id={source_id})"
                                         )
+                            elif "." in str(raw_val) and ir_model_data_proxy:
+                                # Not in id_map, but looks like XML ID - try resolution
+                                not_in_idmap += 1
+                                if raw_val in external_id_cache:
+                                    cache_hits += 1
+                                    ext_resolved = external_id_cache[raw_val]
+                                else:
+                                    rpc_lookups += 1
+                                    ext_resolved = _resolve_external_id_for_pass2(
+                                        ir_model_data_proxy, raw_val
+                                    )
+                                    external_id_cache[raw_val] = ext_resolved
+                                if ext_resolved:
+                                    resolved_ids.append(ext_resolved)
+                                else:
+                                    log.warning(
+                                        f"Missing m2m ref '{field_name}': "
+                                        f"'{raw_val}' not found (id={source_id})"
+                                    )
                             else:
                                 log.warning(
                                     f"Cannot resolve m2m '{field_name}': '{raw_val}' "
@@ -706,15 +725,44 @@ def _prepare_pass_2_data(  # noqa: C901
                                     f"(source_id={source_id})"
                                 )
                         else:
-                            # Non-relational deferred field (e.g., image_1920)
-                            # Not in id_map and not an external ID column
-                            # Use value directly - likely base64 binary data
-                            update_vals[field_name] = field_value
-                            val_len = len(str(field_value))
-                            log.debug(
-                                f"Direct value for '{field_name}' "
-                                f"(source={source_id}, len={val_len})"
-                            )
+                            # Not marked as external ID column, but check if
+                            # value looks like an XML ID (contains module.name)
+                            # This handles cases where column isn't named /id
+                            # but contains XML ID values
+                            if "." in str(field_value) and ir_model_data_proxy:
+                                # Looks like XML ID, try resolution
+                                not_in_idmap += 1
+                                if field_value in external_id_cache:
+                                    cache_hits += 1
+                                    resolved_id = external_id_cache[field_value]
+                                else:
+                                    rpc_lookups += 1
+                                    resolved_id = _resolve_external_id_for_pass2(
+                                        ir_model_data_proxy, field_value
+                                    )
+                                    external_id_cache[field_value] = resolved_id
+
+                                if resolved_id:
+                                    update_vals[field_name] = resolved_id
+                                    log.debug(
+                                        f"Resolved XML ID '{field_name}': "
+                                        f"'{field_value}' -> db_id {resolved_id}"
+                                    )
+                                else:
+                                    log.warning(
+                                        f"Cannot resolve '{field_name}': "
+                                        f"'{field_value}' looks like XML ID but "
+                                        f"not found (source_id={source_id})"
+                                    )
+                            else:
+                                # Non-relational deferred field (e.g., image_1920)
+                                # Use value directly - likely base64 binary data
+                                update_vals[field_name] = field_value
+                                val_len = len(str(field_value))
+                                log.debug(
+                                    f"Direct value for '{field_name}' "
+                                    f"(source={source_id}, len={val_len})"
+                                )
 
         if update_vals:
             pass_2_data_to_write.append((db_id, update_vals))
