@@ -596,7 +596,7 @@ def _prepare_pass_2_data(  # noqa: C901
         if not db_id:
             continue
 
-        update_vals = {}
+        update_vals: dict[str, Any] = {}
         # Use the pre-calculated map to find the values to write.
         for field_name, (
             field_index,
