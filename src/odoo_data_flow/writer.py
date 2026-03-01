@@ -137,15 +137,10 @@ def run_write(
         log.warning("No data rows found in the source file. Nothing to write.")
         return
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_filename = model.replace(".", "_")
-
-    if is_fail_run:
-        fail_output_file = (
-            Path(filename).parent / f"{model_filename}_{timestamp}_write_failed.csv"
-        )
-    else:
-        fail_output_file = Path(filename).parent / f"{model_filename}_write_fail.csv"
+    # Always use the same fail file name so it gets overwritten instead of
+    # accumulating timestamped copies (#182)
+    fail_output_file = Path(filename).parent / f"{model_filename}_write_fail.csv"
 
     log.info(f"Target model: {model}")
     log.info(

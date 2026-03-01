@@ -32,11 +32,15 @@ class TestFilenameUtils:
         assert _infer_model_from_filename("res_users_123.csv") == "res.users"
 
     def test_get_fail_filename_recovery_mode(self) -> None:
-        """Tests that _get_fail_filename creates a timestamped name in fail mode."""
+        """Tests that _get_fail_filename returns same name regardless of mode (#182).
+
+        The fail file is always the same name so it gets overwritten instead of
+        accumulating timestamped copies.
+        """
         filename = _get_fail_filename("res.partner", is_fail_run=True)
-        assert "res_partner" in filename
-        assert "failed" in filename
-        assert any(char.isdigit() for char in filename)
+        assert filename == "res_partner_fail.csv"
+        # Verify same result regardless of is_fail_run flag
+        assert _get_fail_filename("res.partner", False) == filename
 
 
 class TestEnvFromConfig:

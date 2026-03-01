@@ -48,21 +48,19 @@ def _infer_model_from_filename(filename: str) -> Optional[str]:
     return None
 
 
-def _get_fail_filename(model: str, is_fail_run: bool) -> str:
+def _get_fail_filename(model: str, is_fail_run: bool = False) -> str:
     """Generates a standardized filename for failed records.
 
     Args:
         model (str): The Odoo model name being imported.
-        is_fail_run (bool): If True, indicates a recovery run, and a
-            timestamp will be added to the filename.
+        is_fail_run (bool): Unused, kept for API compatibility.
+            The fail file is always the same name so it gets overwritten
+            instead of accumulating timestamped copies (#182).
 
     Returns:
         str: The generated filename for the fail file.
     """
     model_filename = model.replace(".", "_")
-    if is_fail_run:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return f"{model_filename}_{timestamp}_failed.csv"
     return f"{model_filename}_fail.csv"
 
 
@@ -198,7 +196,12 @@ def run_import(  # noqa: C901
     env_name = _get_env_from_config(config)
     input_file_dir = Path(filename).resolve().parent
     if env_name:
-        env_output_dir = input_file_dir / env_name
+        # Avoid creating nested directories if input is already in env directory
+        # e.g., data/prod/file.csv with env_name="prod" -> data/prod/ (not data/prod/prod/)
+        if input_file_dir.name == env_name:
+            env_output_dir = input_file_dir
+        else:
+            env_output_dir = input_file_dir / env_name
     else:
         env_output_dir = input_file_dir
 

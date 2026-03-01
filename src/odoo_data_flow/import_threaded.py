@@ -1198,6 +1198,22 @@ def _handle_create_error(  # noqa C901
         error_message = f"Tuple unpacking error in row {i + 1}: {create_error}"
         if "Fell back to" in error_summary:
             error_summary = "Tuple unpacking error detected"
+    # Handle "already exists" patterns - often occurs when re-importing (#181)
+    elif (
+        "duplicate key" in error_str_lower
+        or "unique constraint" in error_str_lower
+        or "already exists" in error_str_lower
+        or "creates a cycle" in error_str_lower
+        or "circular" in error_str_lower
+    ):
+        error_message = (
+            f"Record may already exist (row {i + 1}): {create_error}. "
+            f"Consider using --skip-existing to skip existing records."
+        )
+        if "Fell back to" in error_summary:
+            error_summary = (
+                "Possible duplicate/existing records. Use --skip-existing to skip them."
+            )
     else:
         error_message = error_str.replace("\n", " | ")
         if "invalid field" in error_str_lower and "/id" in error_str_lower:
