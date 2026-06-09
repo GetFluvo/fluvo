@@ -1,20 +1,33 @@
+/* Fluvo brand palette (matches the logo / favicon). */
 :root {
-    --color-brass: #b08d57; /* gradient start */
-    --color-brass-dark: #8b6a3a; /* gradient end */
-    --color-teal: #008080;
-    --color-teal-light: #20b2aa;
+    --color-gold: #f0c154; /* gold gradient start */
+    --color-gold-dark: #e5a420; /* gold gradient end */
+    --color-teal: #177599; /* teal gradient end (deep) */
+    --color-teal-light: #34a6bc; /* teal gradient start (light) */
 
-    /* Derived */
     --color-fluvo-gold: linear-gradient(
         135deg,
-        var(--color-brass),
-        var(--color-brass-dark)
+        var(--color-gold),
+        var(--color-gold-dark)
     );
-    --color-fluvo-blue: linear-gradient(
+    --color-fluvo-teal: linear-gradient(
         135deg,
-        var(--color-teal),
-        var(--color-teal-light)
+        var(--color-teal-light),
+        var(--color-teal)
     );
+}
+
+/* Brand the shibuya theme: override its accent/link variables with Fluvo teal.
+   This file is loaded after the theme CSS, so these win. */
+:root,
+html[data-theme="light"] {
+    --sy-c-link: #177599;
+    --sy-c-link-hover: #008080;
+}
+
+html[data-theme="dark"] {
+    --sy-c-link: #34a6bc;
+    --sy-c-link-hover: #20b2aa;
 }
 
 /* Logo sizing in header */
