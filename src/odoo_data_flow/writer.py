@@ -4,7 +4,6 @@ This module contains the high-level logic for orchestrating the 'write' process.
 """
 
 import csv
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -92,7 +91,6 @@ def run_write(
     log.info("Starting data write process from file...")
 
     source_file = filename
-    is_fail_run = fail
 
     if fail:
         model_filename = model.replace(".", "_")

@@ -11,7 +11,6 @@ import os
 import re
 import tempfile
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, Union, cast
 
@@ -198,8 +197,8 @@ def run_import(  # noqa: C901
     env_name = _get_env_from_config(config)
     input_file_dir = Path(filename).resolve().parent
     if env_name:
-        # Avoid creating nested directories if input is already in env directory
-        # e.g., data/prod/file.csv with env_name="prod" -> data/prod/ (not data/prod/prod/)
+        # Avoid nested directories if input is already in env directory
+        # e.g., data/prod/file.csv with env="prod" -> data/prod/ not data/prod/prod/
         if input_file_dir.name == env_name:
             env_output_dir = input_file_dir
         else:

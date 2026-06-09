@@ -2624,9 +2624,7 @@ class TestPreparePass2DataCrossModelResolution:
         deferred_fields = ["image_data"]
 
         mock_model = MagicMock()
-        mock_model.fields_get.return_value = {
-            "image_data": {"type": "binary"}
-        }
+        mock_model.fields_get.return_value = {"image_data": {"type": "binary"}}
 
         # Act
         result = _prepare_pass_2_data(

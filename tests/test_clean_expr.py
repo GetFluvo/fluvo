@@ -765,3 +765,63 @@ class TestCompanySuffixConstant:
         assert "gmbh" in clean_expr.COMPANY_SUFFIX_CANONICAL
         assert "ltd" in clean_expr.COMPANY_SUFFIX_CANONICAL
         assert "llc" in clean_expr.COMPANY_SUFFIX_CANONICAL
+
+
+class TestSanitizeNewlines:
+    """Tests for sanitize_newlines function (#187)."""
+
+    def test_sanitize_unix_newlines(self) -> None:
+        """Test sanitization of Unix newlines (\\n)."""
+        result = apply_expr(
+            clean_expr.sanitize_newlines("col"), "Line 1\nLine 2\nLine 3"
+        )
+        assert result == "Line 1 | Line 2 | Line 3"
+
+    def test_sanitize_windows_newlines(self) -> None:
+        """Test sanitization of Windows newlines (\\r\\n)."""
+        result = apply_expr(
+            clean_expr.sanitize_newlines("col"), "Line 1\r\nLine 2\r\nLine 3"
+        )
+        assert result == "Line 1 | Line 2 | Line 3"
+
+    def test_sanitize_carriage_returns(self) -> None:
+        """Test sanitization of carriage returns (\\r)."""
+        result = apply_expr(clean_expr.sanitize_newlines("col"), "Line 1\rLine 2")
+        assert result == "Line 1 | Line 2"
+
+    def test_sanitize_mixed_newlines(self) -> None:
+        """Test sanitization of mixed newline types."""
+        result = apply_expr(clean_expr.sanitize_newlines("col"), "A\nB\r\nC\rD")
+        assert result == "A | B | C | D"
+
+    def test_sanitize_custom_replacement(self) -> None:
+        """Test sanitization with custom replacement string."""
+        result = apply_expr(
+            clean_expr.sanitize_newlines("col", " - "), "Line 1\nLine 2"
+        )
+        assert result == "Line 1 - Line 2"
+
+    def test_sanitize_empty_replacement(self) -> None:
+        """Test sanitization with empty replacement (removes newlines)."""
+        result = apply_expr(clean_expr.sanitize_newlines("col", ""), "Line 1\nLine 2")
+        assert result == "Line 1Line 2"
+
+    def test_sanitize_no_newlines(self) -> None:
+        """Test that strings without newlines are unchanged."""
+        result = apply_expr(
+            clean_expr.sanitize_newlines("col"), "Normal text without newlines"
+        )
+        assert result == "Normal text without newlines"
+
+    def test_sanitize_none_value(self) -> None:
+        """Test sanitization with None value."""
+        result = apply_expr(clean_expr.sanitize_newlines("col"), None)
+        assert result is None
+
+    def test_sanitize_real_world_example(self) -> None:
+        """Test with real-world example from issue #187."""
+        text = "[1A06120023 / AK45] CMP Pad\nCustomer GLOBALFOUNDRIES Dresden"
+        result = apply_expr(clean_expr.sanitize_newlines("col"), text)
+        assert (
+            result == "[1A06120023 / AK45] CMP Pad | Customer GLOBALFOUNDRIES Dresden"
+        )

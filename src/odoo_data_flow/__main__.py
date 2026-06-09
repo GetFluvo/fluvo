@@ -1653,6 +1653,13 @@ def write_cmd(connection_file: str, **kwargs: Any) -> None:
     "Requires admin rights. Use with --all-companies to export all records "
     "across companies regardless of restrictive record rules.",
 )
+@click.option(
+    "--sanitize-newlines",
+    default=None,
+    help="Replace embedded newlines in text fields with this string. "
+    'Default: None (no sanitization). Recommended: " | " to prevent '
+    "CSV corruption from embedded newlines in text/char/html fields.",
+)
 def export_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     """Runs the data export process."""
     # Handle protocol option - create config dict if protocol specified

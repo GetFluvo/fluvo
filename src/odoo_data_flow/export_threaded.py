@@ -24,6 +24,7 @@ from rich.progress import (
 )
 
 from .lib import cache, conf_lib
+from .lib.clean_expr import sanitize_newlines as sanitize_newlines_expr
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch
 from .lib.odoo_lib import ODOO_TO_POLARS_MAP
@@ -414,8 +415,18 @@ def _clean_and_transform_batch(
     df: pl.DataFrame,
     field_types: dict[str, str],
     polars_schema: dict[str, pl.DataType],
+    sanitize_newlines: Optional[str] = None,
 ) -> pl.DataFrame:
-    """Runs a multi-stage cleaning and transformation pipeline on a DataFrame."""
+    """Runs a multi-stage cleaning and transformation pipeline on a DataFrame.
+
+    Args:
+        df: The DataFrame to clean and transform.
+        field_types: Mapping of field names to Odoo field types.
+        polars_schema: Target Polars schema for the DataFrame.
+        sanitize_newlines: If provided, replace newlines in string columns with
+            this string (e.g., " | "). Prevents CSV corruption from embedded
+            newlines in text fields. Default: None (no sanitization).
+    """
     # Step 1: Convert any list-type or object-type columns to strings FIRST.
     transform_exprs = []
     for col_name in df.columns:
@@ -423,6 +434,20 @@ def _clean_and_transform_batch(
             transform_exprs.append(pl.col(col_name).cast(pl.String))
     if transform_exprs:
         df = df.with_columns(transform_exprs)
+
+    # Step 1.5: Sanitize newlines in string columns if requested (#187)
+    if sanitize_newlines is not None:
+        string_field_types = {"char", "text", "html", "selection"}
+        sanitize_exprs = []
+        for field_name, field_type in field_types.items():
+            if field_name in df.columns and field_type in string_field_types:
+                sanitize_exprs.append(
+                    sanitize_newlines_expr(field_name, sanitize_newlines).alias(
+                        field_name
+                    )
+                )
+        if sanitize_exprs:
+            df = df.with_columns(sanitize_exprs)
 
     # Step 2: Now that lists are gone, it's safe to clean up 'False' values.
     false_cleaning_exprs = []
@@ -536,11 +561,17 @@ def _process_export_batches(  # noqa: C901
     is_resuming: bool,
     encoding: str,
     enrich_main_xml_id: bool = False,
+    sanitize_newlines: Optional[str] = None,
 ) -> Optional[pl.DataFrame]:
     """Processes exported batches.
 
     Uses streaming for large files if requested,
     otherwise concatenates in memory for best performance.
+
+    Args:
+        sanitize_newlines: If provided, replace newlines in string columns with
+            this string (e.g., " | "). Prevents CSV corruption from embedded
+            newlines in text fields.
     """
     field_types = {k: v.get("type", "char") for k, v in fields_info.items()}
     polars_schema: dict[str, pl.DataType] = {
@@ -588,7 +619,7 @@ def _process_export_batches(  # noqa: C901
                         continue
 
                     final_batch_df = _clean_and_transform_batch(
-                        df, field_types, polars_schema
+                        df, field_types, polars_schema, sanitize_newlines
                     )
 
                     if enrich_main_xml_id:
@@ -835,8 +866,14 @@ def export_data(
     technical_names: bool = False,
     streaming: bool = False,
     resume_session: Optional[str] = None,
+    sanitize_newlines: Optional[str] = None,
 ) -> tuple[bool, Optional[str], int, Optional[pl.DataFrame]]:
-    """Exports data from an Odoo model, with support for resumable sessions."""
+    """Exports data from an Odoo model, with support for resumable sessions.
+
+    Args:
+        sanitize_newlines: If provided, replace newlines in text fields with this
+            string (e.g., " | "). Prevents CSV corruption from embedded newlines.
+    """
     session_id = resume_session or cache.generate_session_id(model, domain, header)
     session_dir = cache.get_session_dir(session_id)
     if not session_dir:
@@ -903,6 +940,7 @@ def export_data(
         is_resuming=is_resuming,
         encoding=encoding,
         enrich_main_xml_id=enrich_main_xml_id,
+        sanitize_newlines=sanitize_newlines,
     )
 
     # --- Finalization and Cleanup ---

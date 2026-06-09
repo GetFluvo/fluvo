@@ -63,6 +63,7 @@ __all__ = [
     "regex_sub",
     "remove",
     "replace",
+    "sanitize_newlines",
     # String cleaners
     "strip",
     "title",
@@ -454,6 +455,28 @@ def regex_sub(field: str, pattern: str, replacement: str) -> pl.Expr:
         Polars expression.
     """
     return pl.col(field).cast(pl.String).str.replace_all(pattern, replacement)
+
+
+def sanitize_newlines(field: str, replacement: str = " | ") -> pl.Expr:
+    """Replace newline characters with a safe delimiter.
+
+    This prevents embedded newlines in text fields from corrupting CSV structure
+    during export. Handles both Unix (\\n) and Windows (\\r\\n) line endings.
+
+    Args:
+        field: Source column name.
+        replacement: String to replace newlines with. Default: " | "
+
+    Returns:
+        Polars expression with newlines replaced.
+    """
+    return (
+        pl.col(field)
+        .cast(pl.String)
+        .str.replace_all("\r\n", replacement, literal=True)
+        .str.replace_all("\n", replacement, literal=True)
+        .str.replace_all("\r", replacement, literal=True)
+    )
 
 
 def truncate(field: str, max_length: int) -> pl.Expr:

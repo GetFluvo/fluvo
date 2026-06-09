@@ -43,8 +43,14 @@ def run_export(
     technical_names: bool = False,
     streaming: bool = False,
     resume_session: Optional[str] = None,
+    sanitize_newlines: Optional[str] = None,
 ) -> None:
-    """Orchestrates the data export process."""
+    """Orchestrates the data export process.
+
+    Args:
+        sanitize_newlines: If provided, replace embedded newlines in text fields
+            with this string (e.g., " | "). Prevents CSV corruption.
+    """
     log.info(f"Starting export for model '{model}'...")
 
     try:
@@ -88,6 +94,7 @@ def run_export(
         technical_names=technical_names,
         streaming=streaming,
         resume_session=resume_session,
+        sanitize_newlines=sanitize_newlines,
     )
 
     if success:

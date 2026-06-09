@@ -11,6 +11,7 @@ from polars.testing import assert_frame_equal
 
 from odoo_data_flow.export_threaded import (
     RPCThreadExport,
+    _clean_and_transform_batch,
     _clean_batch,
     _initialize_export,
     _process_export_batches,
@@ -1348,3 +1349,88 @@ class TestExportData:
             schema={".id": pl.Int64, "line_ids/id": pl.String},
         )
         assert_frame_equal(result_df, expected_df)
+
+
+class TestCleanAndTransformBatchNewlineSanitization:
+    """Tests for _clean_and_transform_batch with newline sanitization (#187)."""
+
+    def test_sanitize_newlines_in_char_field(self) -> None:
+        """Test that newlines in char fields are sanitized."""
+        df = pl.DataFrame({"name": ["Line 1\nLine 2"], "count": [1]})
+        field_types = {"name": "char", "count": "integer"}
+        schema: dict[str, pl.DataType] = {"name": pl.String(), "count": pl.Int64()}
+
+        result = _clean_and_transform_batch(
+            df, field_types, schema, sanitize_newlines=" | "
+        )
+
+        assert result["name"][0] == "Line 1 | Line 2"
+        assert result["count"][0] == 1
+
+    def test_sanitize_newlines_in_text_field(self) -> None:
+        """Test that newlines in text fields are sanitized."""
+        df = pl.DataFrame({"description": ["First\r\nSecond\nThird"]})
+        field_types = {"description": "text"}
+        schema: dict[str, pl.DataType] = {"description": pl.String()}
+
+        result = _clean_and_transform_batch(
+            df, field_types, schema, sanitize_newlines=" - "
+        )
+
+        assert result["description"][0] == "First - Second - Third"
+
+    def test_sanitize_newlines_in_html_field(self) -> None:
+        """Test that newlines in html fields are sanitized."""
+        df = pl.DataFrame({"body": ["<p>Line 1</p>\n<p>Line 2</p>"]})
+        field_types = {"body": "html"}
+        schema: dict[str, pl.DataType] = {"body": pl.String()}
+
+        result = _clean_and_transform_batch(
+            df, field_types, schema, sanitize_newlines=" "
+        )
+
+        assert result["body"][0] == "<p>Line 1</p> <p>Line 2</p>"
+
+    def test_no_sanitization_when_none(self) -> None:
+        """Test that no sanitization occurs when sanitize_newlines is None."""
+        df = pl.DataFrame({"name": ["Line 1\nLine 2"]})
+        field_types = {"name": "char"}
+        schema: dict[str, pl.DataType] = {"name": pl.String()}
+
+        result = _clean_and_transform_batch(
+            df, field_types, schema, sanitize_newlines=None
+        )
+
+        assert result["name"][0] == "Line 1\nLine 2"
+
+    def test_no_sanitization_for_non_string_fields(self) -> None:
+        """Test that non-string fields are not affected by sanitization."""
+        df = pl.DataFrame({"name": ["Test"], "count": [42], "active": [True]})
+        field_types = {"name": "char", "count": "integer", "active": "boolean"}
+        schema: dict[str, pl.DataType] = {
+            "name": pl.String(),
+            "count": pl.Int64(),
+            "active": pl.Boolean(),
+        }
+
+        result = _clean_and_transform_batch(
+            df, field_types, schema, sanitize_newlines=" | "
+        )
+
+        assert result["name"][0] == "Test"
+        assert result["count"][0] == 42
+        assert result["active"][0] is True
+
+    def test_real_world_example_from_issue(self) -> None:
+        """Test with the real-world example from issue #187."""
+        text = "[1A06120023 / AK45] CMP Pad Conditioner\nCustomer GLOBALFOUNDRIES"
+        df = pl.DataFrame({"order_line_name": [text]})
+        field_types = {"order_line_name": "char"}
+        schema: dict[str, pl.DataType] = {"order_line_name": pl.String()}
+
+        result = _clean_and_transform_batch(
+            df, field_types, schema, sanitize_newlines=" | "
+        )
+
+        expected = "[1A06120023 / AK45] CMP Pad Conditioner | Customer GLOBALFOUNDRIES"
+        assert result["order_line_name"][0] == expected
