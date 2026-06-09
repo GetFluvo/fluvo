@@ -299,6 +299,25 @@ def run_import(  # noqa: C901
             )
             final_deferred = [f for f in final_deferred if f not in blocked]
 
+    # Guard against --groupby on a deferred field (#185/#186). A deferred field is
+    # not written in Pass 1, so partitioning Pass-1 batches by it is meaningless and
+    # silently breaks Pass-2 relation resolution. Drop the conflicting column(s)
+    # from groupby with a warning rather than producing undefined behavior.
+    if groupby and final_deferred:
+
+        def _base(field: str) -> str:
+            return field.replace("/.id", "").replace("/id", "")
+
+        deferred_bases = {_base(f) for f in final_deferred}
+        conflicting = [g for g in groupby if _base(g) in deferred_bases]
+        if conflicting:
+            log.warning(
+                f"Field(s) {conflicting} are in both --groupby and the deferred set. "
+                f"A deferred field is not imported in Pass 1, so it cannot be grouped "
+                f"on; removing it from --groupby. It is still resolved in Pass 2."
+            )
+            groupby = [g for g in groupby if g not in conflicting] or None
+
     final_uid_field = unique_id_field or import_plan.get("unique_id_field") or "id"
     # Create environment-specific directory if it doesn't exist
     if env_name and not env_output_dir.exists():

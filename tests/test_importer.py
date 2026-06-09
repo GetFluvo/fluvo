@@ -133,6 +133,49 @@ class TestFailFilePath:
 
     @patch("fluvo.importer.import_threaded.import_data")
     @patch("fluvo.importer._run_preflight_checks")
+    def test_groupby_deferred_conflict_is_stripped(
+        self,
+        mock_preflight: MagicMock,
+        mock_import_data: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """A field in both --groupby and --deferred-fields is dropped from groupby.
+
+        Regression for #185/#186: grouping Pass-1 batches by a deferred field is
+        meaningless and silently breaks Pass-2 resolution.
+        """
+        source = tmp_path / "res_partner.csv"
+        source.write_text("id;name;parent_id/id\n1;Test;\n")
+        mock_preflight.return_value = True
+        mock_import_data.return_value = (True, {"total_records": 1})
+
+        run_import(
+            config="test.conf",
+            filename=str(source),
+            model="res.partner",
+            deferred_fields=["parent_id/id"],
+            auto_defer=False,
+            unique_id_field=None,
+            no_preflight_checks=False,
+            headless=False,
+            worker=1,
+            batch_size=10,
+            skip=0,
+            fail=False,
+            separator=";",
+            ignore=None,
+            context="{}",
+            encoding="utf-8",
+            o2m=False,
+            groupby=["parent_id/id"],
+        )
+
+        # The conflicting deferred field must have been removed from groupby.
+        split = mock_import_data.call_args.kwargs.get("split_by_cols")
+        assert split is None
+
+    @patch("fluvo.importer.import_threaded.import_data")
+    @patch("fluvo.importer._run_preflight_checks")
     def test_fail_file_no_env_uses_same_dir(
         self,
         mock_preflight: MagicMock,
