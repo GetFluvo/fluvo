@@ -447,6 +447,60 @@ def _validate_header(  # noqa: C901
     return True
 
 
+def _detect_groupby_column(
+    df: "pl.DataFrame",
+    header: list[str],
+    odoo_fields: dict[str, Any],
+    model: str,
+) -> Optional[str]:
+    """Pick a many2one column to group by, to reduce concurrent-write contention.
+
+    Records that write to the same related record (e.g. a shared company/category)
+    can deadlock when imported in parallel. Grouping such records into the same
+    partition serializes those writes without losing cross-group parallelism.
+
+    Returns the header column name of the non-self many2one with the highest
+    duplication (most shared targets) that still yields more than one group, or
+    None when no column would meaningfully help.
+
+    Args:
+        df: The source data (string columns).
+        header: The source header.
+        odoo_fields: fields_get metadata for the model.
+        model: The target model (self-references are skipped; handled by deferral).
+
+    Returns:
+        The chosen header column name, or None.
+    """
+    n_rows = df.height
+    if n_rows < 2:
+        return None
+    best: Optional[str] = None
+    best_dup = 0.0
+    for field_name in header:
+        clean = field_name.replace("/id", "")
+        info = odoo_fields.get(clean)
+        if not info or info.get("type") != "many2one":
+            continue
+        if info.get("relation") == model:
+            continue  # self-references handled by two-pass deferral / sort
+        if field_name not in df.columns:
+            continue
+        col = df.get_column(field_name)
+        non_null = col.filter(col.is_not_null() & (col != ""))
+        if non_null.len() < 2:
+            continue
+        n_unique = non_null.n_unique()
+        # Need >1 group (else no parallelism) and not all-unique (else no contention).
+        if n_unique < 2 or n_unique >= non_null.len():
+            continue
+        dup = non_null.len() / n_unique
+        if dup > best_dup:
+            best_dup, best = dup, field_name
+    # Only worth grouping when there is meaningful duplication (>=2 rows/target).
+    return best if best_dup >= 2.0 else None
+
+
 def _plan_deferrals_and_strategies(  # noqa: C901
     header: list[str],
     odoo_fields: dict[str, Any],
@@ -518,6 +572,20 @@ def _plan_deferrals_and_strategies(  # noqa: C901
     # Always expose required relational fields so the importer can guard against
     # an explicit --deferred-fields that would otherwise break Pass 1.
     import_plan["required_relational_fields"] = required_relational_fields
+
+    # Auto-groupby: pick a many2one column to partition by, reducing concurrent
+    # writes to shared related records (deadlock avoidance). Only when enabled and
+    # the user did not pass an explicit --groupby.
+    if kwargs.get("auto_groupby") and not kwargs.get("groupby"):
+        groupby_col = _detect_groupby_column(df, header, odoo_fields, model)
+        if groupby_col:
+            import_plan["groupby"] = [groupby_col]
+            log.info(
+                f"Auto-groupby: partitioning by '{groupby_col}' to reduce "
+                f"concurrent-write contention."
+            )
+        else:
+            log.info("Auto-groupby: no column with enough duplication to help.")
 
     if deferrable_fields:
         if auto_defer:
