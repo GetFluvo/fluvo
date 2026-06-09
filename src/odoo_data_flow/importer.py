@@ -152,6 +152,8 @@ def run_import(  # noqa: C901
     skip_existing: bool = False,
     adaptive_throttle: bool = True,
     max_batch_bytes: int = 5 * 1024 * 1024,
+    resolve_relations: Optional[list[dict[str, Any]]] = None,
+    auto_clean: bool = False,
 ) -> Optional[dict[str, int]]:
     """Main entry point for the import command, handling all orchestration.
 
@@ -342,6 +344,8 @@ def run_import(  # noqa: C901
             skip_existing=skip_existing,
             adaptive_throttle=adaptive_throttle,
             max_batch_bytes=max_batch_bytes,
+            resolve_relations=resolve_relations,
+            auto_clean=auto_clean,
         )
     finally:
         if (

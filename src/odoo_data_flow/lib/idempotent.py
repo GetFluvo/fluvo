@@ -7,7 +7,20 @@ them during import, making imports idempotent and more efficient.
 from dataclasses import dataclass
 from typing import Any, Optional
 
+import polars as pl
+
 from ..logging_config import log
+
+
+def _norm_str(value: Any) -> str:
+    """Normalize a value to its comparison string (None/empty -> "").
+
+    Mirrors :func:`normalize_value` + :func:`compare_values`: both-None and
+    one-None cases reduce to string equality against the "" sentinel, so a single
+    normalized-string comparison reproduces ``compare_values`` exactly.
+    """
+    norm = normalize_value(value)
+    return "" if norm is None else str(norm)
 
 
 @dataclass
@@ -217,35 +230,15 @@ def find_unchanged_records(
     return changed, unchanged, stats
 
 
-def filter_unchanged_rows(  # noqa: C901
+def _filter_unchanged_pyloop(  # noqa: C901
     rows: list[list[Any]],
     header: list[str],
     existing_records: dict[str, dict[str, Any]],
-    id_field: str = "id",
-    compare_fields: Optional[list[str]] = None,
+    id_field: str,
+    compare_fields: Optional[list[str]],
 ) -> tuple[list[list[Any]], IdempotentStats]:
-    """Filter out unchanged rows from import data.
-
-    This is the main entry point for idempotent import filtering.
-
-    Args:
-        rows: List of data rows (as lists).
-        header: Column headers.
-        existing_records: Dict of existing records keyed by external ID.
-        id_field: Field containing the external ID.
-        compare_fields: Fields to compare. If None, compares all fields.
-
-    Returns:
-        Tuple of (filtered_rows, stats).
-    """
+    """Row-by-row fallback (exact reference semantics, incl. error handling)."""
     stats = IdempotentStats()
-
-    if not existing_records:
-        stats.total_records = len(rows)
-        stats.new_records = len(rows)
-        return rows, stats
-
-    # Find id field index
     try:
         id_index = header.index(id_field)
     except ValueError:
@@ -253,45 +246,30 @@ def filter_unchanged_rows(  # noqa: C901
         stats.total_records = len(rows)
         return rows, stats
 
-    # Determine which fields to compare
     if compare_fields is None:
         compare_fields = [h for h in header if h != id_field]
-
-    # Build field index mapping
-    field_indices = {}
-    for field_name in compare_fields:
-        if field_name in header:
-            field_indices[field_name] = header.index(field_name)
+    field_indices = {f: header.index(f) for f in compare_fields if f in header}
 
     filtered_rows: list[list[Any]] = []
-
     for row in rows:
         stats.total_records += 1
-
         if id_index >= len(row):
             filtered_rows.append(row)
             continue
-
         ext_id = str(row[id_index]).strip()
-
         if not ext_id or ext_id not in existing_records:
             stats.new_records += 1
             filtered_rows.append(row)
             continue
-
         existing = existing_records[ext_id]
         is_changed = False
-
         for field_name, field_idx in field_indices.items():
             if field_idx >= len(row):
                 continue
-
             base_field = field_name.split("/")[0]
             if base_field not in existing:
                 continue
-
             stats.fields_compared += 1
-
             try:
                 if not compare_values(row[field_idx], existing[base_field]):
                     is_changed = True
@@ -300,15 +278,143 @@ def filter_unchanged_rows(  # noqa: C901
                 stats.comparison_errors += 1
                 is_changed = True
                 break
-
         if is_changed:
             stats.changed_records += 1
             filtered_rows.append(row)
         else:
             stats.unchanged_records += 1
             stats.skipped_records += 1
-
     return filtered_rows, stats
+
+
+def filter_unchanged_rows(
+    rows: list[list[Any]],
+    header: list[str],
+    existing_records: dict[str, dict[str, Any]],
+    id_field: str = "id",
+    compare_fields: Optional[list[str]] = None,
+) -> tuple[list[list[Any]], IdempotentStats]:
+    """Filter out unchanged rows via a vectorized Polars anti-join.
+
+    Main entry point for idempotent import filtering. A row is kept if it is new
+    (its external id isn't in ``existing_records``) or changed (any compared field
+    differs); unchanged rows are dropped so the ORM never rewrites them. Comparison
+    semantics match :func:`compare_values` (normalize, then string-equal against a
+    "" sentinel for None/empty). The big incoming side is compared in Polars while
+    the (small) target dict is normalized in Python; original row order/content are
+    preserved. Falls back to a row-by-row pass on any unexpected value.
+
+    Args:
+        rows: List of data rows (as lists).
+        header: Column headers.
+        existing_records: Dict of existing records keyed by external ID.
+        id_field: Field containing the external ID.
+        compare_fields: Fields to compare. If None, compares all non-id fields.
+
+    Returns:
+        Tuple of (filtered_rows, stats).
+    """
+    stats = IdempotentStats()
+    if not existing_records:
+        stats.total_records = len(rows)
+        stats.new_records = len(rows)
+        return rows, stats
+    if id_field not in header:
+        log.warning(f"ID field '{id_field}' not in header, cannot filter unchanged")
+        stats.total_records = len(rows)
+        return rows, stats
+    if not rows:
+        return rows, stats
+
+    if compare_fields is None:
+        compare_fields = [h for h in header if h != id_field]
+    existing_keys: set[str] = set()
+    for rec in existing_records.values():
+        existing_keys.update(rec.keys())
+    comparable = [
+        f for f in compare_fields if f in header and f.split("/")[0] in existing_keys
+    ]
+
+    try:
+        # Pad ragged rows with None (absent) - distinct from "" (present-empty) so
+        # a missing trailing cell is skipped, not compared (reference semantics).
+        width = len(header)
+        padded = [(list(r) + [None] * (width - len(r)))[:width] for r in rows]
+        df = pl.DataFrame(
+            padded, schema={h: pl.String for h in header}, orient="row"
+        ).with_row_index("__idx")
+        df = df.with_columns(
+            pl.col(id_field)
+            .cast(pl.String)
+            .str.strip_chars()
+            .fill_null("")
+            .alias("__extid")
+        )
+
+        existing_rows = []
+        for ext_id, rec in existing_records.items():
+            entry: dict[str, Any] = {"__extid": ext_id, "__present": True}
+            for i, f in enumerate(comparable):
+                entry[f"__t{i}"] = _norm_str(rec.get(f.split("/")[0]))
+            existing_rows.append(entry)
+        existing_df = (
+            pl.DataFrame(existing_rows)
+            if existing_rows
+            else pl.DataFrame(schema={"__extid": pl.String, "__present": pl.Boolean})
+        )
+        df = df.join(existing_df, on="__extid", how="left")
+
+        # Per-field "changed": only when the source cell is present (not absent).
+        df = df.with_columns(
+            [
+                pl.col(f).is_not_null().alias(f"__p{i}")
+                for i, f in enumerate(comparable)
+            ]
+            + [
+                pl.col(f)
+                .str.strip_chars()
+                .fill_null("")
+                .alias(f"__s{i}")
+                for i, f in enumerate(comparable)
+            ]
+        )
+
+        is_matched = pl.col("__present").fill_null(False) & (
+            pl.col("__extid") != ""
+        )
+        if comparable:
+            changed_expr = pl.any_horizontal(
+                [
+                    pl.col(f"__p{i}") & (pl.col(f"__s{i}") != pl.col(f"__t{i}"))
+                    for i in range(len(comparable))
+                ]
+            )
+        else:
+            changed_expr = pl.lit(value=False)
+
+        df = df.with_columns(
+            is_matched.alias("__matched"),
+            (~is_matched | changed_expr).alias("__keep"),
+        )
+
+        kept_set = set(
+            df.filter(pl.col("__keep")).select("__idx").to_series().to_list()
+        )
+        filtered_rows = [row for i, row in enumerate(rows) if i in kept_set]
+
+        matched_count = int(df.select(pl.col("__matched").sum()).item() or 0)
+        stats.total_records = len(rows)
+        stats.new_records = len(rows) - matched_count
+        stats.skipped_records = len(rows) - len(filtered_rows)
+        stats.unchanged_records = stats.skipped_records
+        stats.changed_records = matched_count - stats.unchanged_records
+        stats.fields_compared = len(comparable) * matched_count
+        return filtered_rows, stats
+    except Exception as e:  # pragma: no cover - defensive fallback
+        log.debug(f"Vectorized idempotent filter fell back to row loop: {e}")
+        return _filter_unchanged_pyloop(
+            rows, header, existing_records, id_field, compare_fields
+        )
 
 
 def display_idempotent_stats(stats: IdempotentStats, model: str) -> None:

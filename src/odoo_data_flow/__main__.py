@@ -1033,6 +1033,13 @@ def vat_validate_cmd(
     help="Disable/enable mail tracking during import. Disabled by default.",
 )
 @click.option(
+    "--auto-clean",
+    is_flag=True,
+    default=False,
+    help="Apply safe, type-aware coercions before load (strip whitespace, "
+    "normalize null tokens, canonicalize booleans). Off by default.",
+)
+@click.option(
     "--defer-parent-store",
     is_flag=True,
     default=False,

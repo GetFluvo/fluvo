@@ -92,6 +92,25 @@ def with_country(
     return rows
 
 
+_COUNTRIES = ["Belgium", "France", "Germany", "Netherlands", "Spain"]
+
+
+def partners_with_country(
+    n: int, prefix: str, countries: list[str] | None = None
+) -> list[dict[str, str]]:
+    """Partner rows carrying a ``country`` natural-key column (a country name).
+
+    Used by the ORM-minimizing acceptance test: the naive path feeds this as a
+    bare ``country_id`` (Odoo name_search per row); the optimized path pre-resolves
+    it to ``country_id/id`` in Polars. The expected country per row is deterministic.
+    """
+    names = countries or _COUNTRIES
+    rows = partners(n, prefix)
+    for i, row in enumerate(rows):
+        row["country"] = names[i % len(names)]
+    return rows
+
+
 def states(
     n: int, prefix: str, country_xmlid: str = "base.us"
 ) -> list[dict[str, str]]:

@@ -3056,7 +3056,7 @@ def import_data(  # noqa: C901
     separator: str = ";",
     ignore: Optional[list[str]] = None,
     max_connection: int = 1,
-    batch_size: int = 10,
+    batch_size: int = 200,
     batch_delay: float = 0.0,
     skip: int = 0,
     force_create: bool = False,
@@ -3069,6 +3069,8 @@ def import_data(  # noqa: C901
     skip_existing: bool = False,
     adaptive_throttle: bool = True,
     max_batch_bytes: int = DEFAULT_MAX_BATCH_BYTES,
+    resolve_relations: Optional[list[dict[str, Any]]] = None,
+    auto_clean: bool = False,
 ) -> tuple[bool, dict[str, int]]:
     """Orchestrates a robust, multi-threaded, two-pass import process.
 
@@ -3125,11 +3127,27 @@ def import_data(  # noqa: C901
             update errors on models like stock.quant that restrict updates.
         adaptive_throttle (bool): If True, enables health-aware throttling that
             adjusts batch size and delays based on server response times.
+        resolve_relations (Optional[list[dict]]): Relation pre-resolution specs.
+            Each spec (source_column, model, key_field, relation_field, to,
+            multi, sep, on_missing, drop_source) is joined in Polars against a
+            cached id-map so Odoo's load() skips name_search for that field.
+            See lib.relational_import.resolve_relations_in_df. Off when None.
+        auto_clean (bool): If True, apply safe type-aware coercions (whitespace,
+            null tokens, boolean canonicalization) before load. Off by default.
 
     Returns:
         tuple[bool, int]: True if the entire import process completed without any
         critical, process-halting errors, False otherwise.
     """
+    # Default context suppresses safe, import-irrelevant ORM side-effects so the
+    # server does less work per record. All are honored by load()/write() over RPC.
+    # Pass an explicit `context` (e.g. CLI --context '{"mail_notrack": false}') to
+    # override any of them. NOTE: true deferred recompute / `norecompute` only apply
+    # when running in-process as an Odoo module, not over RPC.
+    #   tracking_disable               - skip field-change audit tracking (mail.thread)
+    #   mail_create_nolog              - skip the "record created" log note
+    #   mail_notrack                   - skip tracking-value computation on write
+    #   mail_activity_automation_skip  - skip activity-plan automation on create
     context, deferred, ignore = (
         context
         or {
@@ -3159,7 +3177,12 @@ def import_data(  # noqa: C901
 
     # Determine if streaming mode is possible
     can_stream = (
-        stream and not o2m and not split_by_cols and not deferred and not force_create
+        stream
+        and not o2m
+        and not split_by_cols
+        and not deferred
+        and not force_create
+        and not resolve_relations
     )
     if stream and not can_stream:
         log.warning(
@@ -3184,6 +3207,35 @@ def import_data(  # noqa: C901
         # Warn about empty id values
         _warn_empty_ids(header, all_data)
 
+        # --- ORM-minimizing: pre-resolve relations to xmlid/db-id in Polars ---
+        # Joining natural keys against a cached id-map here means Odoo's load()
+        # does no name_search per row. RPC-mode optimization; toggle via the
+        # resolve_relations argument (off => unchanged behavior).
+        if resolve_relations:
+            import polars as pl
+
+            from .lib import relational_import
+
+            width = len(header)
+            padded = [
+                (list(row) + [""] * (width - len(row)))[:width] for row in all_data
+            ]
+            df = pl.DataFrame(
+                padded, schema={h: pl.String for h in header}, orient="row"
+            )
+            df = relational_import.resolve_relations_in_df(
+                df, resolve_relations, config
+            )
+            header = df.columns
+            all_data = [
+                ["" if v is None else str(v) for v in row] for row in df.iter_rows()
+            ]
+            record_count = len(all_data)
+            log.info(
+                f"Pre-resolved {len(resolve_relations)} relation(s) in Polars; "
+                f"load() will skip name_search for them."
+            )
+
     try:
         if isinstance(config, dict):
             connection = conf_lib.get_connection_from_dict(config)
@@ -3207,6 +3259,31 @@ def import_data(  # noqa: C901
         )
         _show_error_panel(title, friendly_message)
         return False, {}
+
+    # --- ORM-minimizing: opt-in safe, type-aware coercion before load ---
+    # Off by default (no behavior change). Uncoercible values become empty; the
+    # load-time bisect isolates any resulting bad row instead of aborting.
+    if auto_clean and not can_stream and header and all_data:
+        import polars as pl
+
+        from .lib import auto_clean as auto_clean_lib
+
+        try:
+            field_types = {
+                f: meta.get("type")
+                for f, meta in model_obj.fields_get([], ["type"]).items()
+            }
+        except Exception as e:  # pragma: no cover - defensive
+            log.warning(f"auto-clean: could not fetch field types: {e}")
+            field_types = {}
+        width = len(header)
+        padded = [(list(r) + [""] * (width - len(r)))[:width] for r in all_data]
+        df = pl.DataFrame(padded, schema={h: pl.String for h in header}, orient="row")
+        df = auto_clean_lib.auto_clean_dataframe(df, field_types)
+        all_data = [
+            ["" if v is None else str(v) for v in row] for row in df.iter_rows()
+        ]
+        log.info("Applied auto-clean coercions before load.")
 
     # Apply idempotent filtering if enabled (skip unchanged records)
     idempotent_stats = None

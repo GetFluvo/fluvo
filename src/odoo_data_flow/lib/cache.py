@@ -4,11 +4,63 @@ import configparser
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional, Union, cast
 
 import polars as pl
 
 from ..logging_config import log
+
+
+def _connection_fingerprint(config: Union[str, dict[str, Any]]) -> Optional[str]:
+    """Return a stable hostname+port+database fingerprint for a config.
+
+    Accepts either a path to a connection .conf file or a connection dict, so the
+    cache works regardless of how the caller supplied the connection.
+
+    Args:
+        config: Connection file path or a connection dict.
+
+    Returns:
+        A short string fingerprinting the target server/db, or None on failure.
+    """
+    try:
+        if isinstance(config, dict):
+            return (
+                f"{config.get('hostname')}{config.get('port')}"
+                f"{config.get('database')}"
+            )
+        parser = configparser.ConfigParser()
+        parser.read(config)
+        return (
+            f"{parser.get('Connection', 'hostname')}"
+            f"{parser.get('Connection', 'port')}"
+            f"{parser.get('Connection', 'database')}"
+        )
+    except Exception as e:  # pragma: no cover - defensive
+        log.error(f"Could not fingerprint connection config: {e}")
+        return None
+
+
+def resolve_cache_dir(config: Union[str, dict[str, Any]]) -> Optional[Path]:
+    """Cache directory for a connection, accepting a file path or a dict.
+
+    Args:
+        config: Connection file path or a connection dict.
+
+    Returns:
+        A Path to the unique cache directory, or None on failure.
+    """
+    fingerprint = _connection_fingerprint(config)
+    if fingerprint is None:
+        return None
+    try:
+        hash_id = hashlib.sha256(fingerprint.encode()).hexdigest()
+        cache_dir = Path(".odf_cache") / hash_id
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir
+    except Exception as e:  # pragma: no cover - defensive
+        log.error(f"Could not create or access cache directory: {e}")
+        return None
 
 
 def get_cache_dir(config_file: str) -> Optional[Path]:
@@ -82,6 +134,100 @@ def load_id_map(config_file: str, model: str) -> Optional[pl.DataFrame]:
         return pl.read_parquet(file_path)
     except Exception as e:
         log.error(f"Failed to load id_map for model '{model}': {e}")
+        return None
+
+
+def export_id_map(
+    config: Union[str, dict[str, Any]],
+    model: str,
+    key_field: str,
+    domain: Optional[list[Any]] = None,
+    *,
+    force_refresh: bool = False,
+) -> Optional[pl.DataFrame]:
+    """Export and cache an id-map for ``model`` keyed by a natural field.
+
+    Reads every (or domain-filtered) record of ``model`` once and resolves each to
+    its XML ID (via ``ir.model.data``), producing a Polars DataFrame with columns
+    ``key`` (the stringified ``key_field`` value), ``xmlid`` and ``db_id``. The
+    result is cached to parquet per (connection, model, key_field) and reused on
+    subsequent runs, so relation pre-resolution joins (see
+    :meth:`transform.Processor.resolve_relation`) never pay an Odoo ``name_search``.
+
+    Args:
+        config: Connection file path or connection dict.
+        model: The related Odoo model to map (e.g. ``res.country``).
+        key_field: The natural-key field the source data references (e.g. ``name``,
+            ``code``, ``ref``).
+        domain: Optional domain to limit which records are mapped.
+        force_refresh: If True, ignore any cached copy and re-export.
+
+    Returns:
+        DataFrame ``[key, xmlid, db_id]``, or None on failure.
+    """
+    from . import conf_lib  # local import avoids any import cycle
+
+    cache_dir = resolve_cache_dir(config)
+    safe_key = key_field.replace("/", "_")
+    file_path = (
+        cache_dir / f"{model}.idmap__{safe_key}.parquet" if cache_dir else None
+    )
+
+    if file_path and file_path.exists() and not force_refresh:
+        try:
+            log.info(f"Loading cached id-map for '{model}' (key={key_field}).")
+            return pl.read_parquet(file_path)
+        except Exception as e:  # pragma: no cover - defensive
+            log.warning(f"Could not read cached id-map ({file_path}): {e}")
+
+    try:
+        connection = (
+            conf_lib.get_connection_from_dict(config)
+            if isinstance(config, dict)
+            else conf_lib.get_connection_from_config(config)
+        )
+        records = connection.get_model(model).search_read(domain or [], [key_field])
+        if not records:
+            log.warning(f"id-map export for '{model}' returned no records.")
+            return pl.DataFrame(
+                schema={"key": pl.String, "xmlid": pl.String, "db_id": pl.Int64}
+            )
+
+        db_ids = [r["id"] for r in records]
+        # Bulk-resolve XML IDs for these records in one round trip.
+        imd = connection.get_model("ir.model.data").search_read(
+            [["model", "=", model], ["res_id", "in", db_ids]],
+            ["res_id", "module", "name"],
+        )
+        xmlid_by_res: dict[int, str] = {}
+        for rec in imd:
+            # First XML ID wins if a record somehow has several.
+            xmlid_by_res.setdefault(
+                int(rec["res_id"]), f"{rec['module']}.{rec['name']}"
+            )
+
+        def _key_str(value: Any) -> Optional[str]:
+            # m2o values come back as [id, name]; take the display part.
+            if isinstance(value, (list, tuple)):
+                return str(value[1]) if len(value) > 1 else None
+            return None if value is False or value is None else str(value)
+
+        df = pl.DataFrame(
+            {
+                "key": [_key_str(r.get(key_field)) for r in records],
+                "xmlid": [xmlid_by_res.get(int(r["id"])) for r in records],
+                "db_id": [int(r["id"]) for r in records],
+            }
+        )
+        if file_path:
+            df.write_parquet(file_path)
+            log.info(
+                f"Cached id-map for '{model}' (key={key_field}, "
+                f"{df.height} rows) -> {file_path}"
+            )
+        return df
+    except Exception as e:
+        log.error(f"Failed to export id-map for model '{model}': {e}")
         return None
 
 

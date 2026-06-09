@@ -566,6 +566,54 @@ class Processor:
                 child_df, left_on=master_key, right_on=child_key
             )
 
+    def resolve_relation(
+        self,
+        source_column: str,
+        model: str,
+        key_field: str,
+        relation_field: str,
+        to: str = "xmlid",
+        multi: bool = False,
+        sep: str = ",",
+        on_missing: str = "keep",
+        drop_source: bool = False,
+    ) -> None:
+        """Pre-resolve a relation column to external/db IDs in Polars.
+
+        Joins ``source_column`` (natural keys like a country name/code) against a
+        cached id-map of ``model`` and adds a ``<relation_field>/id`` (xmlid) or
+        ``<relation_field>/.id`` (db id) column, so Odoo's load() performs **no
+        name_search** for that field. Mappings stay in Python: call this in your
+        transform script, then map the produced ``<relation_field>/id`` column.
+
+        Args:
+            source_column: Column in the source data holding the natural key.
+            model: The related Odoo model (e.g. ``res.country``).
+            key_field: Natural-key field on that model (e.g. ``name``, ``code``).
+            relation_field: The target Odoo m2o/m2m field (e.g. ``country_id``).
+            to: ``"xmlid"`` (default, portable) or ``"dbid"`` (fastest, DB-specific).
+            multi: True for many2many (split/resolve/rejoin by ``sep``).
+            sep: Separator for many2many values (default ``,``).
+            on_missing: ``"keep"`` (leave unresolved) or ``"error"`` (raise).
+            drop_source: Drop ``source_column`` after resolving.
+        """
+        from . import relational_import
+
+        spec = {
+            "source_column": source_column,
+            "model": model,
+            "key_field": key_field,
+            "relation_field": relation_field,
+            "to": to,
+            "multi": multi,
+            "sep": sep,
+            "on_missing": on_missing,
+            "drop_source": drop_source,
+        }
+        self.dataframe = relational_import.resolve_relations_in_df(
+            self.dataframe, [spec], self.config_file
+        )
+
     def _add_data(
         self,
         dataframe: pl.DataFrame,

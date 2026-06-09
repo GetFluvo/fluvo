@@ -85,6 +85,117 @@ def _resolve_related_ids(
         return None
 
 
+def _resolve_one_relation(
+    df: "pl.DataFrame",
+    config: Union[str, dict[str, Any]],
+    spec: dict[str, Any],
+) -> "pl.DataFrame":
+    """Resolve a single relation column to xmlid/db-id via a Polars join.
+
+    See :func:`resolve_relations_in_df` for the spec shape. Adds a
+    ``<relation_field>/id`` (xmlid) or ``<relation_field>/.id`` (db id) column.
+    """
+    source_column = spec["source_column"]
+    if source_column not in df.columns:
+        log.warning(f"resolve_relation: source column '{source_column}' not found.")
+        return df
+
+    to = spec.get("to", "xmlid")
+    relation_field = spec["relation_field"]
+    multi = spec.get("multi", False)
+    sep = spec.get("sep", ",")
+    on_missing = spec.get("on_missing", "keep")
+    target = "xmlid" if to == "xmlid" else "db_id"
+    out_col = f"{relation_field}/id" if to == "xmlid" else f"{relation_field}/.id"
+
+    id_map = cache.export_id_map(config, spec["model"], spec["key_field"])
+    if id_map is None or id_map.is_empty():
+        log.warning(
+            f"resolve_relation: empty id-map for '{spec['model']}'; "
+            f"leaving '{source_column}' unresolved."
+        )
+        return df
+
+    lookup = id_map.select(
+        pl.col("key").cast(pl.String).str.strip_chars(),
+        pl.col(target).cast(pl.String).alias(out_col),
+    ).drop_nulls("key")
+
+    if not multi:
+        df = (
+            df.with_columns(
+                pl.col(source_column).cast(pl.String).str.strip_chars().alias("__rk")
+            )
+            .join(lookup, left_on="__rk", right_on="key", how="left")
+            .drop("__rk")
+        )
+    else:
+        df = df.with_row_index("__row")
+        exploded = (
+            df.select(["__row", source_column])
+            .with_columns(pl.col(source_column).cast(pl.String).str.split(sep))
+            .explode(source_column)
+            .with_columns(pl.col(source_column).str.strip_chars().alias("__rk"))
+            .join(lookup, left_on="__rk", right_on="key", how="left")
+        )
+        grouped = (
+            exploded.group_by("__row")
+            .agg(pl.col(out_col).drop_nulls().alias("__vals"))
+            .with_columns(pl.col("__vals").list.join(sep).alias(out_col))
+            .drop("__vals")
+        )
+        df = df.join(grouped, on="__row", how="left").drop("__row")
+
+    # on_missing: a source value present but unresolved => null out_col.
+    if on_missing == "error":
+        unresolved = df.filter(
+            (pl.col(source_column).cast(pl.String).str.strip_chars() != "")
+            & pl.col(source_column).is_not_null()
+            & (pl.col(out_col).is_null() | (pl.col(out_col) == ""))
+        )
+        if unresolved.height:
+            sample = unresolved[source_column].unique().head(5).to_list()
+            raise ValueError(
+                f"resolve_relation: {unresolved.height} rows for "
+                f"'{relation_field}' could not be resolved against "
+                f"'{spec['model']}.{spec['key_field']}' (e.g. {sample})."
+            )
+
+    if spec.get("drop_source") and source_column != out_col:
+        df = df.drop(source_column)
+    return df
+
+
+def resolve_relations_in_df(
+    df: "pl.DataFrame",
+    specs: list[dict[str, Any]],
+    config: Union[str, dict[str, Any]],
+) -> "pl.DataFrame":
+    """Pre-resolve relation columns to external/db IDs in Polars before load().
+
+    Joining source natural-key values against a cached id-map on the client means
+    Odoo's load() does **no name_search** per row (the biggest ORM-minimizing win).
+    RPC-mode optimization.
+
+    Each spec is a dict:
+        source_column: column in ``df`` holding the natural key (e.g. ``country``)
+        model:         related Odoo model (e.g. ``res.country``)
+        key_field:     natural-key field on that model (e.g. ``name``/``code``)
+        relation_field: the Odoo m2o/m2m field (e.g. ``country_id``)
+        to:            ``"xmlid"`` (default, portable) or ``"dbid"`` (fastest)
+        multi:         True for many2many (split/resolve/rejoin by ``sep``)
+        sep:           m2m separator (default ``,``)
+        on_missing:    ``"keep"`` (default) or ``"error"``
+        drop_source:   drop the source column after resolving (default False)
+
+    Returns:
+        A new DataFrame with ``<relation_field>/id`` (or ``/.id``) columns added.
+    """
+    for spec in specs:
+        df = _resolve_one_relation(df, config, spec)
+    return df
+
+
 def _derive_missing_relation_info(
     config: Union[str, dict[str, Any]],
     model: str,
