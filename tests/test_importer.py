@@ -176,6 +176,55 @@ class TestFailFilePath:
 
     @patch("fluvo.importer.import_threaded.import_data")
     @patch("fluvo.importer._run_preflight_checks")
+    def test_auto_groupby_applies_detected_column(
+        self,
+        mock_preflight: MagicMock,
+        mock_import_data: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """--auto-groupby passes the preflight-detected column to the import."""
+        source = tmp_path / "res_partner.csv"
+        source.write_text("id;name;country_id/id\n1;Test;be\n")
+
+        def _set_groupby(
+            preflight_mode: object, import_plan: dict[str, Any], **kwargs: Any
+        ) -> bool:
+            # Mimic the preflight detector populating the plan.
+            import_plan["groupby"] = ["country_id/id"]
+            return True
+
+        mock_preflight.side_effect = _set_groupby
+        mock_import_data.return_value = (True, {"total_records": 1})
+
+        run_import(
+            config="test.conf",
+            filename=str(source),
+            model="res.partner",
+            deferred_fields=None,
+            auto_defer=False,
+            unique_id_field=None,
+            no_preflight_checks=False,
+            headless=False,
+            worker=4,
+            batch_size=10,
+            skip=0,
+            fail=False,
+            separator=";",
+            ignore=None,
+            context="{}",
+            encoding="utf-8",
+            o2m=False,
+            groupby=None,
+            auto_groupby=True,
+        )
+
+        # The auto-detected column reached the import as split_by_cols.
+        assert mock_import_data.call_args.kwargs.get("split_by_cols") == [
+            "country_id/id"
+        ]
+
+    @patch("fluvo.importer.import_threaded.import_data")
+    @patch("fluvo.importer._run_preflight_checks")
     def test_fail_file_no_env_uses_same_dir(
         self,
         mock_preflight: MagicMock,
