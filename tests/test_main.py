@@ -1265,3 +1265,245 @@ def test_import_move_date_not_triggered_when_no_products_extracted(
         mock_update_dates.assert_not_called()
         # Should show warning in output
         assert "No product IDs extracted" in result.output or result.exit_code == 0
+
+
+def _conn(runner_fs: str = "conn.conf") -> None:
+    """Write a minimal connection file in the current (isolated) dir."""
+    with open(runner_fs, "w") as f:
+        f.write("[Connection]\n")
+
+
+@patch("fluvo.__main__.run_update_module_list")
+def test_module_update_list_calls_runner(mock_fn: MagicMock, runner: CliRunner) -> None:
+    """`module update-list` delegates to run_update_module_list."""
+    with runner.isolated_filesystem():
+        _conn()
+        result = runner.invoke(
+            __main__.cli, ["module", "update-list", "--connection-file", "conn.conf"]
+        )
+        assert result.exit_code == 0
+        mock_fn.assert_called_once()
+
+
+@patch("fluvo.__main__.run_module_installation")
+def test_module_install_calls_runner(mock_fn: MagicMock, runner: CliRunner) -> None:
+    """`module install` delegates to run_module_installation."""
+    with runner.isolated_filesystem():
+        _conn()
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "module",
+                "install",
+                "--connection-file",
+                "conn.conf",
+                "--modules",
+                "sale,purchase",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_fn.assert_called_once()
+
+
+@patch("fluvo.__main__.run_module_uninstallation")
+def test_module_uninstall_calls_runner(mock_fn: MagicMock, runner: CliRunner) -> None:
+    """`module uninstall` delegates to run_module_uninstallation."""
+    with runner.isolated_filesystem():
+        _conn()
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "module",
+                "uninstall",
+                "--connection-file",
+                "conn.conf",
+                "--modules",
+                "sale",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_fn.assert_called_once()
+
+
+@patch("fluvo.__main__.run_language_installation")
+def test_module_install_languages_calls_runner(
+    mock_fn: MagicMock, runner: CliRunner
+) -> None:
+    """`module install-languages` delegates to run_language_installation."""
+    with runner.isolated_filesystem():
+        _conn()
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "module",
+                "install-languages",
+                "--connection-file",
+                "conn.conf",
+                "--languages",
+                "nl_BE,fr_FR",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_fn.assert_called_once()
+
+
+@patch("fluvo.__main__.get_vat_validation_settings")
+def test_vat_get_settings_calls_runner(mock_fn: MagicMock, runner: CliRunner) -> None:
+    """`vat get-settings` delegates and renders the returned settings."""
+    mock_fn.return_value = MagicMock(vies_settings={1: True, 2: False})
+    with runner.isolated_filesystem():
+        _conn()
+        result = runner.invoke(
+            __main__.cli, ["vat", "get-settings", "--connection-file", "conn.conf"]
+        )
+        assert result.exit_code == 0
+        mock_fn.assert_called_once()
+
+
+@patch("fluvo.__main__.disable_vat_validation")
+def test_vat_disable_calls_runner(mock_fn: MagicMock, runner: CliRunner) -> None:
+    """`vat disable` delegates to disable_vat_validation."""
+    mock_fn.return_value = MagicMock(vies_settings={1: False})
+    with runner.isolated_filesystem():
+        _conn()
+        result = runner.invoke(
+            __main__.cli, ["vat", "disable", "--connection-file", "conn.conf"]
+        )
+        assert result.exit_code == 0
+        mock_fn.assert_called_once()
+
+
+@patch("fluvo.__main__.run_invoice_v9_workflow")
+def test_workflow_invoice_v9_calls_runner(
+    mock_fn: MagicMock, runner: CliRunner
+) -> None:
+    """`workflow invoice-v9` delegates to run_invoice_v9_workflow."""
+    with runner.isolated_filesystem():
+        _conn()
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "workflow",
+                "invoice-v9",
+                "--connection-file",
+                "conn.conf",
+                "--field",
+                "x_paid",
+                "--status-map",
+                "{}",
+                "--paid-date-field",
+                "paid_on",
+                "--payment-journal",
+                "7",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_fn.assert_called_once()
+
+
+@patch("fluvo.__main__.restore_vat_validation_settings")
+def test_vat_restore_calls_runner(mock_fn: MagicMock, runner: CliRunner) -> None:
+    """`vat restore` delegates to restore_vat_validation_settings."""
+    mock_fn.return_value = True
+    with runner.isolated_filesystem():
+        _conn()
+        with open("settings.json", "w") as f:
+            f.write("{}")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "vat",
+                "restore",
+                "--connection-file",
+                "conn.conf",
+                "--input",
+                "settings.json",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_fn.assert_called_once()
+
+
+@patch("fluvo.__main__.run_vies_validation")
+def test_vat_validate_calls_runner(mock_fn: MagicMock, runner: CliRunner) -> None:
+    """`vat validate` delegates to run_vies_validation."""
+    with runner.isolated_filesystem():
+        _conn()
+        result = runner.invoke(
+            __main__.cli, ["vat", "validate", "--connection-file", "conn.conf"]
+        )
+        assert result.exit_code == 0
+        mock_fn.assert_called_once()
+
+
+@patch("fluvo.__main__.run_write")
+def test_write_calls_runner(mock_fn: MagicMock, runner: CliRunner) -> None:
+    """`write` delegates to run_write."""
+    with runner.isolated_filesystem():
+        _conn()
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "write",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "x.csv",
+                "--model",
+                "res.partner",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_fn.assert_called_once()
+
+
+@patch("fluvo.__main__.run_migration")
+def test_migrate_calls_runner(mock_fn: MagicMock, runner: CliRunner) -> None:
+    """`migrate` delegates to run_migration."""
+    with runner.isolated_filesystem():
+        with open("exp.conf", "w") as f:
+            f.write("[Connection]\n")
+        with open("imp.conf", "w") as f:
+            f.write("[Connection]\n")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "migrate",
+                "--config-export",
+                "exp.conf",
+                "--config-import",
+                "imp.conf",
+                "--model",
+                "res.partner",
+                "--fields",
+                "name,email",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_fn.assert_called_once()
+
+
+@patch("fluvo.__main__.run_path_to_image")
+def test_path_to_image_calls_runner(mock_fn: MagicMock, runner: CliRunner) -> None:
+    """`path-to-image` delegates to run_path_to_image."""
+    with runner.isolated_filesystem():
+        with open("in.csv", "w") as f:
+            f.write("id,img\n")
+        result = runner.invoke(
+            __main__.cli, ["path-to-image", "in.csv", "--fields", "img"]
+        )
+        assert result.exit_code == 0
+        mock_fn.assert_called_once()
+
+
+@patch("fluvo.__main__.run_url_to_image")
+def test_url_to_image_calls_runner(mock_fn: MagicMock, runner: CliRunner) -> None:
+    """`url-to-image` delegates to run_url_to_image."""
+    with runner.isolated_filesystem():
+        with open("in.csv", "w") as f:
+            f.write("id,url\n")
+        result = runner.invoke(
+            __main__.cli, ["url-to-image", "in.csv", "--fields", "url"]
+        )
+        assert result.exit_code == 0
+        mock_fn.assert_called_once()
