@@ -21,6 +21,7 @@ class _Store:
         self.imd: list[dict[str, Any]] = []  # ir.model.data rows
         self._seq = 0
         self.fail_all = False  # when True, load() reports every record as failed
+        self.fail_ids: set[str] = set()  # load() fails any batch containing these ids
 
     def next_id(self) -> int:
         self._seq += 1
@@ -31,12 +32,16 @@ class _FakeModel:
     def __init__(self, name: str, store: _Store) -> None:
         self.model_name = name
         self._s = store
+        self.connection: Any = None  # set by the connection; used for Pass-2 proxy
 
     # --- main model behaviour ---
     def load(
         self, header: list[str], rows: list[list[Any]], context: Any = None
     ) -> dict[str, Any]:
-        if self._s.fail_all:
+        if self._s.fail_all or any(
+            dict(zip(header, row)).get("id") in self._s.fail_ids for row in rows
+        ):
+            # Whole batch fails -> the pipeline binary-searches to isolate the bad row.
             return {"ids": [], "messages": [{"message": "boom", "type": "error"}]}
         ids: list[int] = []
         recs = self._s.records.setdefault(self.model_name, {})
@@ -113,15 +118,26 @@ class _FakeConnection:
         self._s = store
 
     def get_model(self, name: str) -> _FakeModel:
-        return _FakeModel(name, self._s)
+        model = _FakeModel(name, self._s)
+        model.connection = self
+        return model
 
 
-def _run(tmp_path: Path, csv_text: str, fail_all: bool = False, **kwargs: Any) -> Any:
+def _run(
+    tmp_path: Path,
+    csv_text: str,
+    fail_all: bool = False,
+    fail_ids: Optional[set[str]] = None,
+    seed_imd: Optional[list[dict[str, Any]]] = None,
+    **kwargs: Any,
+) -> Any:
     """Write a CSV and run import_data against a fresh FakeOdoo (single-threaded)."""
     src = tmp_path / "data.csv"
     src.write_text(csv_text)
     store = _Store()
     store.fail_all = fail_all
+    store.fail_ids = set(fail_ids or [])
+    store.imd.extend(seed_imd or [])
     with patch(
         "fluvo.import_threaded.conf_lib.get_connection_from_config",
         return_value=_FakeConnection(store),
@@ -186,3 +202,39 @@ def test_import_data_multiple_batches(tmp_path: Path) -> None:
     result, store = _run(tmp_path, csv, batch_size=1)
     assert result is not None
     assert len(store.records.get("res.partner", {})) == 3
+
+
+def test_import_data_partial_failure_rescues_good_records(tmp_path: Path) -> None:
+    """A bad row is isolated to the fail file; the good rows still import."""
+    csv = "id,name\ngood_a,A\nbad_x,X\ngood_c,C\n"
+    result, store = _run(tmp_path, csv, fail_ids={"bad_x"}, batch_size=10)
+    names = {v["name"] for v in store.records.get("res.partner", {}).values()}
+    assert "A" in names and "C" in names  # good rows rescued
+    assert "X" not in names  # bad row isolated, not persisted
+    assert "bad_x" in (tmp_path / "fail.csv").read_text()
+
+
+def test_import_data_cross_model_two_pass(tmp_path: Path) -> None:
+    """A deferred field referencing another model resolves via ir.model.data."""
+    seed = [
+        {
+            "id": 9001,
+            "module": "base",
+            "name": "user_admin",
+            "res_id": 2,
+            "full": "base.user_admin",
+        }
+    ]
+    csv = "id,name,user_id/id\nrec_a,Alice,base.user_admin\n"
+    result, store = _run(tmp_path, csv, deferred_fields=["user_id/id"], seed_imd=seed)
+    contact = next(
+        v for v in store.records["res.partner"].values() if v.get("name") == "Alice"
+    )
+    assert contact.get("user_id") == 2
+
+
+def test_import_data_skip_existing(tmp_path: Path) -> None:
+    """skip_existing imports only new records (fake reports none existing)."""
+    result, store = _run(tmp_path, "id,name\nrec_a,A\n", skip_existing=True)
+    assert result is not None
+    assert len(store.records.get("res.partner", {})) == 1
