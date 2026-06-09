@@ -114,3 +114,60 @@ protocol = jsonrpcs
 port = 443
 uid = 2
 ```
+
+---
+
+## Managing Multiple Environments
+
+Most projects target more than one Odoo instance — a local sandbox, a test/UAT
+server, and production. The recommended convention is **one connection file per
+environment**, named with the environment as a prefix:
+
+```text
+conf/
+├── local_connection.conf
+├── test_connection.conf
+└── prod_connection.conf
+```
+
+You select the environment simply by pointing `--connection-file` at the matching
+file:
+
+```bash
+# Import against the test server
+fluvo import --connection-file conf/test_connection.conf --file data/products.csv --model product.product
+
+# Same data, against production
+fluvo import --connection-file conf/prod_connection.conf --file data/products.csv --model product.product
+```
+
+### What the prefix does: isolated recovery files
+
+Fluvo derives the **environment name** from the connection filename — it strips a
+trailing `_connection` or `_conn` suffix, so `prod_connection.conf` → `prod`,
+`test_connection.conf` → `test`, and a bare `uat.conf` → `uat`.
+
+That environment name is then used to **keep each environment's fail/recovery files
+separate**. When an import produces a [fail file](importing_data.md), it is written
+into an environment subfolder next to your data rather than alongside it:
+
+```text
+data/
+├── products.csv
+├── test/
+│   └── product_product_fail.csv   # from test_connection.conf
+└── prod/
+    └── product_product_fail.csv   # from prod_connection.conf
+```
+
+This means a `--fail` recovery run for production never picks up rows that failed
+against test (or vice-versa) — each environment retries only its own failures. The
+subfolder is created automatically; if the connection file has no recognisable
+prefix, fail files stay in the data directory as before.
+
+```{admonition} Tip
+:class: note
+
+Keep credentials out of version control: commit a `conf/*.conf.example` template and
+add the real `conf/*_connection.conf` files to your `.gitignore`.
+```
