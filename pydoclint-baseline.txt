@@ -1,5 +1,27 @@
-src/fluvo/writer.py
-    DOC203: Function `_read_data_file` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[list[str], list[list[Any]]]']; docstring return section types: ['']
+src/fluvo/__main__.py
+    DOC203: Function `_execute_post_action` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+    DOC203: Function `_get_product_ids_from_quants` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['list[int]']; docstring return section types: ['']
+--------------------
+src/fluvo/export_threaded.py
+    DOC301: Class `RPCThreadExport`: __init__() should not have a docstring; please combine it with the docstring of the class
+    DOC203: Method `RPCThreadExport._execute_batch` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[list[dict[str, Any]], list[int]]']; docstring return section types: ['A tuple containing']
+    DOC201: Function `_clean_and_transform_batch` does not have a return section in docstring
+    DOC203: Function `_clean_and_transform_batch` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC203: Function `_enrich_main_df_with_xml_ids` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.DataFrame']; docstring return section types: ['']
+    DOC101: Function `_process_export_batches`: Docstring contains fewer arguments than in function signature.
+    DOC103: Function `_process_export_batches`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [encoding: str, enrich_main_xml_id: bool, fields_info: dict[str, dict[str, Any]], is_resuming: bool, model_name: str, output: Optional[str], rpc_thread: 'RPCThreadExport', separator: str, session_dir: Optional[Path], streaming: bool, total_ids: int].
+    DOC201: Function `_process_export_batches` does not have a return section in docstring
+    DOC203: Function `_process_export_batches` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC101: Function `export_data`: Docstring contains fewer arguments than in function signature.
+    DOC103: Function `export_data`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [batch_size: int, config: Union[str, dict[str, Any]], context: Optional[dict[str, Any]], domain: list[Any], encoding: str, header: list[str], max_connection: int, model: str, output: Optional[str], resume_session: Optional[str], separator: str, streaming: bool, technical_names: bool].
+    DOC201: Function `export_data` does not have a return section in docstring
+    DOC203: Function `export_data` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+--------------------
+src/fluvo/exporter.py
+    DOC101: Function `run_export`: Docstring contains fewer arguments than in function signature.
+    DOC103: Function `run_export`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [batch_size: int, config: Union[str, dict[str, Any]], context: Union[str, dict[str, Any]], domain: str, encoding: str, fields: str, model: str, output: Optional[str], resume_session: Optional[str], separator: str, streaming: bool, technical_names: bool, worker: int].
+    DOC501: Function `run_export` has raise statements, but the docstring does not have a "Raises" section
+    DOC503: Function `run_export` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: []. Raised exceptions in the body: ['TypeError'].
 --------------------
 src/fluvo/import_threaded.py
     DOC203: Function `_extract_per_row_errors` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['dict[int, str]']; docstring return section types: ['']
@@ -35,4 +57,335 @@ src/fluvo/import_threaded.py
     DOC104: Function `import_data`: Arguments are the same in the docstring and the function signature, but are in a different order.
     DOC105: Function `import_data`: Argument names match, but type hints in these args do not match: config, split_by_cols, resolve_relations
     DOC203: Function `import_data` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[bool, dict[str, int]]']; docstring return section types: ['tuple[bool, int]']
+--------------------
+src/fluvo/importer.py
+    DOC111: Function `_get_fail_filename`: The option `--arg-type-hints-in-docstring` is `False` but there are type hints in the docstring arg list
+    DOC203: Function `_get_env_from_config` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[str]']; docstring return section types: ['']
+    DOC111: Function `_run_preflight_checks`: The option `--arg-type-hints-in-docstring` is `False` but there are type hints in the docstring arg list
+    DOC101: Function `run_import`: Docstring contains fewer arguments than in function signature.
+    DOC103: Function `run_import`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [adaptive_throttle: bool, auto_clean: bool, auto_create_refs: bool, auto_defer: bool, batch_delay: float, batch_size: int, check_refs: str, config: Union[str, dict[str, Any]], context: Any, deferred_fields: Optional[list[str]], encoding: str, fail: bool, filename: str, groupby: Optional[list[str]], headless: bool, ignore: Optional[list[str]], max_batch_bytes: int, model: Optional[str], no_checkpoint: bool, no_preflight_checks: bool, o2m: bool, resolve_relations: Optional[list[dict[str, Any]]], resume: bool, separator: str, set_empty_on_missing: bool, skip: int, skip_existing: bool, skip_unchanged: bool, stream: bool, unique_id_field: Optional[str], worker: int].
+    DOC203: Function `run_import` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[dict[str, int]]']; docstring return section types: ['dict[str, int]']
+    DOC501: Function `run_import` has raise statements, but the docstring does not have a "Raises" section
+    DOC503: Function `run_import` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: []. Raised exceptions in the body: ['TypeError'].
+    DOC111: Function `run_import_for_migration`: The option `--arg-type-hints-in-docstring` is `False` but there are type hints in the docstring arg list
+--------------------
+src/fluvo/lib/actions/language_installer.py
+    DOC203: Function `run_language_installation` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/actions/module_manager.py
+    DOC203: Function `run_update_module_list` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/actions/vies_manager.py
+    DOC203: Function `_get_backup_file_path` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Path']; docstring return section types: ['']
+    DOC203: Function `_save_settings_to_backup` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+    DOC203: Function `_load_settings_from_backup` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[VatValidationSettings]']; docstring return section types: ['']
+    DOC203: Function `_delete_backup_file` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+    DOC203: Function `_is_retriable_error` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+    DOC203: Function `validate_vat_format` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[bool, Optional[str]]']; docstring return section types: ['']
+    DOC203: Function `validate_vat_checksum` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[bool, Optional[str]]']; docstring return section types: ['']
+    DOC203: Function `validate_vat_local` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[bool, Optional[str]]']; docstring return section types: ['']
+    DOC203: Function `get_vat_validation_settings` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[VatValidationSettings]']; docstring return section types: ['']
+    DOC203: Function `disable_vat_validation` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[VatValidationSettings]']; docstring return section types: ['']
+    DOC203: Function `restore_vat_validation_settings` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+    DOC203: Function `run_vies_validation` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['ViesValidationResult']; docstring return section types: ['']
+    DOC203: Function `_validate_vat_vies` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+    DOC501: Function `_validate_vat_vies` has raise statements, but the docstring does not have a "Raises" section
+    DOC503: Function `_validate_vat_vies` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: []. Raised exceptions in the body: ['Exception'].
+    DOC203: Function `run_import_with_vat_validation_disabled` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Any']; docstring return section types: ['']
+    DOC203: Function `restore_vat_settings_from_backup` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+    DOC203: Function `check_vat_settings_backup_status` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['dict[str, Any]']; docstring return section types: ['Dictionary with backup status information']
+--------------------
+src/fluvo/lib/auto_clean.py
+    DOC203: Function `auto_clean_dataframe` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.DataFrame']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/cache.py
+    DOC203: Function `_connection_fingerprint` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[str]']; docstring return section types: ['']
+    DOC203: Function `resolve_cache_dir` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[Path]']; docstring return section types: ['']
+    DOC203: Function `get_cache_dir` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[Path]']; docstring return section types: ['']
+    DOC203: Function `load_id_map` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[pl.DataFrame]']; docstring return section types: ['']
+    DOC203: Function `export_id_map` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[pl.DataFrame]']; docstring return section types: ['']
+    DOC203: Function `load_fields_get_cache` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[dict[str, Any]]']; docstring return section types: ['']
+    DOC203: Function `generate_session_id` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['str']; docstring return section types: ['']
+    DOC203: Function `get_session_dir` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[Path]']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/checkpoint.py
+    DOC203: Function `save_checkpoint` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+    DOC203: Function `load_checkpoint` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[CheckpointData]']; docstring return section types: ['']
+    DOC203: Function `delete_checkpoint` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+    DOC203: Function `cleanup_old_checkpoints` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['int']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/clean.py
+    DOC203: Function `pipe` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Cleaner']; docstring return section types: ['']
+    DOC203: Function `when` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Cleaner']; docstring return section types: ['']
+    DOC203: Function `fallback` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Cleaner']; docstring return section types: ['']
+    DOC201: Function `remove` does not have a return section in docstring
+    DOC203: Function `remove` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `keep` does not have a return section in docstring
+    DOC203: Function `keep` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `replace` does not have a return section in docstring
+    DOC203: Function `replace` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `regex_sub` does not have a return section in docstring
+    DOC203: Function `regex_sub` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `truncate` does not have a return section in docstring
+    DOC203: Function `truncate` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `default` does not have a return section in docstring
+    DOC203: Function `default` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `phone_normalize` does not have a return section in docstring
+    DOC203: Function `phone_normalize` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `phone_clean` does not have a return section in docstring
+    DOC203: Function `phone_clean` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `website_from_email` does not have a return section in docstring
+    DOC203: Function `website_from_email` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `url_ensure_scheme` does not have a return section in docstring
+    DOC203: Function `url_ensure_scheme` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `vat_or_exempt` does not have a return section in docstring
+    DOC203: Function `vat_or_exempt` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC203: Function `separate_city_postal` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Callable[[Any], tuple[str, str]]']; docstring return section types: ['']
+    DOC203: Function `detect_country` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['str | None']; docstring return section types: ['']
+    DOC201: Function `name_strip_title` does not have a return section in docstring
+    DOC203: Function `name_strip_title` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `name_strip_suffix` does not have a return section in docstring
+    DOC203: Function `name_strip_suffix` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `name_filter_common` does not have a return section in docstring
+    DOC203: Function `name_filter_common` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `name_clean` does not have a return section in docstring
+    DOC203: Function `name_clean` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `company_suffix` does not have a return section in docstring
+    DOC203: Function `company_suffix` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `date_parse` does not have a return section in docstring
+    DOC203: Function `date_parse` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `date_normalize` does not have a return section in docstring
+    DOC203: Function `date_normalize` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC201: Function `numeric` does not have a return section in docstring
+    DOC203: Function `numeric` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+--------------------
+src/fluvo/lib/clean_expr.py
+    DOC203: Function `strip` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `normalize_space` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `lower` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `upper` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `title` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `capitalize` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `remove` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `keep` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `replace` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `regex_sub` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `sanitize_newlines` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `truncate` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `default` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `phone` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `phone_digits` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `phone_normalize` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `email` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `email_domain` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `url` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `url_https` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `url_fix_www` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `url_ensure_scheme` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `vat` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `vat_or_exempt` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `zip_code` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `zip_strip_prefix` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `city` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `street` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `city_from_combined` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `postal_from_combined` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `name_strip_title` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `name_strip_suffix` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `name_split_first` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `name_split_last` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `name_filter_common` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `name_clean` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `digits` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `numeric` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `integer` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `company_suffix` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/conf_lib.py
+    DOC203: Function `get_connection_from_dict` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Any']; docstring return section types: ['']
+    DOC501: Function `get_connection_from_dict` has raise statements, but the docstring does not have a "Raises" section
+    DOC503: Function `get_connection_from_dict` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: []. Raised exceptions in the body: ['Exception', 'KeyError', 'ValueError'].
+    DOC203: Function `_read_config_file` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['dict[str, Any]']; docstring return section types: ['']
+    DOC501: Function `_read_config_file` has raise statements, but the docstring does not have a "Raises" section
+    DOC503: Function `_read_config_file` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: []. Raised exceptions in the body: ['FileNotFoundError'].
+    DOC203: Function `get_connection_from_config` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Any']; docstring return section types: ['']
+    DOC501: Function `get_connection_from_config` has raise statements, but the docstring does not have a "Raises" section
+    DOC503: Function `get_connection_from_config` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: []. Raised exceptions in the body: ['FileNotFoundError'].
+--------------------
+src/fluvo/lib/expr.py
+    DOC203: Function `val` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `const` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `concat` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `concat_all` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `cond` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `bool_val` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `num` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `map_val` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `coalesce` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `m2o` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `m2m` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `date` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+    DOC203: Function `datetime` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/geonames.py
+    DOC203: Function `get_cache_dir` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Path']; docstring return section types: ['']
+    DOC203: Function `_get_cached_file` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Path | None']; docstring return section types: ['']
+    DOC203: Function `download_dataset` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Path']; docstring return section types: ['']
+    DOC503: Function `download_dataset` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: ['ValueError', 'httpx.HTTPError']. Raised exceptions in the body: ['ValueError'].
+    DOC203: Function `load_cities` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.DataFrame']; docstring return section types: ['Polars DataFrame with columns']
+    DOC203: Function `load_alternate_names` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.DataFrame']; docstring return section types: ['']
+    DOC203: Function `load_postal_codes` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.DataFrame']; docstring return section types: ['']
+    DOC501: Function `load_postal_codes` has raise statements, but the docstring does not have a "Raises" section
+    DOC503: Function `load_postal_codes` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: []. Raised exceptions in the body: ['ValueError'].
+    DOC203: Function `get_cities_lookup` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['dict[str, str]']; docstring return section types: ['']
+    DOC203: Function `get_postal_lookup` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['dict[str, dict[str, str]]']; docstring return section types: ['']
+    DOC203: Function `get_city_coordinates` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[float, float] | None']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/idempotent.py
+    DOC203: Function `compare_values` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+    DOC203: Function `get_existing_records` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['dict[str, dict[str, Any]]']; docstring return section types: ['']
+    DOC203: Function `find_unchanged_records` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[list[dict[str, Any]], list[dict[str, Any]], IdempotentStats]']; docstring return section types: ['']
+    DOC203: Function `filter_unchanged_rows` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[list[list[Any]], IdempotentStats]']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/internal/exceptions.py
+    DOC301: Class `SkippingError`: __init__() should not have a docstring; please combine it with the docstring of the class
+--------------------
+src/fluvo/lib/internal/rpc_thread.py
+    DOC301: Class `RpcThread`: __init__() should not have a docstring; please combine it with the docstring of the class
+    DOC201: Method `RpcThread.spawn_thread` does not have a return section in docstring
+    DOC203: Method `RpcThread.spawn_thread` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+--------------------
+src/fluvo/lib/internal/tools.py
+    DOC404: Function `batch` yield type(s) in docstring not consistent with the return annotation. The yield type (the 0th arg in Generator[...]/Iterator[...]): Any; docstring "yields" section types:
+    DOC201: Function `to_m2o` does not have a return section in docstring
+    DOC203: Function `to_m2o` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+    DOC001: Function/method `to_m2m`: Potential formatting errors in docstring. Error message: Expected a colon in 'separated by commas.'. (Note: DOC001 could trigger other unrelated violations under this function/method too. Please fix the docstring formatting first.)
+    DOC301: Class `AttributeLineDict`: __init__() should not have a docstring; please combine it with the docstring of the class
+--------------------
+src/fluvo/lib/mapper.py
+    DOC203: Function `concat_mapper_all` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['MapperFunc']; docstring return section types: ['']
+    DOC203: Function `bool_val` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['MapperFunc']; docstring return section types: ['']
+    DOC111: Function `num`: The option `--arg-type-hints-in-docstring` is `False` but there are type hints in the docstring arg list
+    DOC203: Function `m2o` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['MapperFunc']; docstring return section types: ['']
+    DOC203: Function `m2o_fun` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['str']; docstring return section types: ['']
+    DOC203: Function `m2o_map` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['MapperFunc']; docstring return section types: ['']
+    DOC203: Function `m2o_fun` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['str']; docstring return section types: ['']
+    DOC203: Function `m2m` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['MapperFunc']; docstring return section types: ['']
+    DOC203: Function `m2o_att_name` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['MapperFunc']; docstring return section types: ['']
+    DOC203: Function `binary` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['MapperFunc']; docstring return section types: ['']
+    DOC203: Function `binary_url_to_base64` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['MapperFunc']; docstring return section types: ['']
+    DOC203: Function `val_att` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['MapperFunc']; docstring return section types: ['']
+    DOC203: Function `m2o_att` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['MapperFunc']; docstring return section types: ['']
+    DOC203: Function `split_line_number` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Callable[[LineDict, int], int]']; docstring return section types: ['']
+    DOC203: Function `split_file_number` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Callable[[LineDict, int], int]']; docstring return section types: ['']
+    DOC201: Function `path_to_image` does not have a return section in docstring
+    DOC203: Function `path_to_image` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+--------------------
+src/fluvo/lib/odoo_lib.py
+    DOC203: Function `get_odoo_version` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['int']; docstring return section types: ['']
+    DOC501: Function `get_odoo_version` has raise statements, but the docstring does not have a "Raises" section
+    DOC503: Function `get_odoo_version` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: []. Raised exceptions in the body: ['Exception'].
+    DOC203: Function `build_polars_schema` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['dict[str, type[pl.DataType]]']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/preflight.py
+    DOC203: Function `_get_odoo_fields` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[dict[str, Any]]']; docstring return section types: ['']
+    DOC203: Function `_get_csv_header` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[list[str]]']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/relational_import.py
+    DOC101: Function `resolve_relations_in_df`: Docstring contains fewer arguments than in function signature.
+    DOC103: Function `resolve_relations_in_df`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [config: Union[str, dict[str, Any]], df: 'pl.DataFrame', specs: list[dict[str, Any]]].
+    DOC203: Function `resolve_relations_in_df` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.DataFrame']; docstring return section types: ['']
+    DOC203: Function `_derive_missing_relation_info` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[Optional[str], Optional[str]]']; docstring return section types: ['']
+    DOC203: Function `_query_relation_info_from_odoo` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[tuple[str, str]]']; docstring return section types: ['']
+    DOC501: Function `_query_relation_info_from_odoo` has raise statements, but the docstring does not have a "Raises" section
+    DOC503: Function `_query_relation_info_from_odoo` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: []. Raised exceptions in the body: ['ValueError'].
+    DOC203: Function `_derive_relation_info` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[str, str]']; docstring return section types: ['']
+    DOC203: Function `_prepare_link_dataframe` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.DataFrame']; docstring return section types: ['']
+    DOC203: Function `_create_relational_records` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/retry.py
+    DOC203: Function `categorize_error` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[ErrorCategory, str]']; docstring return section types: ['']
+    DOC203: Function `calculate_backoff_delay` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['float']; docstring return section types: ['']
+    DOC203: Function `retry_with_backoff` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[Optional[T], Optional[str]]']; docstring return section types: ['']
+    DOC203: Function `should_retry_error` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+    DOC203: Function `is_recoverable_error` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+    DOC203: Function `get_retry_recommendation` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['dict[str, Any]']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/rpc_transport.py
+    DOC203: Function `pooled_json_rpc` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Any']; docstring return section types: ['']
+    DOC501: Function `pooled_json_rpc` has raise statements, but the docstring does not have a "Raises" section
+    DOC503: Function `pooled_json_rpc` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: []. Raised exceptions in the body: ['JsonRPCException'].
+--------------------
+src/fluvo/lib/sort.py
+    DOC111: Function `sort_for_self_referencing`: The option `--arg-type-hints-in-docstring` is `False` but there are type hints in the docstring arg list
+--------------------
+src/fluvo/lib/throttle.py
+    DOC301: Class `ThrottleController`: __init__() should not have a docstring; please combine it with the docstring of the class
+    DOC203: Method `ThrottleController.get_delay` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['float']; docstring return section types: ['']
+    DOC203: Method `ThrottleController.get_batch_size` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['int']; docstring return section types: ['']
+    DOC203: Method `ThrottleController.get_health_status` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['dict[str, Any]']; docstring return section types: ['']
+    DOC203: Function `create_throttle_controller` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['ThrottleController']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/transform.py
+    DOC301: Class `MapperRepr`: __init__() should not have a docstring; please combine it with the docstring of the class
+    DOC301: Class `Processor`: __init__() should not have a docstring; please combine it with the docstring of the class
+    DOC203: Method `Processor._apply_date_formats` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.DataFrame']; docstring return section types: ['']
+    DOC203: Method `Processor.check` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+    DOC203: Method `Processor.split` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['dict[Any, Processor]']; docstring return section types: ['']
+    DOC102: Method `Processor.process`: Docstring contains more arguments than in function signature.
+    DOC103: Method `Processor.process`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the docstring but not in the function signature: [mapping: ].
+    DOC203: Method `Processor.process` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.DataFrame']; docstring return section types: ['']
+    DOC501: Method `Processor.resolve_relation` has raise statements, but the docstring does not have a "Raises" section
+    DOC503: Method `Processor.resolve_relation` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: []. Raised exceptions in the body: ['ValueError'].
+    DOC203: Method `Processor._cast_result_for_polars` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Any']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/validation.py
+    DOC203: Function `validate_csv_data` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['ValidationResult']; docstring return section types: ['']
+--------------------
+src/fluvo/lib/workflow/invoice_v9.py
+    DOC301: Class `InvoiceWorkflowV9`: __init__() should not have a docstring; please combine it with the docstring of the class
+--------------------
+src/fluvo/lib/writer.py
+    DOC203: Function `_get_env_from_config` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[str]']; docstring return section types: ['']
+--------------------
+src/fluvo/workflow_runner.py
+    DOC501: Function `run_invoice_v9_workflow` has raise statements, but the docstring does not have a "Raises" section
+    DOC503: Function `run_invoice_v9_workflow` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: []. Raised exceptions in the body: ['TypeError'].
+--------------------
+src/fluvo/write_threaded.py
+    DOC301: Class `RPCThreadWrite`: __init__() should not have a docstring; please combine it with the docstring of the class
+    DOC104: Function `write_data`: Arguments are the same in the docstring and the function signature, but are in a different order.
+    DOC105: Function `write_data`: Argument names match, but type hints in these args do not match: config_file, model, header, data, fail_file, max_connection, batch_size, is_fail_run, context, ignore, check
+    DOC203: Function `write_data` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['bool']; docstring return section types: ['']
+--------------------
+src/fluvo/writer.py
+    DOC203: Function `_read_data_file` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[list[str], list[list[Any]]]']; docstring return section types: ['']
+--------------------
+tests/e2e/_runtime.py
+    DOC203: Function `compose_base` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['list[str]']; docstring return section types: ['']
+--------------------
+tests/e2e/assertions.py
+    DOC101: Function `import_with_stats`: Docstring contains fewer arguments than in function signature.
+    DOC103: Function `import_with_stats`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [**kwargs: Any, batch_size: int, conn_config: dict[str, Any], context: Optional[dict[str, Any]], deferred_fields: Optional[list[str]], fail_file: str, file_csv: str, groupby: Optional[list[str]], model: str, separator: str, skip_existing: bool, skip_unchanged: bool, unique_id_field: str, worker: int].
+    DOC203: Function `import_with_stats` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[bool, dict[str, Any]]']; docstring return section types: ['The ``(success, stats)`` tuple from ']
+    DOC101: Function `run_full_import`: Docstring contains fewer arguments than in function signature.
+    DOC103: Function `run_full_import`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [auto_defer: bool, batch_size: int, conn_config: dict[str, Any], deferred_fields: Optional[list[str]], file_csv: str, groupby: Optional[list[str]], model: str, no_preflight_checks: bool, separator: str, unique_id_field: Optional[str], worker: int].
+    DOC203: Function `run_full_import` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[dict[str, int]]']; docstring return section types: ['']
+    DOC203: Function `assert_failures` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['list[dict[str, str]]']; docstring return section types: ['']
+--------------------
+tests/e2e/conftest.py
+    DOC101: Function `odoo_endpoint`: Docstring contains fewer arguments than in function signature.
+    DOC103: Function `odoo_endpoint`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [request: pytest.FixtureRequest].
+    DOC404: Function `odoo_endpoint` yield type(s) in docstring not consistent with the return annotation. The yield type (the 0th arg in Generator[...]/Iterator[...]): (str, object); docstring "yields" section types:
+--------------------
+tests/e2e/generators.py
+    DOC101: Function `write_csv`: Docstring contains fewer arguments than in function signature.
+    DOC103: Function `write_csv`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [header: list[str], path: str, rows: list[dict[str, Any]], separator: str].
+    DOC203: Function `write_csv` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['str']; docstring return section types: ['']
+    DOC101: Function `inject_duplicates`: Docstring contains fewer arguments than in function signature.
+    DOC103: Function `inject_duplicates`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [dupe_count: int, id_field: str, rows: list[dict[str, str]]].
+    DOC203: Function `inject_duplicates` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[list[dict[str, str]], list[str]]']; docstring return section types: ['']
+    DOC101: Function `inject_malformed`: Docstring contains fewer arguments than in function signature.
+    DOC103: Function `inject_malformed`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [bad_count: int, rows: list[dict[str, str]]].
+    DOC203: Function `inject_malformed` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[list[dict[str, str]], list[str]]']; docstring return section types: ['']
 --------------------
