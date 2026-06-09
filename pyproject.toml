@@ -4,14 +4,23 @@ version = "0.0.1"
 description = "Fast data into Odoo — high-performance Polars-backed ETL."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { file = "LICENSE" }
+license = "LGPL-3.0-only"
+license-files = ["LICENSE"]
 authors = [
     { name = "Strategic Efficiency B.V." },
 ]
 maintainers = [
     { name = "bosd", email = "c5e2fd43-d292-4c90-9d1f-74ff3436329a@anonaddy.me" },
 ]
-classifiers = ["Development Status :: 3 - Alpha"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 
 dependencies = [
     "click >=8.0.1",
@@ -34,7 +43,7 @@ Changelog = "https://github.com/getfluvo/fluvo/releases"
 [build-system]
 # This now includes all dependencies needed for mypyc to compile the code.
 requires = [
-    "setuptools>=61.0",
+    "setuptools>=77.0",
     "mypy>=1.0",
     "click >=8.0.1",
     "odoo-client-lib",

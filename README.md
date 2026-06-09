@@ -24,21 +24,18 @@
 [ruff badge]: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json
 [ruff project]: https://github.com/charliermarsh/ruff
 
-A powerful Python library for defining robust, repeatable, and high-performance data import/export workflows for Odoo. It replaces complex, manual data preparation with a clean, "configuration-as-code" approach.
+**Fluvo gets data into Odoo, fast.** A high-performance, Polars-backed ETL toolkit that replaces fragile, manual data prep with declarative, repeatable, configuration-as-code workflows.
 
 ---
 
-## Key Features
+## Why Fluvo?
 
-- **Declarative Transformations:** Use simple Python scripts and a rich set of `mapper` functions to transform any source CSV or XML data into an Odoo-ready format.
-- **Intelligent Import Engine:** A smart, multi-threaded importer that automatically uses the best strategy for your data. Features a `load` -> `create` fallback to rescue good records from failed batches and provide precise error feedback.
-- **Automatic Two-Pass Imports:** Automatically detects and handles interdependent relationships (e.g., parent/child records in the same file), eliminating a whole class of complex import-order errors without manual configuration.
-- **High-Performance CLI:** A clean, modern command-line interface with parallel processing (`--worker`), batching (`--size`), and deadlock prevention (`--groupby`).
-- **Direct Server-to-Server Migration:** Perform a complete export, transform, and import from one Odoo instance to another in a single, in-memory step with the `migrate` command.
-- **Post-Import Workflows:** Run automated actions on your data _after_ it has been imported (e.g., validating invoices) using the powerful `workflow` command.
-- **High-Performance Streaming Exports:** Export massive datasets from Odoo with confidence using a streaming pipeline and the Polars engine for multi-threaded data processing.
-- **Multiple Data Sources**: Natively supports CSV and XML files. Easily extendable to support other sources like databases or APIs.
-- **Data Validation:** Ensure data integrity before it even reaches Odoo.
+- ⚡ **Fast at scale** — a Polars-backed, multi-threaded engine for importing and exporting large Odoo datasets.
+- 🛟 **Imports that don't lose data** — a `load` → `create` fallback rescues the good records from a failing batch and writes the rest to a fail file with the exact error, so a few bad rows never sink the whole import.
+- 🔗 **No import-order headaches** — automatically detects relational and parent/child data and runs a two-pass import, so you don't have to hand-order your files.
+- 🧩 **Configuration-as-code** — define transforms as plain Python with a rich `mapper` library: readable, repeatable, and version-controlled.
+- 🔄 **Server-to-server migration** — export, transform, and import between two Odoo instances in a single in-memory step.
+- ✅ **Clean data before it lands** — built-in cleaning and validation catch bad values before they ever reach Odoo.
 
 
 ## Installation
@@ -122,6 +119,6 @@ This development of project is financially supported by [stefcy.com].
 
 <!-- github-only -->
 
-[license]: https://github.com/getfluvo/fluvo/blob/main/LICENSE
-[contributor guide]: https://github.com/getfluvo/fluvo/blob/main/CONTRIBUTING.md
+[license]: https://github.com/getfluvo/fluvo/blob/master/LICENSE
+[contributor guide]: https://github.com/getfluvo/fluvo/blob/master/CONTRIBUTING.md
 [command-line reference]: https://fluvo.readthedocs.io/en/latest/usage.html
