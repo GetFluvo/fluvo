@@ -27,6 +27,8 @@ html_logo = "_static/icon.png"
 # pixels large.
 html_favicon = "_static/favicon.ico"
 html_static_path = ["_static"]
+# Fluvo brand palette / logo sizing.
+html_css_files = ["branding.css"]
 
 
 def on_builder_inited(app: Sphinx) -> None:
