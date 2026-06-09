@@ -307,6 +307,7 @@ def docs_build(session: nox.Session) -> None:
         "myst_parser",
         "shibuya",
         "sphinx-copybutton",
+        "pygments<2.20",  # shibuya passes int linespans; pygments 2.20 escapes it
     )
     session.install("-e", ".")
 
