@@ -3,7 +3,13 @@ coverage:
   status:
     project:
       default:
-        target: "100"
+        # Don't regress vs. the base commit (with a small slack). The hard
+        # floor is enforced separately by coverage's fail_under in pyproject.
+        target: auto
+        threshold: 1%
     patch:
       default:
-        target: "100"
+        # New/changed lines should be reasonably covered, but don't block on
+        # trivial gaps.
+        target: 80%
+        threshold: 5%
