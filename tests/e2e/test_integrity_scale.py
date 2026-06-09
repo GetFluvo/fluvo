@@ -56,9 +56,7 @@ def test_large_two_pass_hierarchy_resolves(
     n = max(scale, 2000)
     rows = G.hierarchy(n, prefix)
     csv_path = str(tmp_path / "bighier.csv")
-    G.write_csv(
-        csv_path, ["id", "name", "email", "is_company", "parent_id"], rows
-    )
+    G.write_csv(csv_path, ["id", "name", "email", "is_company", "parent_id"], rows)
 
     success, stats = A.import_with_stats(
         conn_config,

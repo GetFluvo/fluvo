@@ -73,9 +73,7 @@ from ...lib import conf_lib
 from ...logging_config import log
 
 # Default backup file location (in user's home directory)
-DEFAULT_VAT_SETTINGS_BACKUP_DIR = (
-    Path.home() / ".fluvo" / "vat_settings_backup"
-)
+DEFAULT_VAT_SETTINGS_BACKUP_DIR = Path.home() / ".fluvo" / "vat_settings_backup"
 
 # Retry configuration for restoration
 RESTORE_MAX_RETRIES = 5

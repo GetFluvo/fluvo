@@ -458,10 +458,10 @@ def regex_sub(field: str, pattern: str, replacement: str) -> pl.Expr:
 
 
 def sanitize_newlines(field: str, replacement: str = " | ") -> pl.Expr:
-    """Replace newline characters with a safe delimiter.
+    r"""Replace newline characters with a safe delimiter.
 
     This prevents embedded newlines in text fields from corrupting CSV structure
-    during export. Handles both Unix (\\n) and Windows (\\r\\n) line endings.
+    during export. Handles both Unix (\n) and Windows (\r\n) line endings.
 
     Args:
         field: Source column name.

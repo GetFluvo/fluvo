@@ -289,9 +289,7 @@ class TestViesValidationResult:
 class TestGetVatValidationSettings:
     """Tests for get_vat_validation_settings function."""
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_get_settings_success(self, mock_get_connection: MagicMock) -> None:
         """Test getting VAT validation settings successfully."""
         mock_company_obj = MagicMock()
@@ -314,9 +312,7 @@ class TestGetVatValidationSettings:
         assert settings is not None
         assert settings.vies_settings == {1: True, 2: False}
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_get_settings_connection_error(
         self, mock_get_connection: MagicMock
     ) -> None:
@@ -326,9 +322,7 @@ class TestGetVatValidationSettings:
         settings = get_vat_validation_settings(config="bad.conf")
         assert settings is None
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_get_settings_specific_companies(
         self, mock_get_connection: MagicMock
     ) -> None:
@@ -357,9 +351,7 @@ class TestGetVatValidationSettings:
 class TestDisableVatValidation:
     """Tests for disable_vat_validation function."""
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_disable_vies(self, mock_get_connection: MagicMock) -> None:
         """Test disabling VIES validation."""
         mock_company_obj = MagicMock()
@@ -385,9 +377,7 @@ class TestDisableVatValidation:
         assert settings is not None
         mock_company_obj.write.assert_called()
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_disable_stdnum(self, mock_get_connection: MagicMock) -> None:
         """Test disabling stdnum validation."""
         mock_company_obj = MagicMock()
@@ -415,9 +405,7 @@ class TestDisableVatValidation:
 class TestRestoreVatValidationSettings:
     """Tests for restore_vat_validation_settings function."""
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_restore_settings_success(self, mock_get_connection: MagicMock) -> None:
         """Test restoring VAT validation settings."""
         mock_company_obj = MagicMock()
@@ -442,9 +430,7 @@ class TestRestoreVatValidationSettings:
         assert mock_company_obj.write.call_count == 2
         mock_param_obj.set_param.assert_called_once()
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_restore_settings_connection_error(
         self, mock_get_connection: MagicMock
     ) -> None:
@@ -468,9 +454,7 @@ class TestRestoreVatValidationSettings:
 class TestRunViesValidation:
     """Tests for run_vies_validation function."""
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_validation_no_partners(self, mock_get_connection: MagicMock) -> None:
         """Test validation with no partners to validate."""
         mock_partner_obj = MagicMock()
@@ -485,9 +469,7 @@ class TestRunViesValidation:
         assert result.total_checked == 0
         assert result.valid_count == 0
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_validation_connection_error(self, mock_get_connection: MagicMock) -> None:
         """Test handling connection error."""
         mock_get_connection.side_effect = Exception("Connection Failed")
@@ -1094,9 +1076,7 @@ class TestGetVatValidationSettingsEdgeCases:
         assert settings is not None
         mock_get_connection.assert_called_once_with(config)
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_get_settings_stdnum_param_error(
         self, mock_get_connection: MagicMock
     ) -> None:
@@ -1117,9 +1097,7 @@ class TestGetVatValidationSettingsEdgeCases:
         assert settings is not None
         assert settings.stdnum_settings == {}
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_get_settings_search_read_error(
         self, mock_get_connection: MagicMock
     ) -> None:
@@ -1161,9 +1139,7 @@ class TestDisableVatValidationEdgeCases:
 
         assert settings is not None
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_disable_connection_error_after_saving_settings(
         self, mock_get_connection: MagicMock, tmp_path: Path
     ) -> None:
@@ -1202,9 +1178,7 @@ class TestDisableVatValidationEdgeCases:
         assert settings is not None
         assert settings.vies_settings == {1: True}
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_disable_write_error(
         self, mock_get_connection: MagicMock, tmp_path: Path
     ) -> None:
@@ -1232,9 +1206,7 @@ class TestDisableVatValidationEdgeCases:
         # Should still return settings even though write failed
         assert settings is not None
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_disable_stdnum_set_param_error(
         self, mock_get_connection: MagicMock, tmp_path: Path
     ) -> None:
@@ -1261,9 +1233,7 @@ class TestDisableVatValidationEdgeCases:
         # Should still return settings
         assert settings is not None
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_disable_save_settings_false(
         self, mock_get_connection: MagicMock, tmp_path: Path
     ) -> None:
@@ -1416,9 +1386,7 @@ class TestRunViesValidationEdgeCases:
         assert result.total_checked == 0
         mock_get_connection.assert_called_once_with(config)
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_validation_with_domain_filter(
         self, mock_get_connection: MagicMock
     ) -> None:
@@ -1439,9 +1407,7 @@ class TestRunViesValidationEdgeCases:
         call_args = mock_partner_obj.search_count.call_args[0][0]
         assert ("country_id.code", "=", "BE") in call_args
 
-    @patch(
-        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
-    )
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
     def test_validation_with_max_records(self, mock_get_connection: MagicMock) -> None:
         """Test VIES validation with max_records limit."""
         mock_partner_obj = MagicMock()

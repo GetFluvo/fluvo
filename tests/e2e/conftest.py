@@ -5,9 +5,9 @@ By default this manages a disposable Postgres+Odoo stack via compose
 (e.g. a doodba stack) to run the same scenarios against a realistic install instead.
 
 Environment knobs:
-    FLUVO_E2E_ODOO_URL      Use an external Odoo (``http://host:port``); skips containers.
+    FLUVO_E2E_ODOO_URL      External Odoo URL (``http://host:port``); skips startup.
     FLUVO_E2E_ODOO_VERSION  Odoo image tag for the managed stack (default ``18.0``).
-    FLUVO_E2E_ODOO_PORT     Host port the managed Odoo is published on (default ``8069``).
+    FLUVO_E2E_ODOO_PORT     Published host port for managed Odoo (default ``8069``).
     FLUVO_E2E_DB            Target database name (default ``fluvo_e2e_target``).
     FLUVO_E2E_ADMIN_PWD     Admin password / API key (default ``admin``).
     FLUVO_E2E_PROTOCOL      Connection protocol (default ``jsonrpc``).
@@ -84,9 +84,7 @@ def target_db(odoo_endpoint: dict[str, object]) -> str:
 
 
 @pytest.fixture(scope="session")
-def conn_config(
-    odoo_endpoint: dict[str, object], target_db: str
-) -> dict[str, object]:
+def conn_config(odoo_endpoint: dict[str, object], target_db: str) -> dict[str, object]:
     """Return a connection config dict accepted by ``run_import`` / ``conf_lib``."""
     return {
         "hostname": odoo_endpoint["host"],

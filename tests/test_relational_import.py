@@ -490,9 +490,7 @@ class TestRunDirectRelationalImportEdgeCases:
 
         assert result is None
 
-    @patch(
-        "fluvo.lib.relational_import._resolve_related_ids", return_value=None
-    )
+    @patch("fluvo.lib.relational_import._resolve_related_ids", return_value=None)
     @patch("fluvo.lib.relational_import.cache.load_id_map")
     def test_run_direct_relational_import_resolve_fails(
         self, mock_load_id_map: MagicMock, mock_resolve: MagicMock
@@ -550,9 +548,7 @@ class TestRunWriteTupleImportEdgeCases:
 
         assert result is False
 
-    @patch(
-        "fluvo.lib.relational_import._resolve_related_ids", return_value=None
-    )
+    @patch("fluvo.lib.relational_import._resolve_related_ids", return_value=None)
     def test_run_write_tuple_import_resolve_fails(
         self, mock_resolve: MagicMock
     ) -> None:
@@ -866,9 +862,7 @@ class TestRunWriteO2MTupleImportEdgeCases:
         # Only p1 should be processed
         mock_parent_model.write.assert_called_once()
 
-    @patch(
-        "fluvo.lib.relational_import.writer.write_relational_failures_to_csv"
-    )
+    @patch("fluvo.lib.relational_import.writer.write_relational_failures_to_csv")
     @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_run_write_o2m_tuple_import_write_exception(
         self, mock_get_conn: MagicMock, mock_write_failures: MagicMock

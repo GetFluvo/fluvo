@@ -62,9 +62,7 @@ def name_domain(prefix: str) -> list[Any]:
     return [["name", "like", f"{prefix} %"]]
 
 
-def hierarchy(
-    n: int, prefix: str, *, fanout: int = 10
-) -> list[dict[str, str]]:
+def hierarchy(n: int, prefix: str, *, fanout: int = 10) -> list[dict[str, str]]:
     """Generate a self-referencing partner hierarchy (``parent_id`` external ids).
 
     Children reference parents that appear *later* in the file, forcing correct
@@ -111,9 +109,7 @@ def partners_with_country(
     return rows
 
 
-def states(
-    n: int, prefix: str, country_xmlid: str = "base.us"
-) -> list[dict[str, str]]:
+def states(n: int, prefix: str, country_xmlid: str = "base.us") -> list[dict[str, str]]:
     """Generate res.country.state rows (``country_id`` is a *required* m2o).
 
     Used to prove the engine never defers a required relational field - doing so
@@ -170,9 +166,7 @@ def inject_malformed(
     return rows, bad_ids
 
 
-def mixed_type_column(
-    n: int, prefix: str, column: str = "ref"
-) -> list[dict[str, str]]:
+def mixed_type_column(n: int, prefix: str, column: str = "ref") -> list[dict[str, str]]:
     """Partner rows whose ``column`` mixes integer-looking and text values.
 
     Reproduces the Polars type-inference crash class (commit a1eeca5): a column

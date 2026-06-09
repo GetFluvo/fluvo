@@ -109,8 +109,15 @@ def database_exists(db_name: str) -> bool:
     """Return True if the Postgres database already exists."""
     result = exec_in(
         "db",
-        ["psql", "-U", "odoo", "-d", "postgres", "-tAc",
-         f"SELECT 1 FROM pg_database WHERE datname='{db_name}'"],
+        [
+            "psql",
+            "-U",
+            "odoo",
+            "-d",
+            "postgres",
+            "-tAc",
+            f"SELECT 1 FROM pg_database WHERE datname='{db_name}'",
+        ],
         timeout=60,
     )
     return result.stdout.strip() == "1"
@@ -139,6 +146,5 @@ def wait_http_ready(host: str, port: int, timeout: int = 300) -> None:
             last_err = exc
         time.sleep(3)
     raise TimeoutError(
-        f"Odoo did not become ready at {url} within {timeout}s "
-        f"(last error: {last_err})"
+        f"Odoo did not become ready at {url} within {timeout}s (last error: {last_err})"
     )

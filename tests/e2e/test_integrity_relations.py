@@ -60,9 +60,7 @@ def test_dangling_reference_is_captured_not_dropped(
         rows[i]["country_id"] = "base.country_does_not_exist_xyz"
         bad_ids.append(rows[i]["id"])
     csv_path = str(tmp_path / "dangle.csv")
-    G.write_csv(
-        csv_path, ["id", "name", "email", "is_company", "country_id"], rows
-    )
+    G.write_csv(csv_path, ["id", "name", "email", "is_company", "country_id"], rows)
 
     _success, stats = A.import_with_stats(
         conn_config, "res.partner", csv_path, _fail_path(tmp_path, "dangle")
@@ -86,9 +84,7 @@ def test_self_referential_hierarchy_resolves(
     prefix = "s3hier"
     rows = G.hierarchy(scale, prefix)
     csv_path = str(tmp_path / "hier.csv")
-    G.write_csv(
-        csv_path, ["id", "name", "email", "is_company", "parent_id"], rows
-    )
+    G.write_csv(csv_path, ["id", "name", "email", "is_company", "parent_id"], rows)
 
     success, stats = A.import_with_stats(
         conn_config,
@@ -117,9 +113,7 @@ def test_cross_model_xmlid_reference_resolves(
     prefix = "s4xref"
     rows = G.with_country(scale, prefix, country_xmlid="base.be")
     csv_path = str(tmp_path / "xref.csv")
-    G.write_csv(
-        csv_path, ["id", "name", "email", "is_company", "country_id"], rows
-    )
+    G.write_csv(csv_path, ["id", "name", "email", "is_company", "country_id"], rows)
 
     success, stats = A.import_with_stats(
         conn_config,

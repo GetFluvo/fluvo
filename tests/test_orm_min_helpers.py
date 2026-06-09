@@ -134,8 +134,9 @@ def test_export_id_map_builds_key_xmlid_dbid(tmp_path: object) -> None:
     conn.get_model.side_effect = lambda m: country if m == "res.country" else imd
 
     cfg = {"hostname": "h", "port": 1, "database": "d", "login": "a", "password": "b"}
-    with patch.object(cache, "resolve_cache_dir", return_value=None), patch(
-        "fluvo.lib.conf_lib.get_connection_from_dict", return_value=conn
+    with (
+        patch.object(cache, "resolve_cache_dir", return_value=None),
+        patch("fluvo.lib.conf_lib.get_connection_from_dict", return_value=conn),
     ):
         df = cache.export_id_map(cfg, "res.country", "name")
 

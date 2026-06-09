@@ -480,9 +480,7 @@ def test_m2o_fun_state_present_but_unused(mocker: MagicMock) -> None:
         "fluvo.lib.mapper._get_field_value",
         side_effect=_mock_get_field_value,
     )
-    mock_to_m2o = mocker.patch(
-        "fluvo.lib.mapper.to_m2o", side_effect=_mock_to_m2o
-    )
+    mock_to_m2o = mocker.patch("fluvo.lib.mapper.to_m2o", side_effect=_mock_to_m2o)
 
     mapper_func = mapper.m2o(prefix="test_prefix", field="name")
     line: LineDict = {"name": "TestValue"}
@@ -508,9 +506,7 @@ def test_m2o_fun_with_skip_and_empty_value_state_unused(
         "fluvo.lib.mapper._get_field_value",
         side_effect=_mock_get_field_value,
     )
-    mock_to_m2o = mocker.patch(
-        "fluvo.lib.mapper.to_m2o", side_effect=_mock_to_m2o
-    )
+    mock_to_m2o = mocker.patch("fluvo.lib.mapper.to_m2o", side_effect=_mock_to_m2o)
 
     mapper_func = mapper.m2o(prefix="test_prefix", field="name", skip=True)
     line: LineDict = {"name": ""}
@@ -537,9 +533,7 @@ def test_m2o_map_fun_state_passed_to_concat_mapper(mocker: MagicMock) -> None:
     mock_concat_actual = mocker.patch(
         "fluvo.lib.mapper.concat", side_effect=_mock_concat
     )
-    mock_to_m2o = mocker.patch(
-        "fluvo.lib.mapper.to_m2o", side_effect=_mock_to_m2o
-    )
+    mock_to_m2o = mocker.patch("fluvo.lib.mapper.to_m2o", side_effect=_mock_to_m2o)
 
     mapper_func = mapper.m2o_map("test_prefix", "first", "last")
     line: LineDict = {"first": "John", "last": "Doe"}
@@ -586,9 +580,7 @@ def test_m2o_map_fun_with_skip_and_empty_concat_value_state_passed(
     mock_concat_actual = mocker.patch(
         "fluvo.lib.mapper.concat", side_effect=_mock_concat
     )
-    mock_to_m2o = mocker.patch(
-        "fluvo.lib.mapper.to_m2o", side_effect=_mock_to_m2o
-    )
+    mock_to_m2o = mocker.patch("fluvo.lib.mapper.to_m2o", side_effect=_mock_to_m2o)
 
     mapper_func = mapper.m2o_map("test_prefix", "non_existent_field", skip=True)
     line: LineDict = {}

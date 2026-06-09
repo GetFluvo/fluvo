@@ -158,9 +158,7 @@ def xmlid_to_res_id(rpc: Any, xmlid: str) -> Optional[int]:
     return int(rows[0]["res_id"]) if rows else None
 
 
-def assert_db_count(
-    rpc: Any, model: str, domain: list[Any], expected: int
-) -> None:
+def assert_db_count(rpc: Any, model: str, domain: list[Any], expected: int) -> None:
     """Assert the target DB holds exactly ``expected`` records for ``domain``."""
     actual = count(rpc, model, domain)
     assert actual == expected, (

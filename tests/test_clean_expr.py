@@ -771,21 +771,21 @@ class TestSanitizeNewlines:
     """Tests for sanitize_newlines function (#187)."""
 
     def test_sanitize_unix_newlines(self) -> None:
-        """Test sanitization of Unix newlines (\\n)."""
+        r"""Test sanitization of Unix newlines (\n)."""
         result = apply_expr(
             clean_expr.sanitize_newlines("col"), "Line 1\nLine 2\nLine 3"
         )
         assert result == "Line 1 | Line 2 | Line 3"
 
     def test_sanitize_windows_newlines(self) -> None:
-        """Test sanitization of Windows newlines (\\r\\n)."""
+        r"""Test sanitization of Windows newlines (\r\n)."""
         result = apply_expr(
             clean_expr.sanitize_newlines("col"), "Line 1\r\nLine 2\r\nLine 3"
         )
         assert result == "Line 1 | Line 2 | Line 3"
 
     def test_sanitize_carriage_returns(self) -> None:
-        """Test sanitization of carriage returns (\\r)."""
+        r"""Test sanitization of carriage returns (\r)."""
         result = apply_expr(clean_expr.sanitize_newlines("col"), "Line 1\rLine 2")
         assert result == "Line 1 | Line 2"
 

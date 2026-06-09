@@ -29,7 +29,7 @@ def _show_success_panel(message: str) -> None:
     )
 
 
-def run_export(
+def run_export(  # noqa: D417
     config: Union[str, dict[str, Any]],
     model: str,
     fields: str,

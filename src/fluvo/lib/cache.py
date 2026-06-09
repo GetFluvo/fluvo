@@ -26,8 +26,7 @@ def _connection_fingerprint(config: Union[str, dict[str, Any]]) -> Optional[str]
     try:
         if isinstance(config, dict):
             return (
-                f"{config.get('hostname')}{config.get('port')}"
-                f"{config.get('database')}"
+                f"{config.get('hostname')}{config.get('port')}{config.get('database')}"
             )
         parser = configparser.ConfigParser()
         parser.read(config)
@@ -169,9 +168,7 @@ def export_id_map(
 
     cache_dir = resolve_cache_dir(config)
     safe_key = key_field.replace("/", "_")
-    file_path = (
-        cache_dir / f"{model}.idmap__{safe_key}.parquet" if cache_dir else None
-    )
+    file_path = cache_dir / f"{model}.idmap__{safe_key}.parquet" if cache_dir else None
 
     if file_path and file_path.exists() and not force_refresh:
         try:

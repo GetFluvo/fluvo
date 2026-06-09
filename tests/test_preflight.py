@@ -22,9 +22,7 @@ def mock_polars_read_csv() -> Generator[MagicMock, None, None]:
 @pytest.fixture
 def mock_conf_lib() -> Generator[MagicMock, None, None]:
     """Fixture to mock conf_lib.get_connection_from_config."""
-    with patch(
-        "fluvo.lib.preflight.conf_lib.get_connection_from_config"
-    ) as mock_conn:
+    with patch("fluvo.lib.preflight.conf_lib.get_connection_from_config") as mock_conn:
         yield mock_conn
 
 

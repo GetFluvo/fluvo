@@ -24,13 +24,9 @@ def test_auto_defer_keeps_required_m2o_in_pass1(
     csv_path = str(tmp_path / "states.csv")
     G.write_csv(csv_path, ["id", "name", "code", "country_id/id"], rows)
 
-    A.run_full_import(
-        conn_config, "res.country.state", csv_path, auto_defer=True
-    )
+    A.run_full_import(conn_config, "res.country.state", csv_path, auto_defer=True)
 
-    A.assert_db_count(
-        rpc, "res.country.state", [["name", "like", f"{prefix} %"]], n
-    )
+    A.assert_db_count(rpc, "res.country.state", [["name", "like", f"{prefix} %"]], n)
 
 
 def test_explicit_defer_of_required_field_is_ignored(
@@ -57,6 +53,4 @@ def test_explicit_defer_of_required_field_is_ignored(
         deferred_fields=["country_id"],
     )
 
-    A.assert_db_count(
-        rpc, "res.country.state", [["name", "like", f"{prefix} %"]], n
-    )
+    A.assert_db_count(rpc, "res.country.state", [["name", "like", f"{prefix} %"]], n)

@@ -366,22 +366,14 @@ def filter_unchanged_rows(
 
         # Per-field "changed": only when the source cell is present (not absent).
         df = df.with_columns(
-            [
-                pl.col(f).is_not_null().alias(f"__p{i}")
-                for i, f in enumerate(comparable)
-            ]
+            [pl.col(f).is_not_null().alias(f"__p{i}") for i, f in enumerate(comparable)]
             + [
-                pl.col(f)
-                .str.strip_chars()
-                .fill_null("")
-                .alias(f"__s{i}")
+                pl.col(f).str.strip_chars().fill_null("").alias(f"__s{i}")
                 for i, f in enumerate(comparable)
             ]
         )
 
-        is_matched = pl.col("__present").fill_null(False) & (
-            pl.col("__extid") != ""
-        )
+        is_matched = pl.col("__present").fill_null(False) & (pl.col("__extid") != "")
         if comparable:
             changed_expr = pl.any_horizontal(
                 [

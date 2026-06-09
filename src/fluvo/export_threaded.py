@@ -411,7 +411,7 @@ def _clean_batch(batch_data: list[dict[str, Any]]) -> pl.DataFrame:
     return pl.DataFrame(batch_data, infer_schema_length=None)
 
 
-def _clean_and_transform_batch(
+def _clean_and_transform_batch(  # noqa: C901
     df: pl.DataFrame,
     field_types: dict[str, str],
     polars_schema: dict[str, pl.DataType],
@@ -549,7 +549,7 @@ def _enrich_main_df_with_xml_ids(
     return df_enriched.with_columns(pl.col("xml_id").alias("id")).drop("xml_id")
 
 
-def _process_export_batches(  # noqa: C901
+def _process_export_batches(  # noqa: C901, D417
     rpc_thread: "RPCThreadExport",
     total_ids: int,
     model_name: str,
@@ -852,7 +852,7 @@ def _create_new_session(
     return ids, total_record_count
 
 
-def export_data(
+def export_data(  # noqa: D417
     config: Union[str, dict[str, Any]],
     model: str,
     domain: list[Any],
