@@ -47,7 +47,7 @@ def test_convert_external_id_no_dot_uses_export_module() -> None:
     imd = conn.get_model.return_value
     imd.search.return_value = [5]
     imd.read.return_value = {"res_id": 7}
-    base, value = _convert_external_id_field(conn, "x_id/id", "just_name")
+    _base, value = _convert_external_id_field(conn, "x_id/id", "just_name")
     assert value == 7
 
 
