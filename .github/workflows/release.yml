@@ -1,53 +1,91 @@
 name: Release
 
-# Tag-triggered release. Push an annotated tag like `v0.0.1` (matching the
-# version in pyproject.toml) to build and publish to PyPI via Trusted Publishing
-# (OIDC) — no API token secrets required.
+# Tag-triggered release. Push an annotated tag like `v0.0.2` (matching the version
+# in pyproject.toml) to build compiled (mypyc) wheels for every platform via
+# cibuildwheel + an sdist, then publish to PyPI via Trusted Publishing (OIDC).
+#
+# `workflow_dispatch` builds the wheels WITHOUT publishing, so the matrix can be
+# tested before committing to a real release tag.
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  release:
-    name: Release
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write # OIDC for PyPI Trusted Publishing
-      contents: write # create the GitHub release notes
+  build-wheels:
+    name: Wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Build compiled (mypyc) wheels
+        uses: pypa/cibuildwheel@v4.0.0
+        # All build settings live in [tool.cibuildwheel] in pyproject.toml.
+
+      - uses: actions/upload-artifact@v6
         with:
-          python-version: "3.13"
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  build-sdist:
+    name: Source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
+      - name: Build sdist
+        run: uv build --sdist
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  publish:
+    name: Publish to PyPI
+    needs: [build-wheels, build-sdist]
+    runs-on: ubuntu-latest
+    # Only publish on a real version tag, never on a workflow_dispatch test build.
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      id-token: write # OIDC for PyPI Trusted Publishing
+      contents: write # create the GitHub release notes
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
       - name: Verify tag matches package version
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          pkg="$(uv version | awk '{ print $2 }')"
+          pkg="$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)"
           if [ "$tag" != "$pkg" ]; then
             echo "::error::Tag '${GITHUB_REF_NAME}' does not match pyproject version '${pkg}'."
             exit 1
           fi
           echo "Releasing version ${pkg}."
 
-      - name: Build package
-        # Build a pure-Python wheel + sdist. We deliberately do NOT set
-        # FLUVO_COMPILE_MYPYC here: a mypyc-compiled wheel gets a `linux_x86_64`
-        # platform tag, which PyPI rejects (it requires manylinux). Compiled
-        # manylinux/macos/windows wheels can be added later via cibuildwheel.
-        run: uv build
+      - name: Collect all build artifacts into dist/
+        uses: actions/download-artifact@v7
+        with:
+          path: dist
+          pattern: "*"
+          merge-multiple: true
 
       - name: Publish to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@release/v1

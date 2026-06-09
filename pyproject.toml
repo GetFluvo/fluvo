@@ -220,6 +220,19 @@ exclude = [
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.cibuildwheel]
+# Build mypyc-compiled wheels for the supported CPython versions (used by the
+# Release workflow). mypyc targets CPython, so PyPy/musllinux/32-bit are skipped.
+build = "cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
+skip = "*-musllinux* *_i686 *-win32 pp*"
+environment = "FLUVO_COMPILE_MYPYC=1"
+# Smoke-test that each built wheel's compiled extension imports.
+test-command = "python -c \"import fluvo\""
+build-verbosity = 1
+
+[tool.cibuildwheel.macos]
+archs = ["x86_64", "arm64"]
+
 [tool.pydoclint]
 style = 'google'
 exclude = '\.git|\.nox|noxfile.py'
