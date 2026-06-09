@@ -2005,10 +2005,12 @@ def _execute_load_batch(  # noqa: C901
                     sanitized_id = to_xmlid(line[uid_index])
                     db_id = created_ids[i]
                     id_map[sanitized_id] = db_id
-
-                    # Ensure XML ID is persisted (load() sometimes fails to create it)
-                    if sanitized_id and sanitized_id.strip() and connection:
-                        _create_xmlid_entry(connection, sanitized_id, db_id, model_name)
+                    # NB: Odoo's load() creates the ir.model.data XML ID entry
+                    # natively for the 'id' column. Do NOT create it per-record
+                    # here: that adds 2-3 RPCs per record (search+read+create),
+                    # which collapses throughput on large imports. The create()
+                    # fallback path (which does not auto-create XML IDs) still
+                    # calls _create_xmlid_entry where it is genuinely required.
 
             # The update call remains the same and will now be type-safe.
             aggregated_id_map.update(id_map)

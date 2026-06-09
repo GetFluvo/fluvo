@@ -15,6 +15,11 @@ from typing import Any
 import odoolib
 
 from ..logging_config import log
+from . import rpc_transport
+
+# Replace odoo-client-lib's per-call httpx.post transport with a pooled client
+# (one SSL context, keep-alive, generous timeout). Critical for large imports.
+rpc_transport.install()
 
 _connection_cache: dict[str, Any] = {}
 
