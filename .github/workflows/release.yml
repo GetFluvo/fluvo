@@ -43,8 +43,10 @@ jobs:
           echo "Releasing version ${pkg}."
 
       - name: Build package
-        env:
-          FLUVO_COMPILE_MYPYC: "1"
+        # Build a pure-Python wheel + sdist. We deliberately do NOT set
+        # FLUVO_COMPILE_MYPYC here: a mypyc-compiled wheel gets a `linux_x86_64`
+        # platform tag, which PyPI rejects (it requires manylinux). Compiled
+        # manylinux/macos/windows wheels can be added later via cibuildwheel.
         run: uv build
 
       - name: Publish to PyPI (Trusted Publishing)
