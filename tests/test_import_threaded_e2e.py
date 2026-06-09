@@ -180,7 +180,7 @@ def test_import_data_two_pass_self_ref(tmp_path: Path) -> None:
 
 def test_import_data_failures_written_to_fail_file(tmp_path: Path) -> None:
     """Records that fail to load are written to the fail file with the error."""
-    result, store = _run(tmp_path, "id,name\nrec_a,Alice\n", fail_all=True)
+    _result, store = _run(tmp_path, "id,name\nrec_a,Alice\n", fail_all=True)
     fail = tmp_path / "fail.csv"
     assert fail.exists()
     content = fail.read_text()
@@ -207,7 +207,7 @@ def test_import_data_multiple_batches(tmp_path: Path) -> None:
 def test_import_data_partial_failure_rescues_good_records(tmp_path: Path) -> None:
     """A bad row is isolated to the fail file; the good rows still import."""
     csv = "id,name\ngood_a,A\nbad_x,X\ngood_c,C\n"
-    result, store = _run(tmp_path, csv, fail_ids={"bad_x"}, batch_size=10)
+    _result, store = _run(tmp_path, csv, fail_ids={"bad_x"}, batch_size=10)
     names = {v["name"] for v in store.records.get("res.partner", {}).values()}
     assert "A" in names and "C" in names  # good rows rescued
     assert "X" not in names  # bad row isolated, not persisted
@@ -226,7 +226,7 @@ def test_import_data_cross_model_two_pass(tmp_path: Path) -> None:
         }
     ]
     csv = "id,name,user_id/id\nrec_a,Alice,base.user_admin\n"
-    result, store = _run(tmp_path, csv, deferred_fields=["user_id/id"], seed_imd=seed)
+    _result, store = _run(tmp_path, csv, deferred_fields=["user_id/id"], seed_imd=seed)
     contact = next(
         v for v in store.records["res.partner"].values() if v.get("name") == "Alice"
     )

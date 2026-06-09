@@ -499,7 +499,7 @@ class Processor:
             df = info_copy.pop("dataframe", None)
             if df is not None:
                 info_copy["header"] = list(df.columns)
-                info_copy["data"] = df.rows()
+                info_copy["data"] = [list(row) for row in df.rows()]
             # Use the config from params if available, else the processor default.
             info_copy["conf_file"] = info.get("config") or self.config_file
             info_copy.update(
