@@ -215,7 +215,7 @@ style = 'google'
 exclude = '\.git|\.nox|noxfile.py'
 arg-type-hints-in-docstring = false
 baseline = 'pydoclint-baseline.txt'
-auto-generate-baseline = 'True'
+auto-generate-baseline = 'False'
 
 [tool.pytest.ini_options]
 addopts = "--doctest-modules src tests --ignore=tests/e2e"

@@ -32,7 +32,10 @@ repos:
         entry: pydoclint
         language: system
         types: [python]
-        args: ["--generate-baseline=True"]
+        # Check mode: validate against the committed baseline instead of
+        # regenerating it every run (regeneration made CI fail on any ordering
+        # nuance). Refresh the baseline manually with --generate-baseline=True.
+        args: ["--generate-baseline=False"]
       - id: ruff
         name: ruff
         entry: ruff check
