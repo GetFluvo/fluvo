@@ -258,7 +258,7 @@ def run_import(  # noqa: C901
     if auto_groupby and not groupby:
         groupby = import_plan.get("groupby") or None
         if groupby:
-            log.info(f"Auto-groupby active: grouping by {groupby}.")
+            log.info(f"Auto-groupby active: grouping by {', '.join(groupby)}.")
 
     # --- Strategy Execution ---
     sorted_temp_file = None

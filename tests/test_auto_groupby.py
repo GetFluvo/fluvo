@@ -95,3 +95,17 @@ def test_auto_groupby_respects_explicit_groupby(tmp_path) -> None:  # type: igno
         groupby=["name"],  # explicit -> auto must not override
     )
     assert "groupby" not in import_plan
+
+
+def test_picks_dbid_suffix_column() -> None:
+    """A /.id (database-id) relational column is recognised (review fix)."""
+    df = pl.DataFrame(
+        {
+            "id": ["a", "b", "c", "d"],
+            "country_id/.id": ["10", "10", "20", "10"],  # 4 rows / 2 unique = 2.0
+        }
+    )
+    assert (
+        _detect_groupby_column(df, list(df.columns), _FIELDS, "res.partner")
+        == "country_id/.id"
+    )

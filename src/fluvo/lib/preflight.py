@@ -478,7 +478,8 @@ def _detect_groupby_column(
     best: Optional[str] = None
     best_dup = 0.0
     for field_name in header:
-        clean = field_name.replace("/id", "")
+        # Strip any relational suffix: handles 'x_id/id', 'x_id/.id' and 'x_id'.
+        clean = field_name.split("/", 1)[0]
         info = odoo_fields.get(clean)
         if not info or info.get("type") != "many2one":
             continue
@@ -486,8 +487,10 @@ def _detect_groupby_column(
             continue  # self-references handled by two-pass deferral / sort
         if field_name not in df.columns:
             continue
+        # Drop nulls first, then empties, to avoid Polars null-propagation in the mask.
         col = df.get_column(field_name)
-        non_null = col.filter(col.is_not_null() & (col != ""))
+        non_null = col.drop_nulls()
+        non_null = non_null.filter(non_null != "")
         if non_null.len() < 2:
             continue
         n_unique = non_null.n_unique()
