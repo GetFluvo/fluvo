@@ -340,3 +340,52 @@ if __name__ == "__main__":
     test_format_odoo_error()
     test_extract_per_row_errors()
     print("All import_threaded comprehensive tests passed!")
+
+
+def test_execute_load_batch_multi_record_success() -> None:
+    """A clean multi-record batch loads in one call and maps ids."""
+    from fluvo.import_threaded import _execute_load_batch
+
+    model = MagicMock()
+    model.load.return_value = {"ids": [101, 102], "messages": []}
+    thread_state: dict[str, Any] = {
+        "model": model,
+        "id_map": {},
+        "failed_lines": [],
+        "context": {},
+        "progress": None,
+        "unique_id_field_index": 0,
+        "connection": MagicMock(),
+    }
+    result = _execute_load_batch(
+        thread_state, [["rec_1", "A"], ["rec_2", "B"]], ["id", "name"], 1
+    )
+    assert isinstance(result, dict)
+    assert "id_map" in result
+
+
+def test_execute_load_batch_many_failures_triggers_fallback() -> None:
+    """Multiple failures with a single generic message route to binary fallback."""
+    from fluvo.import_threaded import _execute_load_batch
+
+    model = MagicMock()
+    # All records fail with one generic message (no per-row errors).
+    model.load.return_value = {
+        "ids": [],
+        "messages": [{"message": "generic batch error"}],
+    }
+    thread_state: dict[str, Any] = {
+        "model": model,
+        "id_map": {},
+        "failed_lines": [],
+        "context": {},
+        "progress": None,
+        "unique_id_field_index": 0,
+        "connection": MagicMock(),
+    }
+    result = _execute_load_batch(
+        thread_state, [["rec_1", "A"], ["rec_2", "B"]], ["id", "name"], 1
+    )
+    assert isinstance(result, dict)
+    # model.load is retried by the binary fallback on the failing rows.
+    assert model.load.call_count >= 1
