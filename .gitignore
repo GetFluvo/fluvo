@@ -44,7 +44,6 @@ testdata/
 uv.lock
 
 # pydoclint baseline
-pydoclint-baseline.txt
 
 # python
 __pycache__
