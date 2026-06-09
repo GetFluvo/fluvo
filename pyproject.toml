@@ -123,6 +123,9 @@ tests = ["tests", "*/tests"]
 
 [tool.coverage.run]
 branch = true
+# The import/export pipelines run in worker threads; without this, coverage
+# never counts the lines executed inside them.
+concurrency = ["thread"]
 source = ["fluvo", "tests"]
 omit = [
     # Exclude the legacy v9 workflow from coverage reports
