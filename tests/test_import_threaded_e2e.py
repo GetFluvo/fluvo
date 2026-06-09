@@ -251,12 +251,7 @@ def test_import_data_groupby_imports_all_records(tmp_path: Path) -> None:
 
 def test_import_data_groupby_with_deferred_no_loss(tmp_path: Path) -> None:
     """Grouping + a deferred self-ref still imports everything and resolves Pass 2."""
-    csv = (
-        "id,name,country_id/id,parent_id/id\n"
-        "co,Co,be,\n"
-        "a,A,be,co\n"
-        "b,B,fr,co\n"
-    )
+    csv = "id,name,country_id/id,parent_id/id\nco,Co,be,\na,A,be,co\nb,B,fr,co\n"
     _result, store = _run(
         tmp_path, csv, split_by_cols=["country_id/id"], deferred_fields=["parent_id/id"]
     )

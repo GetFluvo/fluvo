@@ -35,9 +35,7 @@ def test_all_unique_returns_none() -> None:
 
 def test_self_reference_is_skipped() -> None:
     """Self-referencing m2o is left to two-pass deferral, not groupby."""
-    df = pl.DataFrame(
-        {"id": ["a", "b", "c"], "parent_id/id": ["p", "p", "p"]}
-    )
+    df = pl.DataFrame({"id": ["a", "b", "c"], "parent_id/id": ["p", "p", "p"]})
     assert _detect_groupby_column(df, list(df.columns), _FIELDS, "res.partner") is None
 
 
