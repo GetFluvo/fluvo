@@ -1,5 +1,6 @@
 """Tests for the pooled JSON-RPC transport patch."""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import odoolib.rpc
@@ -94,6 +95,9 @@ def test_get_client_is_singleton() -> None:
         c2 = rpc_transport._get_client()
         assert c1 is c2
     finally:
-        if rpc_transport._client is not None:
-            rpc_transport._client.close()
+        # Annotate as Any: mypy can't see that _get_client() repopulated the
+        # module global, so it would otherwise mark this cleanup unreachable.
+        client: Any = rpc_transport._client
+        if client is not None:
+            client.close()
             rpc_transport._client = None
