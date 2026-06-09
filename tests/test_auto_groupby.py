@@ -107,3 +107,43 @@ def test_picks_dbid_suffix_column() -> None:
         _detect_groupby_column(df, list(df.columns), _FIELDS, "res.partner")
         == "country_id/.id"
     )
+
+
+def test_returns_none_for_tiny_df() -> None:
+    """A df with fewer than 2 rows can't benefit from grouping (early return)."""
+    df = pl.DataFrame({"id": ["a"], "country_id/id": ["be"]})
+    assert _detect_groupby_column(df, list(df.columns), _FIELDS, "res.partner") is None
+
+
+def test_skips_field_absent_from_df() -> None:
+    """A many2one named in the header but missing from the df is skipped."""
+    df = pl.DataFrame({"id": ["a", "b"], "name": ["A", "B"]})
+    header = ["id", "name", "country_id/id"]  # claims a column the df lacks
+    assert _detect_groupby_column(df, header, _FIELDS, "res.partner") is None
+
+
+def test_skips_sparse_column() -> None:
+    """A many2one column with fewer than 2 non-empty values is skipped."""
+    df = pl.DataFrame({"id": ["a", "b"], "country_id/id": ["be", ""]})
+    assert _detect_groupby_column(df, list(df.columns), _FIELDS, "res.partner") is None
+
+
+def test_auto_groupby_wiring_no_detectable_column(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """auto_groupby with no groupable column leaves the plan unset (no-op + log)."""
+    from fluvo.lib.preflight import _plan_deferrals_and_strategies
+
+    csv = tmp_path / "p.csv"
+    csv.write_text("id,name\na,A\nb,B\n")  # no many2one column at all
+    odoo_fields = {"id": {"type": "char"}, "name": {"type": "char"}}
+    import_plan: dict = {}  # type: ignore[type-arg]
+    _plan_deferrals_and_strategies(
+        ["id", "name"],
+        odoo_fields,
+        "res.partner",
+        str(csv),
+        ",",
+        import_plan,
+        auto_groupby=True,
+        groupby=None,
+    )
+    assert "groupby" not in import_plan
