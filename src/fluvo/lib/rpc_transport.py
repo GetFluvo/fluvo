@@ -131,19 +131,19 @@ def install() -> bool:
     try:
         import odoolib.tools as _tools
 
-        _tools.json_rpc = pooled_json_rpc  # type: ignore[assignment]
+        _tools.json_rpc = pooled_json_rpc
         try:
             import odoolib.rpc as _rpc
 
             # rpc.py did `from .tools import json_rpc`, so it has its own ref.
-            _rpc.json_rpc = pooled_json_rpc  # type: ignore[assignment]
+            _rpc.json_rpc = pooled_json_rpc
         except Exception as exc:  # pragma: no cover - older/newer layouts
             log.debug(f"odoolib.rpc json_rpc not patched: {exc}")
         try:
             # Odoo 19 json2 connector: swap its module-level httpx for the shim.
             import odoolib.json2 as _json2
 
-            _json2.httpx = _PooledHttpx(_json2.httpx)  # type: ignore[assignment]
+            _json2.httpx = _PooledHttpx(_json2.httpx)
         except Exception as exc:  # pragma: no cover - older/newer layouts
             log.debug(f"odoolib.json2 httpx not patched: {exc}")
         _installed = True

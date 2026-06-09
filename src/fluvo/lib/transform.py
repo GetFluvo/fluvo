@@ -610,6 +610,11 @@ class Processor:
             "on_missing": on_missing,
             "drop_source": drop_source,
         }
+        if self.config_file is None:
+            raise ValueError(
+                "resolve_relation() needs an Odoo connection config to build the "
+                "id-map; construct the Processor with a config file."
+            )
         self.dataframe = relational_import.resolve_relations_in_df(
             self.dataframe, [spec], self.config_file
         )
