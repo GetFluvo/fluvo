@@ -760,3 +760,26 @@ def test_no_date_formats_passthrough() -> None:
 
     # Without date_formats, column stays as string
     assert processor.dataframe["some_date"].dtype == pl.String
+
+
+def test_write_to_file_writes_data_csv(tmp_path: Path) -> None:
+    """write_to_file must write the transformed data CSV, not just load.sh.
+
+    Regression: _add_data queued the dataframe but write_file expected
+    header/data, so the referenced CSV was never written (only the load script).
+    """
+    src = tmp_path / "src.csv"
+    src.write_text("SKU,Name\nA1,Widget\nB2,Gadget\n")
+    out = tmp_path / "out.csv"
+    load = tmp_path / "load.sh"
+
+    mapping = {"id": mapper.m2o("product", "SKU"), "name": mapper.val("Name")}
+    processor = Processor(mapping, source_filename=str(src), separator=",")
+    processor.process(str(out), {"model": "product.product"})
+    processor.write_to_file(str(load))
+
+    assert out.exists(), "the transformed data CSV must be written"
+    content = out.read_text()
+    assert "name" in content and "Widget" in content and "Gadget" in content
+    assert load.exists()
+    assert "fluvo import" in load.read_text()

@@ -59,13 +59,13 @@ from fluvo.lib.transform import Processor
 from fluvo.lib import mapper
 
 my_mapping = {
-    'id': mapper.concat('prod_', 'SKU'),
+    'id': mapper.m2o('product', 'SKU'),  # external id, e.g. product.A1
     'name': mapper.val('ProductName'),
     'list_price': mapper.num('Price'),
 }
 
-processor = Processor('origin/products.csv')
-processor.process(my_mapping, 'data/products_clean.csv', {'model': 'product.product'})
+processor = Processor(my_mapping, source_filename='origin/products.csv', separator=',')
+processor.process('data/products_clean.csv', {'model': 'product.product'})
 processor.write_to_file("load.sh")
 ```
 ...

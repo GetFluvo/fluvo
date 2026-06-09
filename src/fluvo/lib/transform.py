@@ -493,8 +493,14 @@ class Processor:
         init = not append
         for _, info in self.file_to_write.items():
             info_copy = info.copy()
-            # NEW: Use the config from params if available,
-            #  otherwise use the processor's default
+            # Convert the queued dataframe into the header + rows that write_file
+            # needs to actually write the data CSV (without this, only the load
+            # script is produced and the referenced CSV is never written).
+            df = info_copy.pop("dataframe", None)
+            if df is not None:
+                info_copy["header"] = list(df.columns)
+                info_copy["data"] = df.rows()
+            # Use the config from params if available, else the processor default.
             info_copy["conf_file"] = info.get("config") or self.config_file
             info_copy.update(
                 {
