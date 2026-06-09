@@ -196,6 +196,11 @@ exclude = [
 "*/test_*.py" = ["S101"]
 "noxfile.py" = ["S101"]
 "**/conftest.py" = ["S101"]
+# The e2e harness is operational tooling, not library code: the assertion module
+# is assert-based (S101), uses short A/G import aliases by convention (N812), and
+# its runtime driver shells out to compose / runs an internal DB-exists query
+# (S603/S608). Optional style (UP045) matches the rest of the codebase.
+"tests/e2e/*" = ["S101", "N812", "S603", "S608", "UP045"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -210,3 +215,6 @@ auto-generate-baseline = 'True'
 [tool.pytest.ini_options]
 addopts = "--doctest-modules src tests --ignore=tests/e2e"
 doctest_optionflags = "NORMALIZE_WHITESPACE ELLIPSIS IGNORE_EXCEPTION_DETAIL"
+markers = [
+    "large: opt-in large-dataset e2e stress runs (deselected unless -m large).",
+]

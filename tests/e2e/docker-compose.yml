@@ -1,0 +1,31 @@
+# e2e test stack for odoo-data-flow.
+# Brought up / torn down by tests/e2e/conftest.py (runtime-agnostic: podman or docker).
+# The Odoo version is injected via the ODF_E2E_ODOO_VERSION env var (default 18.0).
+# Not used in normal `pytest` runs (tests/e2e is excluded by default); only the e2e session.
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=odoo
+      - POSTGRES_PASSWORD=odoo
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odoo"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  odoo:
+    image: odoo:${ODF_E2E_ODOO_VERSION:-18.0}
+    depends_on:
+      - db
+    ports:
+      - "${ODF_E2E_ODOO_PORT:-8069}:8069"
+    environment:
+      - HOST=db
+      - USER=odoo
+      - PASSWORD=odoo
+    # Long-running server; the harness execs `odoo -d <db> -i base --stop-after-init`
+    # into this container to create the source/target databases on demand.
+    command: ["odoo", "--db_host=db", "--db_user=odoo", "--db_password=odoo"]

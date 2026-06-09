@@ -180,6 +180,30 @@ def tests(session: nox.Session) -> None:
 
 
 @nox.session(python=python_versions[0])
+def e2e(session: nox.Session) -> None:
+    """Run the end-to-end integrity suite against a real Odoo.
+
+    Brings up a disposable Postgres+Odoo stack via compose (podman or docker;
+    see tests/e2e/conftest.py) and runs the data-integrity scenarios. Point
+    ODF_E2E_ODOO_URL at an existing Odoo (e.g. doodba) to skip container mgmt.
+
+    The default small tier runs here; pass ``-- -m large`` (with a larger
+    ODF_E2E_SCALE) for the opt-in stress tier.
+    """
+    session.install("pytest", "pytest-mock")
+    session.install("-e", ".")
+    args = session.posargs or ["-m", "not large"]
+    # Override the default addopts (which ignores tests/e2e and runs doctests).
+    session.run(
+        "pytest",
+        "tests/e2e",
+        "-o",
+        "addopts=",
+        *args,
+    )
+
+
+@nox.session(python=python_versions[0])
 def tests_compiled(session: nox.Session) -> None:
     """Run tests against the compiled C extension code."""
     session.run("python", "-c", CLEAN_COMMAND)
