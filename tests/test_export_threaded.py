@@ -1434,3 +1434,42 @@ class TestCleanAndTransformBatchNewlineSanitization:
 
         expected = "[1A06120023 / AK45] CMP Pad Conditioner | Customer GLOBALFOUNDRIES"
         assert result["order_line_name"][0] == expected
+
+
+def test_resume_existing_session_filters_completed(tmp_path: Path) -> None:
+    """_resume_existing_session returns only not-yet-completed ids + total count."""
+    import json as _json
+
+    from fluvo.export_threaded import _resume_existing_session
+
+    (tmp_path / "all_ids.json").write_text(_json.dumps([1, 2, 3, 4]))
+    (tmp_path / "completed_ids.txt").write_text("1\n2\n")
+    ids, total = _resume_existing_session(tmp_path, "sess1")
+    assert total == 4
+    assert sorted(ids) == [3, 4]
+
+
+def test_resume_existing_session_missing_file(tmp_path: Path) -> None:
+    """Missing all_ids.json returns empty + zero (cannot resume)."""
+    from fluvo.export_threaded import _resume_existing_session
+
+    ids, total = _resume_existing_session(tmp_path, "sess1")
+    assert ids == []
+    assert total == 0
+
+
+def test_create_new_session_writes_ids(tmp_path: Path) -> None:
+    """_create_new_session searches, persists all_ids.json, and touches completed."""
+    import json as _json
+
+    from fluvo.export_threaded import _create_new_session
+
+    model = MagicMock()
+    model.model_name = "res.partner"
+    model.search.return_value = [10, 20, 30]
+    ids, total = _create_new_session(model, [], None, "sess1", tmp_path)
+    assert ids == [10, 20, 30]
+    assert total == 3
+    assert _json.loads((tmp_path / "all_ids.json").read_text()) == [10, 20, 30]
+    assert (tmp_path / "completed_ids.txt").exists()
+    model.search.assert_called_once()

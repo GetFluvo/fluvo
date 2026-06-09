@@ -2635,3 +2635,32 @@ class TestPreparePass2DataCrossModelResolution:
         assert len(result) == 1
         assert result[0][0] == 101
         assert result[0][1]["image_data"] == "SGVsbG8gV29ybGQ="
+
+
+def test_binary_fallback_malformed_rows_go_to_failed() -> None:
+    """Rows whose column count != header are routed to failed_lines early."""
+    from fluvo.import_threaded import _load_batch_with_binary_fallback
+
+    header = ["id", "name"]
+    lines = [["only_one_col"]]  # 1 col, header has 2 -> malformed
+    result = _load_batch_with_binary_fallback(
+        MagicMock(), MagicMock(), lines, header, 0, {}, [], "res.partner"
+    )
+    assert result["success"] is False
+    assert len(result["failed_lines"]) == 1
+
+
+def test_binary_fallback_happy_path_loads_batch() -> None:
+    """A clean multi-row batch is loaded in one model.load() call."""
+    from fluvo.import_threaded import _load_batch_with_binary_fallback
+
+    model = MagicMock()
+    model.load.return_value = {"ids": [101, 102], "messages": []}
+    header = ["id", "name"]
+    lines = [["rec_a", "A"], ["rec_b", "B"]]
+    result = _load_batch_with_binary_fallback(
+        model, MagicMock(), lines, header, 0, {}, [], "res.partner"
+    )
+    model.load.assert_called_once()
+    assert result["success"] is True
+    assert not result["failed_lines"]
