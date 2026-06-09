@@ -12,9 +12,9 @@ Here is a list of important resources for contributors:
 - [Code of Conduct]
 
 [lgpl 3.0 license]: https://www.gnu.org/licenses/lgpl-3.0
-[source code]: https://github.com/bosd/odoo-data-flow
-[documentation]: https://odoo-data-flow.readthedocs.io/
-[issue tracker]: https://github.com/bosd/odoo-data-flow/issues
+[source code]: https://github.com/bosd/fluvo
+[documentation]: https://fluvo.readthedocs.io/
+[issue tracker]: https://github.com/bosd/fluvo/issues
 
 ## How to report a bug
 
@@ -53,7 +53,7 @@ or the command-line interface:
 
 ```console
 $ uv run python
-$ uv run odoo-data-flow
+$ uv run fluvo
 ```
 
 [uv]: https://docs.astral.sh/uv/
@@ -106,7 +106,7 @@ $ nox --session=pre-commit -- install
 It is recommended to open an issue before starting work on anything.
 This will allow a chance to talk it over with the owners and validate your approach.
 
-[pull request]: https://github.com/bosd/odoo-data-flow/pulls
+[pull request]: https://github.com/bosd/fluvo/pulls
 
 <!-- github-only -->
 

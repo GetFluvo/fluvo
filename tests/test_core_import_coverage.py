@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 def test_format_odoo_error() -> None:
     """Test _format_odoo_error with various error types."""
-    from odoo_data_flow.import_threaded import _format_odoo_error
+    from fluvo.import_threaded import _format_odoo_error
 
     # Test with plain string error
     result = _format_odoo_error("Some error message")
@@ -30,7 +30,7 @@ def test_format_odoo_error() -> None:
 
 def test_recursive_create_batches_realistic() -> None:
     """Test _recursive_create_batches with realistic data."""
-    from odoo_data_flow.import_threaded import _recursive_create_batches
+    from fluvo.import_threaded import _recursive_create_batches
 
     # Create realistic data grouped by some criteria
     current_data = [
@@ -59,7 +59,7 @@ def test_recursive_create_batches_realistic() -> None:
 
 def test_execute_load_batch_comprehensive() -> None:
     """Test _execute_load_batch with comprehensive parameters."""
-    from odoo_data_flow.import_threaded import _execute_load_batch
+    from fluvo.import_threaded import _execute_load_batch
 
     # Create mock model
     mock_model = MagicMock()

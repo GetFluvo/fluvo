@@ -16,7 +16,7 @@ from typing import Any, Optional
 from ..logging_config import log
 
 # Default checkpoint directory name
-CHECKPOINT_DIR = ".odf_checkpoint"
+CHECKPOINT_DIR = ".fluvo_checkpoint"
 
 
 @dataclass

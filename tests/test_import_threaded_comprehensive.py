@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 def test_prepare_pass_2_data() -> None:
     """Test _prepare_pass_2_data function."""
-    from odoo_data_flow.import_threaded import _prepare_pass_2_data
+    from fluvo.import_threaded import _prepare_pass_2_data
 
     # Mock the required parameters
     all_data = [["rec_1", "Test Name", "rec_2"]]  # rec_2 is a self-reference
@@ -38,7 +38,7 @@ def test_prepare_pass_2_data() -> None:
 
 def test_handle_create_error_scenarios() -> None:
     """Test _handle_create_error with different error types and scenarios."""
-    from odoo_data_flow.import_threaded import _handle_create_error
+    from fluvo.import_threaded import _handle_create_error
 
     # Test with different error types
     error1 = Exception("Database error")
@@ -59,7 +59,7 @@ def test_handle_create_error_scenarios() -> None:
 
 def test_execute_load_batch_edge_cases() -> None:
     """Test _execute_load_batch with various edge cases."""
-    from odoo_data_flow.import_threaded import _execute_load_batch
+    from fluvo.import_threaded import _execute_load_batch
 
     # Create mock thread state
     mock_model = MagicMock()
@@ -86,7 +86,7 @@ def test_execute_load_batch_edge_cases() -> None:
 
 def test_execute_load_batch_with_errors() -> None:
     """Test _execute_load_batch when load fails."""
-    from odoo_data_flow.import_threaded import _execute_load_batch
+    from fluvo.import_threaded import _execute_load_batch
 
     # Create mock thread state that will cause load to fail
     mock_model = MagicMock()
@@ -119,7 +119,7 @@ def test_execute_load_batch_with_errors() -> None:
 
 def test_recursive_create_batches() -> None:
     """Test _recursive_create_batches function."""
-    from odoo_data_flow.import_threaded import _recursive_create_batches
+    from fluvo.import_threaded import _recursive_create_batches
 
     # Test with sample data
     current_data = [["rec_1", "val_a"], ["rec_1", "val_b"], ["rec_2", "val_c"]]
@@ -142,7 +142,7 @@ def test_recursive_create_batches() -> None:
 
 def test_execute_write_batch() -> None:
     """Test _execute_write_batch function."""
-    from odoo_data_flow.import_threaded import _execute_write_batch
+    from fluvo.import_threaded import _execute_write_batch
 
     # Mock model
     mock_model = MagicMock()
@@ -167,7 +167,7 @@ def test_execute_write_batch() -> None:
 
 def test_import_data_with_complex_parameters() -> None:
     """Test import_data function with various parameter combinations."""
-    from odoo_data_flow.import_threaded import import_data
+    from fluvo.import_threaded import import_data
 
     # Create temporary CSV file for testing with id column
     with tempfile.NamedTemporaryFile(
@@ -181,7 +181,7 @@ def test_import_data_with_complex_parameters() -> None:
     try:
         # Mock the connection
         with patch(
-            "odoo_data_flow.import_threaded.conf_lib.get_connection_from_config"
+            "fluvo.import_threaded.conf_lib.get_connection_from_config"
         ) as mock_get_conn:
             mock_model = MagicMock()
             mock_model.load.return_value = {"ids": [1], "messages": []}
@@ -216,7 +216,7 @@ def test_import_data_with_complex_parameters() -> None:
 
 def test_convert_external_id_field() -> None:
     """Test _convert_external_id_field function."""
-    from odoo_data_flow.import_threaded import _convert_external_id_field
+    from fluvo.import_threaded import _convert_external_id_field
 
     # Create mock connection with ir.model.data model
     mock_connection = MagicMock()
@@ -246,7 +246,7 @@ def test_convert_external_id_field() -> None:
 
 def test_handle_create_error_detailed() -> None:
     """Test _handle_create_error with different error types."""
-    from odoo_data_flow.import_threaded import _handle_create_error
+    from fluvo.import_threaded import _handle_create_error
 
     # Test error handling with different parameters
     error = Exception("Test Error")
@@ -267,7 +267,7 @@ def test_handle_create_error_detailed() -> None:
 
 def test_recursive_create_batches_complex() -> None:
     """Test _recursive_create_batches with complex grouping scenarios."""
-    from odoo_data_flow.import_threaded import _recursive_create_batches
+    from fluvo.import_threaded import _recursive_create_batches
 
     # Create test data with complex grouping
     current_data = [
@@ -295,7 +295,7 @@ def test_recursive_create_batches_complex() -> None:
 
 def test_format_odoo_error() -> None:
     """Test _format_odoo_error function."""
-    from odoo_data_flow.import_threaded import _format_odoo_error
+    from fluvo.import_threaded import _format_odoo_error
 
     # Test with plain string
     result = _format_odoo_error("Simple error")
@@ -314,7 +314,7 @@ def test_format_odoo_error() -> None:
 
 def test_extract_per_row_errors() -> None:
     """Test _extract_per_row_errors function."""
-    from odoo_data_flow.import_threaded import _extract_per_row_errors
+    from fluvo.import_threaded import _extract_per_row_errors
 
     # Test with messages containing row information
     messages = [

@@ -1,4 +1,4 @@
-"""Internal odoo-data-flow Tools.
+"""Internal fluvo Tools.
 
 This module provides low-level utility functions for data formatting
 and iteration,

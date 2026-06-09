@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 
-from odoo_data_flow.lib.odoo_lib import build_polars_schema, get_odoo_version
+from fluvo.lib.odoo_lib import build_polars_schema, get_odoo_version
 
 
 def test_get_odoo_version_success() -> None:
@@ -23,7 +23,7 @@ def test_get_odoo_version_success() -> None:
     mock_connection.get_model.assert_called_once_with("ir.module.module")
 
 
-@patch("odoo_data_flow.lib.odoo_lib.log.warning")
+@patch("fluvo.lib.odoo_lib.log.warning")
 def test_get_odoo_version_failure_on_exception(
     mock_log_warning: MagicMock,
 ) -> None:
@@ -41,7 +41,7 @@ def test_get_odoo_version_failure_on_exception(
     assert "Could not detect Odoo version" in mock_log_warning.call_args[0][0]
 
 
-@patch("odoo_data_flow.lib.odoo_lib.log.warning")
+@patch("fluvo.lib.odoo_lib.log.warning")
 def test_get_odoo_version_base_module_not_found(
     mock_log_warning: MagicMock,
 ) -> None:
@@ -99,7 +99,7 @@ class TestBuildPolarsSchema:
         mock_connection.get_model.assert_called_once_with("res.partner")
         mock_model_obj.fields_get.assert_called_once()
 
-    @patch("odoo_data_flow.lib.odoo_lib.log.error")
+    @patch("fluvo.lib.odoo_lib.log.error")
     def test_build_polars_schema_failure(self, mock_log_error: MagicMock) -> None:
         """Tests that an empty dict is returned if fields_get fails."""
         # 1. Setup

@@ -1,6 +1,6 @@
-# e2e test stack for odoo-data-flow.
+# e2e test stack for fluvo.
 # Brought up / torn down by tests/e2e/conftest.py (runtime-agnostic: podman or docker).
-# The Odoo version is injected via the ODF_E2E_ODOO_VERSION env var (default 18.0).
+# The Odoo version is injected via the FLUVO_E2E_ODOO_VERSION env var (default 18.0).
 # Not used in normal `pytest` runs (tests/e2e is excluded by default); only the e2e session.
 
 services:
@@ -17,11 +17,11 @@ services:
       retries: 20
 
   odoo:
-    image: odoo:${ODF_E2E_ODOO_VERSION:-18.0}
+    image: odoo:${FLUVO_E2E_ODOO_VERSION:-18.0}
     depends_on:
       - db
     ports:
-      - "${ODF_E2E_ODOO_PORT:-8069}:8069"
+      - "${FLUVO_E2E_ODOO_PORT:-8069}:8069"
     environment:
       - HOST=db
       - USER=odoo

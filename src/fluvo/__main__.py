@@ -1,4 +1,4 @@
-"""Command-line interface for odoo-data-flow."""
+"""Command-line interface for fluvo."""
 
 import ast
 from importlib.metadata import version as get_version
@@ -362,7 +362,7 @@ def run_project_flow(flow_file: str, flow_name: Optional[str]) -> None:
     context_settings=dict(help_option_names=["-h", "--help"]),
     invoke_without_command=True,
 )
-@click.version_option(version=get_version("odoo-data-flow"))
+@click.version_option(version=get_version("fluvo"))
 @click.option(
     "-v", "--verbose", is_flag=True, help="Enable verbose, debug-level logging."
 )
@@ -390,7 +390,7 @@ def cli(
     flow_file: Optional[str],
     flow_name: Optional[str],
 ) -> None:
-    """Odoo Data Flow: A tool for importing, exporting, and processing data."""
+    """Fluvo: A tool for importing, exporting, and processing data."""
     setup_logging(verbose, log_file)
 
     # If a subcommand is invoked, it's Single-Action mode. Let it proceed.

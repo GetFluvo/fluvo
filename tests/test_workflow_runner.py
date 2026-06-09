@@ -3,11 +3,11 @@
 
 from unittest.mock import MagicMock, patch
 
-from odoo_data_flow.workflow_runner import run_invoice_v9_workflow
+from fluvo.workflow_runner import run_invoice_v9_workflow
 
 
-@patch("odoo_data_flow.workflow_runner.InvoiceWorkflowV9")
-@patch("odoo_data_flow.workflow_runner.get_connection_from_config")
+@patch("fluvo.workflow_runner.InvoiceWorkflowV9")
+@patch("fluvo.workflow_runner.get_connection_from_config")
 def test_run_invoice_v9_workflow_all_actions(
     mock_get_connection: MagicMock, mock_invoice_workflow: MagicMock
 ) -> None:
@@ -39,8 +39,8 @@ def test_run_invoice_v9_workflow_all_actions(
     mock_wf_instance.rename.assert_called_once_with("x_legacy_number")
 
 
-@patch("odoo_data_flow.workflow_runner.InvoiceWorkflowV9")
-@patch("odoo_data_flow.workflow_runner.get_connection_from_config")
+@patch("fluvo.workflow_runner.InvoiceWorkflowV9")
+@patch("fluvo.workflow_runner.get_connection_from_config")
 def test_run_invoice_v9_workflow_specific_action(
     mock_get_connection: MagicMock, mock_invoice_workflow: MagicMock
 ) -> None:
@@ -71,8 +71,8 @@ def test_run_invoice_v9_workflow_specific_action(
     mock_wf_instance.rename.assert_not_called()
 
 
-@patch("odoo_data_flow.workflow_runner.get_connection_from_config")  # This was missing
-@patch("odoo_data_flow.workflow_runner.log.error")
+@patch("fluvo.workflow_runner.get_connection_from_config")  # This was missing
+@patch("fluvo.workflow_runner.log.error")
 def test_run_invoice_v9_workflow_bad_status_map(
     mock_log_error: MagicMock, mock_get_connection: MagicMock
 ) -> None:
@@ -90,8 +90,8 @@ def test_run_invoice_v9_workflow_bad_status_map(
     assert "Failed to initialize workflow" in mock_log_error.call_args[0][0]
 
 
-@patch("odoo_data_flow.workflow_runner.get_connection_from_config")
-@patch("odoo_data_flow.workflow_runner.log.error")
+@patch("fluvo.workflow_runner.get_connection_from_config")
+@patch("fluvo.workflow_runner.log.error")
 def test_run_invoice_v9_workflow_connection_fails(
     mock_log_error: MagicMock, mock_get_connection: MagicMock
 ) -> None:
@@ -110,8 +110,8 @@ def test_run_invoice_v9_workflow_connection_fails(
     assert "Failed to initialize workflow" in mock_log_error.call_args[0][0]
 
 
-@patch("odoo_data_flow.workflow_runner.get_connection_from_config")
-@patch("odoo_data_flow.workflow_runner.log.error")
+@patch("fluvo.workflow_runner.get_connection_from_config")
+@patch("fluvo.workflow_runner.log.error")
 def test_run_invoice_v9_workflow_status_map_not_dict(
     mock_log_error: MagicMock, mock_get_connection: MagicMock
 ) -> None:

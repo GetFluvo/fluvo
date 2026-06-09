@@ -1,13 +1,13 @@
 # Comparison with Other Tools
 
-Choosing the right tool for a data migration is critical. While there are many ways to get data into and out of Odoo, `odoo-data-flow` is designed to solve a specific set of challenges related to complex, repeatable, and robust data workflows.
+Choosing the right tool for a data migration is critical. While there are many ways to get data into and out of Odoo, `fluvo` is designed to solve a specific set of challenges related to complex, repeatable, and robust data workflows.
 
-This guide provides an in-depth comparison of `odoo-data-flow` with other common tools and methodologies to help you understand its strengths and decide when it's the right choice for your project.
+This guide provides an in-depth comparison of `fluvo` with other common tools and methodologies to help you understand its strengths and decide when it's the right choice for your project.
 
 ## Feature Comparison at a Glance
 
 
-| Feature                | Odoo's Built-in Tool                    | Direct SQL                | Custom Python Script   | odoo-data-flow                                                         |
+| Feature                | Odoo's Built-in Tool                    | Direct SQL                | Custom Python Script   | fluvo                                                         |
 | :--------------------- | :-------------------------------------- | :------------------------ | :--------------------- | :--------------------------------------------------------------------- |
 | **Ease of Use** | Very High                               | Very Low                  | Low                    | Medium                                                                 |
 | **Transformation Power** | Very Low                                | High                      | Very High              | Very High                                                              |
@@ -32,7 +32,7 @@ This is the standard import/export tool available in the Odoo user interface.
 * **Cons:**
     * **Very Limited Transformations:** You cannot perform any significant data cleaning or restructuring. Your source file must already be in a nearly perfect format.
     * **Poor Error Handling for Large Files:** If an error occurs in a large file, Odoo often provides a generic and unhelpful error message. Finding the single bad row in a file with thousands of lines is very difficult.
-    * **"All or Nothing" Transactions:** By default, if one record in a file fails, the entire import is rolled back. This makes importing large datasets very inefficient, a problem that `odoo-data-flow` now solves with its automatic `load` -> `create` fallback mechanism.
+    * **"All or Nothing" Transactions:** By default, if one record in a file fails, the entire import is rolled back. This makes importing large datasets very inefficient, a problem that `fluvo` now solves with its automatic `load` -> `create` fallback mechanism.
     * **Not Repeatable:** The process is entirely manual (clicking through the UI), which makes it unsuitable for automated, repeatable migrations between environments (e.g., from staging to production).
 
 * **Verdict:** Perfect for simple, one-off tasks performed by functional users. It is not designed for the complex, repeatable migrations that developers often face.
@@ -65,9 +65,9 @@ This is a very common approach for developers. It involves writing a custom Pyth
     * **Error Handling is Manual:** You have to build your own `try...except` blocks and logging logic from scratch. A simple script will often fail on the first error.
     * **Less Structured:** It's a "blank canvas" approach, which can lead to unstructured, difficult-to-maintain scripts if not carefully designed.
 
-* **Verdict:** A good choice for highly unique, one-off tasks that don't fit a standard ETL pattern. However, for a typical data migration, you will spend a lot of time re-implementing features that `odoo-data-flow` already provides out of the box.
+* **Verdict:** A good choice for highly unique, one-off tasks that don't fit a standard ETL pattern. However, for a typical data migration, you will spend a lot of time re-implementing features that `fluvo` already provides out of the box.
 
-### 4. `odoo-data-flow`
+### 4. `fluvo`
 
 This library is designed to be the "sweet spot" between the simplicity of the built-in tool and the power of a fully custom script.
 

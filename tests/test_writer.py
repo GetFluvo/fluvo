@@ -8,19 +8,19 @@ import httpx
 from rich.panel import Panel
 from rich.progress import Progress, TaskID
 
-from odoo_data_flow import writer
-from odoo_data_flow.lib.writer import (
+from fluvo import writer
+from fluvo.lib.writer import (
     _get_env_from_config,
     write_relational_failures_to_csv,
 )
-from odoo_data_flow.write_threaded import RPCThreadWrite
-from odoo_data_flow.writer import _read_data_file, run_write
+from fluvo.write_threaded import RPCThreadWrite
+from fluvo.writer import _read_data_file, run_write
 
 
 class TestRunWrite:
     """Tests for the main run_write function in writer.py."""
 
-    @patch("odoo_data_flow.writer.write_threaded.write_data")
+    @patch("fluvo.writer.write_threaded.write_data")
     def test_run_write_success_path(
         self, mock_write_data: MagicMock, tmp_path: Path
     ) -> None:
@@ -41,7 +41,7 @@ class TestRunWrite:
         assert call_kwargs["model"] == "res.partner"
         assert call_kwargs["is_fail_run"] is False
 
-    @patch("odoo_data_flow.writer.write_threaded.write_data")
+    @patch("fluvo.writer.write_threaded.write_data")
     def test_run_write_fail_mode(
         self, mock_write_data: MagicMock, tmp_path: Path
     ) -> None:
@@ -66,10 +66,10 @@ class TestRunWrite:
         assert call_kwargs["header"] == ["id", "name"]
         assert call_kwargs["data"] == [["102", "Retry Name"]]
 
-    patch("odoo_data_flow.writer.Console")
+    patch("fluvo.writer.Console")
 
-    @patch("odoo_data_flow.writer.Console")
-    @patch("odoo_data_flow.writer.write_threaded.write_data")
+    @patch("fluvo.writer.Console")
+    @patch("fluvo.writer.write_threaded.write_data")
     def test_run_write_fail_mode_no_records_to_retry(
         self,
         mock_write_data: MagicMock,
@@ -114,16 +114,16 @@ class TestRunWrite:
         source_file = tmp_path / "no_id.csv"
         source_file.write_text("name,value\nTest,100")
 
-        with patch("odoo_data_flow.writer.log.error") as mock_log:
+        with patch("fluvo.writer.log.error") as mock_log:
             header, data = _read_data_file(str(source_file), ",", "utf-8")
             assert header == []
             assert data == []
             mock_log.assert_called_once()
             assert "must contain an 'id' column" in mock_log.call_args[0][0]
 
-    @patch("odoo_data_flow.writer._read_data_file")
-    @patch("odoo_data_flow.writer.write_threaded.write_data")
-    @patch("odoo_data_flow.writer.log")
+    @patch("fluvo.writer._read_data_file")
+    @patch("fluvo.writer.write_threaded.write_data")
+    @patch("fluvo.writer.log")
     def test_run_write_no_data_rows(
         self,
         mock_log: MagicMock,
@@ -148,8 +148,8 @@ class TestRunWrite:
         )
         mock_write_data.assert_not_called()
 
-    @patch("odoo_data_flow.writer._read_data_file")
-    @patch("odoo_data_flow.writer.write_threaded.write_data")
+    @patch("fluvo.writer._read_data_file")
+    @patch("fluvo.writer.write_threaded.write_data")
     @patch("rich.console.Console.print")
     def test_run_write_handles_failure(
         self,
@@ -230,7 +230,7 @@ class TestRPCThreadWrite:
         lines = [["101", "False"]]
         rpc_thread = RPCThreadWrite(1, mock_model, header)
 
-        with patch("odoo_data_flow.write_threaded.log.error") as mock_log:
+        with patch("fluvo.write_threaded.log.error") as mock_log:
             result = rpc_thread._execute_batch(lines, 1)
             assert result["failed"] == 1
             mock_log.assert_called_once()
@@ -251,7 +251,7 @@ class TestRPCThreadWrite:
         assert result["error_summary"] == "Odoo Error"
         mock_writer.writerow.assert_called_once_with([101, "Odoo Error"])
 
-    @patch("odoo_data_flow.lib.internal.rpc_thread.RpcThread.wait")
+    @patch("fluvo.lib.internal.rpc_thread.RpcThread.wait")
     def test_wait_fallback_without_progress(self, mock_super_wait: MagicMock) -> None:
         """Tests that wait() calls super().wait() if no progress bar is given."""
         rpc_thread = RPCThreadWrite(1, MagicMock(), [])
@@ -283,14 +283,14 @@ class TestRPCThreadWrite:
 
     def test_read_data_file_not_found(self) -> None:
         """Tests that _read_data_file handles a FileNotFoundError."""
-        with patch("odoo_data_flow.writer.log.error") as mock_log:
+        with patch("fluvo.writer.log.error") as mock_log:
             header, data = _read_data_file("non_existent_file.csv", ",", "utf-8")
             assert header == []
             assert data == []
             mock_log.assert_called_once()
             assert "Source file not found" in mock_log.call_args[0][0]
 
-    @patch("odoo_data_flow.writer.write_threaded.write_data")
+    @patch("fluvo.writer.write_threaded.write_data")
     def test_run_write_empty_file(
         self, mock_write_data: MagicMock, tmp_path: Path
     ) -> None:
@@ -307,8 +307,8 @@ class TestRPCThreadWrite:
         )
         mock_write_data.assert_not_called()
 
-    @patch("odoo_data_flow.writer.Console")
-    @patch("odoo_data_flow.writer.write_threaded.write_data", return_value=False)
+    @patch("fluvo.writer.Console")
+    @patch("fluvo.writer.write_threaded.write_data", return_value=False)
     def test_run_write_prints_failure_panel(
         self,
         mock_write_data: MagicMock,
@@ -330,7 +330,7 @@ class TestRPCThreadWrite:
         mock_write_data.assert_called_once()
 
 
-@patch("odoo_data_flow.lib.writer._show_error_panel")
+@patch("fluvo.lib.writer._show_error_panel")
 @patch("builtins.open", new_callable=mock_open)
 def test_write_relational_failures_to_csv_os_error(
     mock_open_file: MagicMock, mock_show_error: MagicMock, tmp_path: Path
@@ -444,7 +444,7 @@ class TestReadDataFileEdgeCases:
         """Test that _read_data_file handles generic exceptions."""
         with (
             patch("builtins.open", side_effect=PermissionError("Access denied")),
-            patch("odoo_data_flow.writer.log.error") as mock_log,
+            patch("fluvo.writer.log.error") as mock_log,
         ):
             header, data = _read_data_file("permission_error.csv", ",", "utf-8")
             assert header == []
@@ -456,7 +456,7 @@ class TestReadDataFileEdgeCases:
 class TestRunWriteEdgeCases:
     """Additional edge case tests for run_write."""
 
-    @patch("odoo_data_flow.writer.Console")
+    @patch("fluvo.writer.Console")
     def test_run_write_fail_mode_file_not_exists(
         self,
         mock_console_class: MagicMock,

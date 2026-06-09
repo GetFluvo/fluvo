@@ -1,4 +1,4 @@
-"""Internal helper tools for odoo-data-flow.
+"""Internal helper tools for fluvo.
 
 This __init__.py file makes the internal modules available under the
 'internal' namespace and defines the public API of this sub-package.

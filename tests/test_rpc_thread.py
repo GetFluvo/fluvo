@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from odoo_data_flow.lib.internal.rpc_thread import RpcThread
+from fluvo.lib.internal.rpc_thread import RpcThread
 
 
 def test_rpc_thread_invalid_max_connection() -> None:
@@ -20,7 +20,7 @@ def test_rpc_thread_invalid_max_connection() -> None:
         RpcThread(-1)
 
 
-@patch("odoo_data_flow.lib.internal.rpc_thread.log.error")
+@patch("fluvo.lib.internal.rpc_thread.log.error")
 def test_rpc_thread_wait_handles_exception(mock_log_error: MagicMock) -> None:
     """Test Wait handle exception.
 

@@ -74,12 +74,12 @@ uid = 2
 
     Your terminal prompt should now indicate that you are in the `.venv` environment.
 
-2.  **Install `odoo-data-flow`:**
+2.  **Install `fluvo`:**
 
     With the environment active, use `uv` to install the package from PyPI.
 
     ```bash
-    uv pip install odoo-data-flow
+    uv pip install fluvo
     ```
 
 ## 5. Installing for Development
@@ -89,8 +89,8 @@ If you want to contribute to the project or test the latest unreleased changes, 
 1.  **Clone the GitHub repository:**
 
     ```bash
-    git clone [https://github.com/OdooDataFlow/odoo-data-flow.git](https://github.com/OdooDataFlow/odoo-data-flow.git)
-    cd odoo-data-flow
+    git clone [https://github.com/getfluvo/fluvo.git](https://github.com/getfluvo/fluvo.git)
+    cd fluvo
     ```
 
 2.  **Create and activate an environment:**

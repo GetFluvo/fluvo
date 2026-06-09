@@ -4,10 +4,10 @@ from unittest.mock import MagicMock, patch
 
 from rich.panel import Panel
 
-from odoo_data_flow.lib.internal.ui import _show_error_panel, _show_warning_panel
+from fluvo.lib.internal.ui import _show_error_panel, _show_warning_panel
 
 
-@patch("odoo_data_flow.lib.internal.ui.Console")
+@patch("fluvo.lib.internal.ui.Console")
 def test_show_error_panel(mock_console_class: MagicMock) -> None:
     """Tests that the _show_error_panel function.
 
@@ -38,7 +38,7 @@ def test_show_error_panel(mock_console_class: MagicMock) -> None:
     assert panel_instance.border_style == "red"
 
 
-@patch("odoo_data_flow.lib.internal.ui.Console")
+@patch("fluvo.lib.internal.ui.Console")
 def test_show_warning_panel(mock_console_class: MagicMock) -> None:
     """Tests that the _show_warning_panel function.
 

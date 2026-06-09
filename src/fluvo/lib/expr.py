@@ -6,7 +6,7 @@ as vectorized operations, providing significant performance improvements over
 row-by-row Python execution.
 
 Usage:
-    from odoo_data_flow.lib import expr
+    from fluvo.lib import expr
 
     processor = Processor(
         mapping={

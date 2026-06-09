@@ -1,6 +1,6 @@
 # Guide: Automation & Workflows
 
-The `odoo-data-flow` library includes a powerful system for running automated actions directly on your Odoo server. These actions are split into two main categories:
+The `fluvo` library includes a powerful system for running automated actions directly on your Odoo server. These actions are split into two main categories:
 
 * **Module Management (`module` command):** For administrative tasks like installing, uninstalling, or updating the list of available modules and languages. These are typically run to prepare an Odoo environment.
 * **Data Workflows (`workflow` command):** For running multi-step processes on data that already exists in the database, such as validating a batch of imported invoices.
@@ -19,7 +19,7 @@ This is a crucial first step to run after you have added new custom modules to y
 
 #### Usage
 ```bash
-odoo-data-flow module update-list
+fluvo module update-list
 ```
 
 #### Command-Line Options
@@ -34,7 +34,7 @@ Before installing modules that have their own translations, you may need to inst
 
 #### Usage
 ```bash
-odoo-data-flow module install-languages --languages nl_BE,fr_FR
+fluvo module install-languages --languages nl_BE,fr_FR
 ```
 
 #### Command-Line Options
@@ -52,7 +52,7 @@ The `module install` command will install new modules or upgrade them if they ar
 
 #### Usage
 ```bash
-odoo-data-flow module install --modules sale_management,mrp
+fluvo module install --modules sale_management,mrp
 ```
 
 #### Command-Line Options
@@ -68,7 +68,7 @@ The `module uninstall` command will uninstall modules that are currently install
 
 #### Usage
 ```bash
-odoo-data-flow module uninstall --modules stock,account
+fluvo module uninstall --modules stock,account
 ```
 
 #### Command-Line Options
@@ -94,7 +94,7 @@ The `vat` command group allows you to temporarily disable these validations duri
 Before making changes, you can check the current VAT validation settings for all companies:
 
 ```bash
-odoo-data-flow vat get-settings --connection-file conf/connection.conf
+fluvo vat get-settings --connection-file conf/connection.conf
 ```
 
 This displays a table showing which companies have VIES checking enabled.
@@ -105,13 +105,13 @@ To disable VAT validation before a large contact import:
 
 ```bash
 # Disable and save settings to a file for later restoration
-odoo-data-flow vat disable --connection-file conf/connection.conf --output vat_settings.json
+fluvo vat disable --connection-file conf/connection.conf --output vat_settings.json
 
 # Disable only VIES (keep stdnum validation)
-odoo-data-flow vat disable --connection-file conf/connection.conf --no-stdnum --output vat_settings.json
+fluvo vat disable --connection-file conf/connection.conf --no-stdnum --output vat_settings.json
 
 # Disable for specific companies only
-odoo-data-flow vat disable --connection-file conf/connection.conf --company-ids 1,2,3 --output vat_settings.json
+fluvo vat disable --connection-file conf/connection.conf --company-ids 1,2,3 --output vat_settings.json
 ```
 
 #### Command-Line Options
@@ -129,7 +129,7 @@ odoo-data-flow vat disable --connection-file conf/connection.conf --company-ids 
 After your import is complete, restore the original settings:
 
 ```bash
-odoo-data-flow vat restore --connection-file conf/connection.conf --input vat_settings.json
+fluvo vat restore --connection-file conf/connection.conf --input vat_settings.json
 ```
 
 ### Batch VAT Validation
@@ -138,13 +138,13 @@ After importing contacts with validation disabled, you can validate VAT numbers 
 
 ```bash
 # Validate all partners with VAT numbers
-odoo-data-flow vat validate --connection-file conf/connection.conf --batch-size 50 --delay 1.0
+fluvo vat validate --connection-file conf/connection.conf --batch-size 50 --delay 1.0
 
 # Validate with user notifications on failures
-odoo-data-flow vat validate --connection-file conf/connection.conf --notify-users 1,2
+fluvo vat validate --connection-file conf/connection.conf --notify-users 1,2
 
 # Validate only companies
-odoo-data-flow vat validate --connection-file conf/connection.conf \
+fluvo vat validate --connection-file conf/connection.conf \
     --domain "[('is_company', '=', True)]" \
     --max-records 1000
 ```
@@ -166,20 +166,20 @@ Here's a typical workflow for importing contacts with VAT validation management:
 
 ```bash
 # 1. Save current settings and disable validation
-odoo-data-flow vat disable --connection-file conf/connection.conf --output vat_settings.json
+fluvo vat disable --connection-file conf/connection.conf --output vat_settings.json
 
 # 2. Run the contact import
-odoo-data-flow import --connection-file conf/connection.conf \
+fluvo import --connection-file conf/connection.conf \
     --file contacts.csv \
     --model res.partner \
     --worker 4 \
     --size 500
 
 # 3. Restore VAT validation settings
-odoo-data-flow vat restore --connection-file conf/connection.conf --input vat_settings.json
+fluvo vat restore --connection-file conf/connection.conf --input vat_settings.json
 
 # 4. Validate VAT numbers in batches with notifications
-odoo-data-flow vat validate --connection-file conf/connection.conf \
+fluvo vat validate --connection-file conf/connection.conf \
     --batch-size 50 \
     --delay 2.0 \
     --notify-users 1
@@ -190,7 +190,7 @@ odoo-data-flow vat validate --connection-file conf/connection.conf \
 You can also use these functions programmatically in Python:
 
 ```python
-from odoo_data_flow.lib.actions.vies_manager import (
+from fluvo.lib.actions.vies_manager import (
     disable_vat_validation,
     restore_vat_validation_settings,
     run_import_with_vat_validation_disabled,
@@ -202,7 +202,7 @@ settings = disable_vat_validation("conf/connection.conf")
 restore_vat_validation_settings("conf/connection.conf", settings)
 
 # Option 2: Context manager style
-from odoo_data_flow.importer import run_import
+from fluvo.importer import run_import
 
 result = run_import_with_vat_validation_disabled(
     config="conf/connection.conf",
@@ -221,7 +221,7 @@ result = run_import_with_vat_validation_disabled(
 For high-performance VAT validation, you can replace the default Python validator with a custom implementation (e.g., Rust-based via PyO3):
 
 ```python
-from odoo_data_flow.lib.actions.vies_manager import (
+from fluvo.lib.actions.vies_manager import (
     set_custom_vat_validator,
     validate_vat_local,
 )
@@ -265,7 +265,7 @@ The workflow allows you to perform the following actions on your imported invoic
 You run the workflow from the command line, specifying which action(s) you want to perform.
 
 ```bash
-odoo-data-flow workflow invoice-v9 [OPTIONS]
+fluvo workflow invoice-v9 [OPTIONS]
 ```
 
 #### Command-Line Options
@@ -287,7 +287,7 @@ Imagine you have imported thousands of invoices. Now, you want to find all the i
 You would run the following command:
 
 ```bash
-odoo-data-flow workflow invoice-v9 \
+fluvo workflow invoice-v9 \
     --config conf/connection.conf \
     --action validate \
     --field x_studio_legacy_status \

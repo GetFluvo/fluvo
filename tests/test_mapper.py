@@ -9,11 +9,11 @@ from unittest.mock import MagicMock, call, patch
 import httpx
 import pytest
 
-from odoo_data_flow.lib import mapper
-from odoo_data_flow.lib.internal.exceptions import SkippingError
+from fluvo.lib import mapper
+from fluvo.lib.internal.exceptions import SkippingError
 
 # Import MapperFunc for type hinting in this test file
-from odoo_data_flow.lib.mapper import MapperFunc
+from fluvo.lib.mapper import MapperFunc
 
 # --- Type Aliases ---
 LineDict = dict[str, Any]
@@ -72,15 +72,15 @@ def _mock_concat(
 @pytest.fixture(autouse=True)
 def mock_mapper_dependencies(mocker: MagicMock) -> None:
     """Fixture to mock external dependencies in mapper.py."""
-    mocker.patch("odoo_data_flow.lib.mapper.to_m2o", side_effect=_mock_to_m2o)
+    mocker.patch("fluvo.lib.mapper.to_m2o", side_effect=_mock_to_m2o)
     mocker.patch(
-        "odoo_data_flow.lib.mapper._get_field_value",
+        "fluvo.lib.mapper._get_field_value",
         side_effect=_mock_get_field_value,
     )
-    mocker.patch("odoo_data_flow.lib.mapper.concat", side_effect=_mock_concat)
+    mocker.patch("fluvo.lib.mapper.concat", side_effect=_mock_concat)
     # Patch log to prevent actual logging during tests if desired,
     # or let it log to stdout
-    mocker.patch("odoo_data_flow.lib.mapper.log", logging.getLogger("test_logger"))
+    mocker.patch("fluvo.lib.mapper.log", logging.getLogger("test_logger"))
 
 
 # --- Test Data ---
@@ -265,7 +265,7 @@ def test_binary_skip_on_not_found() -> None:
         mapper_func(LINE_SIMPLE, {})
 
 
-@patch("odoo_data_flow.lib.mapper.log.warning")
+@patch("fluvo.lib.mapper.log.warning")
 def test_binary_file_not_found_no_skip(mock_log_warning: MagicMock) -> None:
     """Tests that a warning is logged when a file is not found and skip=False."""
     mapper_func = mapper.binary("col1", skip=False)
@@ -282,7 +282,7 @@ def test_binary_url_map_empty() -> None:
 
 def test_binary_url_map_skip_on_not_found(mocker: MagicMock) -> None:
     """Tests that binary_url_map raises SkippingError when request fails."""
-    mock_httpx_get = mocker.patch("odoo_data_flow.lib.mapper.httpx.get")
+    mock_httpx_get = mocker.patch("fluvo.lib.mapper.httpx.get")
     mock_httpx_get.side_effect = httpx.RequestError(
         "Timeout", request=httpx.Request("GET", "http://test.com")
     )
@@ -294,8 +294,8 @@ def test_binary_url_map_skip_on_not_found(mocker: MagicMock) -> None:
 
 def test_binary_url_map_request_exception(mocker: MagicMock) -> None:
     """Tests that a warning is logged when a URL request fails and skip=False."""
-    mock_httpx_get = mocker.patch("odoo_data_flow.lib.mapper.httpx.get")
-    mock_log_warning = mocker.patch("odoo_data_flow.lib.mapper.log.warning")
+    mock_httpx_get = mocker.patch("fluvo.lib.mapper.httpx.get")
+    mock_log_warning = mocker.patch("fluvo.lib.mapper.log.warning")
 
     mock_httpx_get.side_effect = httpx.RequestError(
         "Timeout", request=httpx.Request("GET", "http://test.com")
@@ -477,11 +477,11 @@ def test_m2o_fun_state_present_but_unused(mocker: MagicMock) -> None:
         mocker: The pytest-mock fixture for patching.
     """
     mock_get_field_value = mocker.patch(
-        "odoo_data_flow.lib.mapper._get_field_value",
+        "fluvo.lib.mapper._get_field_value",
         side_effect=_mock_get_field_value,
     )
     mock_to_m2o = mocker.patch(
-        "odoo_data_flow.lib.mapper.to_m2o", side_effect=_mock_to_m2o
+        "fluvo.lib.mapper.to_m2o", side_effect=_mock_to_m2o
     )
 
     mapper_func = mapper.m2o(prefix="test_prefix", field="name")
@@ -505,11 +505,11 @@ def test_m2o_fun_with_skip_and_empty_value_state_unused(
         mocker: The pytest-mock fixture for patching.
     """
     mock_get_field_value = mocker.patch(
-        "odoo_data_flow.lib.mapper._get_field_value",
+        "fluvo.lib.mapper._get_field_value",
         side_effect=_mock_get_field_value,
     )
     mock_to_m2o = mocker.patch(
-        "odoo_data_flow.lib.mapper.to_m2o", side_effect=_mock_to_m2o
+        "fluvo.lib.mapper.to_m2o", side_effect=_mock_to_m2o
     )
 
     mapper_func = mapper.m2o(prefix="test_prefix", field="name", skip=True)
@@ -535,10 +535,10 @@ def test_m2o_map_fun_state_passed_to_concat_mapper(mocker: MagicMock) -> None:
         mocker: The pytest-mock fixture for patching.
     """
     mock_concat_actual = mocker.patch(
-        "odoo_data_flow.lib.mapper.concat", side_effect=_mock_concat
+        "fluvo.lib.mapper.concat", side_effect=_mock_concat
     )
     mock_to_m2o = mocker.patch(
-        "odoo_data_flow.lib.mapper.to_m2o", side_effect=_mock_to_m2o
+        "fluvo.lib.mapper.to_m2o", side_effect=_mock_to_m2o
     )
 
     mapper_func = mapper.m2o_map("test_prefix", "first", "last")
@@ -562,7 +562,7 @@ def test_m2o_map_fun_state_modified_by_concat_mapper(mocker: MagicMock) -> None:
     Args:
         mocker: The pytest-mock fixture for patching.
     """
-    mocker.patch("odoo_data_flow.lib.mapper.concat", side_effect=_mock_concat)
+    mocker.patch("fluvo.lib.mapper.concat", side_effect=_mock_concat)
     mapper_func = mapper.m2o_map("test_prefix", "code")
     line: LineDict = {"code": "A1B2"}
     state: StateDict = {"concat_calls": 0}
@@ -584,10 +584,10 @@ def test_m2o_map_fun_with_skip_and_empty_concat_value_state_passed(
         mocker: The pytest-mock fixture for patching.
     """
     mock_concat_actual = mocker.patch(
-        "odoo_data_flow.lib.mapper.concat", side_effect=_mock_concat
+        "fluvo.lib.mapper.concat", side_effect=_mock_concat
     )
     mock_to_m2o = mocker.patch(
-        "odoo_data_flow.lib.mapper.to_m2o", side_effect=_mock_to_m2o
+        "fluvo.lib.mapper.to_m2o", side_effect=_mock_to_m2o
     )
 
     mapper_func = mapper.m2o_map("test_prefix", "non_existent_field", skip=True)

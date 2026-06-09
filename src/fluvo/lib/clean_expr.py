@@ -5,7 +5,7 @@ objects for vectorized operations. These are typically 10-100x faster than
 row-by-row Python execution.
 
 Usage:
-    from odoo_data_flow.lib import clean_expr
+    from fluvo.lib import clean_expr
 
     mapping = {
         "phone": clean_expr.phone("raw_phone"),

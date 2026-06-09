@@ -55,7 +55,7 @@ def resolve_cache_dir(config: Union[str, dict[str, Any]]) -> Optional[Path]:
         return None
     try:
         hash_id = hashlib.sha256(fingerprint.encode()).hexdigest()
-        cache_dir = Path(".odf_cache") / hash_id
+        cache_dir = Path(".fluvo_cache") / hash_id
         cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir
     except Exception as e:  # pragma: no cover - defensive
@@ -81,7 +81,7 @@ def get_cache_dir(config_file: str) -> Optional[Path]:
             f"{config.get('Connection', 'database')}"
         )
         hash_id = hashlib.sha256(connection_str.encode()).hexdigest()
-        cache_dir = Path(".odf_cache") / hash_id
+        cache_dir = Path(".fluvo_cache") / hash_id
         cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir
     except Exception as e:
@@ -322,7 +322,7 @@ def get_session_dir(session_id: str) -> Optional[Path]:
     try:
         # Session directories are stored in a common 'sessions' subdir to
         # distinguish them from other connection-specific caches.
-        session_dir = Path(".odf_cache") / "sessions" / session_id
+        session_dir = Path(".fluvo_cache") / "sessions" / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
         return session_dir
     except Exception as e:

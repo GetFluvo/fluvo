@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from odoo_data_flow.lib.actions.language_installer import (
+from fluvo.lib.actions.language_installer import (
     _install_languages_legacy,
     _install_languages_modern,
     _wait_for_languages_to_be_active,
@@ -16,7 +16,7 @@ from odoo_data_flow.lib.actions.language_installer import (
 class TestLanguageInstaller:
     """Tests for the language installation action."""
 
-    @patch("odoo_data_flow.lib.actions.language_installer.time.sleep")
+    @patch("fluvo.lib.actions.language_installer.time.sleep")
     def test_wait_for_languages_success(self, mock_sleep: MagicMock) -> None:
         """Tests the success path of the language polling function."""
         mock_lang_model = MagicMock()
@@ -34,7 +34,7 @@ class TestLanguageInstaller:
         assert result is True
         assert mock_lang_model.search_read.call_count == 2
 
-    @patch("odoo_data_flow.lib.actions.language_installer.time.sleep")
+    @patch("fluvo.lib.actions.language_installer.time.sleep")
     def test_wait_for_languages_timeout(self, mock_sleep: MagicMock) -> None:
         """Tests the timeout path of the language polling function."""
         mock_lang_model = MagicMock()
@@ -47,7 +47,7 @@ class TestLanguageInstaller:
         )
         assert result is False
 
-    @patch("odoo_data_flow.lib.actions.language_installer.time.sleep")
+    @patch("fluvo.lib.actions.language_installer.time.sleep")
     def test_wait_for_languages_rpc_error(self, mock_sleep: MagicMock) -> None:
         """Tests that the polling function handles an RPC error."""
         mock_lang_model = MagicMock()
@@ -98,8 +98,8 @@ class TestLanguageInstaller:
             ]
         )
 
-    @patch("odoo_data_flow.lib.odoo_lib.get_odoo_version")
-    @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.odoo_lib.get_odoo_version")
+    @patch("fluvo.lib.conf_lib.get_connection_from_config")
     @pytest.mark.parametrize(
         "version, expected_create_payload",
         [
@@ -145,8 +145,8 @@ class TestLanguageInstaller:
         mock_installer_model.create.assert_called_once_with(expected_create_payload)
         mock_installer_model.lang_install.assert_called_once_with([123])
 
-    @patch("odoo_data_flow.lib.odoo_lib.get_odoo_version")
-    @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.odoo_lib.get_odoo_version")
+    @patch("fluvo.lib.conf_lib.get_connection_from_config")
     def test_installation_fails_if_language_not_found(
         self, mock_get_conn: MagicMock, mock_get_version: MagicMock
     ) -> None:
@@ -174,7 +174,7 @@ class TestLanguageInstaller:
         # --- Assert ---
         assert result is False
 
-    @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.conf_lib.get_connection_from_config")
     def test_installation_fails_gracefully_on_rpc_error(
         self, mock_get_conn: MagicMock
     ) -> None:
@@ -186,8 +186,8 @@ class TestLanguageInstaller:
         assert result is False
 
     @pytest.mark.parametrize("version", [14, 18])
-    @patch("odoo_data_flow.lib.odoo_lib.get_odoo_version")
-    @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.odoo_lib.get_odoo_version")
+    @patch("fluvo.lib.conf_lib.get_connection_from_config")
     def test_run_installation_with_partial_failure(
         self,
         mock_get_conn: MagicMock,
@@ -244,8 +244,8 @@ class TestLanguageInstaller:
         )  # Only the successful one was executed
 
     @pytest.mark.parametrize("version", [14, 18])
-    @patch("odoo_data_flow.lib.odoo_lib.get_odoo_version")
-    @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.odoo_lib.get_odoo_version")
+    @patch("fluvo.lib.conf_lib.get_connection_from_config")
     def test_run_installation_fails_on_install_step(
         self,
         mock_get_conn: MagicMock,
@@ -392,7 +392,7 @@ class TestLanguageInstaller:
         # Assert create was only called once, as no fallback is attempted
         mock_installer_model.create.assert_called_once_with({"langs": [(6, 0, [42])]})
 
-    @patch("odoo_data_flow.lib.actions.language_installer.log")
+    @patch("fluvo.lib.actions.language_installer.log")
     def test_install_languages_modern_failure_on_install_step(
         self, mock_log: MagicMock
     ) -> None:

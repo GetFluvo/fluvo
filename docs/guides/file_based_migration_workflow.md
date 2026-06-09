@@ -1,6 +1,6 @@
 # Guide: The File-Based Migration Workflow
 
-This guide details the recommended best-practice for a robust, repeatable, and debuggable data migration using `odoo-data-flow`. This workflow is centered around a three-step, file-based process:
+This guide details the recommended best-practice for a robust, repeatable, and debuggable data migration using `fluvo`. This workflow is centered around a three-step, file-based process:
 
 1.  **Export:** Extract data from the source Odoo instance into a local CSV file.
 2.  **Transform:** Apply data cleaning, mapping, and transformation logic to the CSV file, producing a new, clean CSV file ready for import.
@@ -22,7 +22,7 @@ Our requirements are:
 
 ## Step 1: Export the Source Data
 
-First, we use the `odf export` command to pull the data from our source database. We'll create two configuration files, one for the source and one for the destination.
+First, we use the `fluvo export` command to pull the data from our source database. We'll create two configuration files, one for the source and one for the destination.
 
 **`source.conf`**:
 ```ini
@@ -45,7 +45,7 @@ password = yyy
 Now, run the export command:
 
 ```bash
-odf export --config source.conf \
+fluvo export --config source.conf \
            --model res.partner \
            --fields "id,name,email,phone" \
            --domain "[('category_id.name', '=', 'Customers')]" \
@@ -63,13 +63,13 @@ After this step, you will have a `source_partners.csv` file on your machine.
 
 ## Step 2: Transform the Data
 
-This is where the power of `odoo-data-flow` shines. We will create a Python script to define our transformations.
+This is where the power of `fluvo` shines. We will create a Python script to define our transformations.
 
 Create a file named `partner_mapper.py`:
 
 ```python
 import polars as pl
-from odoo_data_flow.lib.transform import Processor
+from fluvo.lib.transform import Processor
 
 # Define the transformation logic using Polars expressions.
 mapping = {
@@ -84,7 +84,7 @@ mapping = {
     "phone": pl.col("phone"),
 }
 
-# Create the Processor instance. This is what odf will use.
+# Create the Processor instance. This is what fluvo will use.
 # The `dataframe` will be automatically injected by the `transform` command.
 processor = Processor(mapping=mapping)
 ```
@@ -92,7 +92,7 @@ processor = Processor(mapping=mapping)
 Now, run the `transform` command, pointing it to our source data and our new mapper file:
 
 ```bash
-odf transform --file-in source_partners.csv \
+fluvo transform --file-in source_partners.csv \
               --file-out partners_transformed.csv \
               --transformer-file partner_mapper.py
 ```
@@ -101,10 +101,10 @@ This command reads `source_partners.csv`, applies the logic from `partner_mapper
 
 ## Step 3: Import the Transformed Data
 
-Finally, we import the clean data into our destination database using the `odf import` command.
+Finally, we import the clean data into our destination database using the `fluvo import` command.
 
 ```bash
-odf import --config destination.conf \
+fluvo import --config destination.conf \
            --file partners_transformed.csv \
            --model res.partner
 ```

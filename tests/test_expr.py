@@ -4,8 +4,8 @@ from datetime import date as date_type
 
 import polars as pl
 
-from odoo_data_flow.lib import expr
-from odoo_data_flow.lib.transform import Processor
+from fluvo.lib import expr
+from fluvo.lib.transform import Processor
 
 
 class TestVal:

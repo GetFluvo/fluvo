@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from odoo_data_flow.lib import preflight
+from fluvo.lib import preflight
 
 
 @pytest.fixture
@@ -205,14 +205,14 @@ class TestCheckReferencesExist:
 class TestReferenceCheck:
     """Tests for the reference_check preflight function."""
 
-    @patch("odoo_data_flow.lib.preflight._get_csv_header")
-    @patch("odoo_data_flow.lib.preflight._get_odoo_fields")
-    @patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.preflight._get_csv_header")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    @patch("fluvo.lib.preflight.conf_lib.get_connection_from_config")
     def test_skip_mode_returns_true(
         self, mock_conn: Any, mock_fields: Any, mock_header: Any
     ) -> None:
         """Test that skip mode immediately returns True."""
-        from odoo_data_flow.enums import PreflightMode
+        from fluvo.enums import PreflightMode
 
         result = preflight.reference_check(
             preflight_mode=PreflightMode.NORMAL,
@@ -225,11 +225,11 @@ class TestReferenceCheck:
         assert result is True
         mock_header.assert_not_called()
 
-    @patch("odoo_data_flow.lib.preflight._get_csv_header")
-    @patch("odoo_data_flow.lib.preflight._get_odoo_fields")
-    @patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config")
-    @patch("odoo_data_flow.lib.preflight._extract_references_from_csv")
-    @patch("odoo_data_flow.lib.preflight._check_references_exist")
+    @patch("fluvo.lib.preflight._get_csv_header")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    @patch("fluvo.lib.preflight.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.preflight._extract_references_from_csv")
+    @patch("fluvo.lib.preflight._check_references_exist")
     def test_all_refs_valid_returns_true(
         self,
         mock_check: Any,
@@ -239,7 +239,7 @@ class TestReferenceCheck:
         mock_header: Any,
     ) -> None:
         """Test that valid references return True."""
-        from odoo_data_flow.enums import PreflightMode
+        from fluvo.enums import PreflightMode
 
         mock_header.return_value = ["id", "name", "partner_id/id"]
         mock_fields.return_value = {
@@ -260,12 +260,12 @@ class TestReferenceCheck:
 
         assert result is True
 
-    @patch("odoo_data_flow.lib.preflight._get_csv_header")
-    @patch("odoo_data_flow.lib.preflight._get_odoo_fields")
-    @patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config")
-    @patch("odoo_data_flow.lib.preflight._extract_references_from_csv")
-    @patch("odoo_data_flow.lib.preflight._check_references_exist")
-    @patch("odoo_data_flow.lib.preflight._display_missing_references")
+    @patch("fluvo.lib.preflight._get_csv_header")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    @patch("fluvo.lib.preflight.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.preflight._extract_references_from_csv")
+    @patch("fluvo.lib.preflight._check_references_exist")
+    @patch("fluvo.lib.preflight._display_missing_references")
     def test_missing_refs_fail_mode(
         self,
         mock_display: Any,
@@ -276,7 +276,7 @@ class TestReferenceCheck:
         mock_header: Any,
     ) -> None:
         """Test that missing refs with fail mode returns False."""
-        from odoo_data_flow.enums import PreflightMode
+        from fluvo.enums import PreflightMode
 
         mock_header.return_value = ["id", "name", "partner_id/id"]
         mock_fields.return_value = {
@@ -296,12 +296,12 @@ class TestReferenceCheck:
         assert result is False
         mock_display.assert_called_once()
 
-    @patch("odoo_data_flow.lib.preflight._get_csv_header")
-    @patch("odoo_data_flow.lib.preflight._get_odoo_fields")
-    @patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config")
-    @patch("odoo_data_flow.lib.preflight._extract_references_from_csv")
-    @patch("odoo_data_flow.lib.preflight._check_references_exist")
-    @patch("odoo_data_flow.lib.preflight._display_missing_references")
+    @patch("fluvo.lib.preflight._get_csv_header")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    @patch("fluvo.lib.preflight.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.preflight._extract_references_from_csv")
+    @patch("fluvo.lib.preflight._check_references_exist")
+    @patch("fluvo.lib.preflight._display_missing_references")
     def test_missing_refs_warn_mode(
         self,
         mock_display: Any,
@@ -312,7 +312,7 @@ class TestReferenceCheck:
         mock_header: Any,
     ) -> None:
         """Test that missing refs with warn mode returns True."""
-        from odoo_data_flow.enums import PreflightMode
+        from fluvo.enums import PreflightMode
 
         mock_header.return_value = ["id", "name", "partner_id/id"]
         mock_fields.return_value = {
@@ -334,7 +334,7 @@ class TestReferenceCheck:
 
     def test_fail_mode_skipped(self) -> None:
         """Test that reference check is skipped in FAIL_MODE."""
-        from odoo_data_flow.enums import PreflightMode
+        from fluvo.enums import PreflightMode
 
         result = preflight.reference_check(
             preflight_mode=PreflightMode.FAIL_MODE,
@@ -398,12 +398,12 @@ class TestExtractIdsFromCSV:
 class TestSelfReferenceExclusion:
     """Tests for excluding self-references from missing references."""
 
-    @patch("odoo_data_flow.lib.preflight._get_csv_header")
-    @patch("odoo_data_flow.lib.preflight._get_odoo_fields")
-    @patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config")
-    @patch("odoo_data_flow.lib.preflight._extract_references_from_csv")
-    @patch("odoo_data_flow.lib.preflight._extract_ids_from_csv")
-    @patch("odoo_data_flow.lib.preflight._check_references_exist")
+    @patch("fluvo.lib.preflight._get_csv_header")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    @patch("fluvo.lib.preflight.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.preflight._extract_references_from_csv")
+    @patch("fluvo.lib.preflight._extract_ids_from_csv")
+    @patch("fluvo.lib.preflight._check_references_exist")
     def test_self_references_excluded_from_missing(
         self,
         mock_check: Any,
@@ -414,7 +414,7 @@ class TestSelfReferenceExclusion:
         mock_header: Any,
     ) -> None:
         """Test that self-references (IDs in same file) are not flagged as missing."""
-        from odoo_data_flow.enums import PreflightMode
+        from fluvo.enums import PreflightMode
 
         mock_header.return_value = ["id", "name", "parent_id/id"]
         mock_fields.return_value = {
@@ -449,12 +449,12 @@ class TestSelfReferenceExclusion:
         # The test passes if it doesn't fail on __import__.company_a
         mock_extract_ids.assert_called_once()
 
-    @patch("odoo_data_flow.lib.preflight._get_csv_header")
-    @patch("odoo_data_flow.lib.preflight._get_odoo_fields")
-    @patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config")
-    @patch("odoo_data_flow.lib.preflight._extract_references_from_csv")
-    @patch("odoo_data_flow.lib.preflight._extract_ids_from_csv")
-    @patch("odoo_data_flow.lib.preflight._check_references_exist")
+    @patch("fluvo.lib.preflight._get_csv_header")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    @patch("fluvo.lib.preflight.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.preflight._extract_references_from_csv")
+    @patch("fluvo.lib.preflight._extract_ids_from_csv")
+    @patch("fluvo.lib.preflight._check_references_exist")
     def test_all_self_references_returns_success(
         self,
         mock_check: Any,
@@ -465,7 +465,7 @@ class TestSelfReferenceExclusion:
         mock_header: Any,
     ) -> None:
         """Test that when all missing refs are self-refs, check passes."""
-        from odoo_data_flow.enums import PreflightMode
+        from fluvo.enums import PreflightMode
 
         mock_header.return_value = ["id", "name", "parent_id/id"]
         mock_fields.return_value = {

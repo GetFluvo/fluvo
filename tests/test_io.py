@@ -4,13 +4,13 @@ import shlex
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from odoo_data_flow.lib.internal.io import write_csv, write_file
+from fluvo.lib.internal.io import write_csv, write_file
 
 # --- Tests for write_csv ---
 
 
-@patch("odoo_data_flow.lib.internal.io.open")
-@patch("odoo_data_flow.lib.internal.io.log.error")
+@patch("fluvo.lib.internal.io.open")
+@patch("fluvo.lib.internal.io.log.error")
 def test_write_csv_oserror(mock_log_error: MagicMock, mock_open: MagicMock) -> None:
     """Tests that write_csv logs an error if an OSError occurs."""
     # 1. Setup: Make the open call raise an OSError
@@ -31,7 +31,7 @@ def test_write_file_writes_csv_data(tmp_path: Path) -> None:
     """Tests that write_file correctly calls write_csv to create the data file."""
     data_file = tmp_path / "data.csv"
 
-    with patch("odoo_data_flow.lib.internal.io.write_csv") as mock_write_csv:
+    with patch("fluvo.lib.internal.io.write_csv") as mock_write_csv:
         write_file(
             filename=str(data_file),
             header=["id", "name"],
@@ -43,8 +43,8 @@ def test_write_file_writes_csv_data(tmp_path: Path) -> None:
         )
 
 
-@patch("odoo_data_flow.lib.internal.io.write_csv")
-@patch("odoo_data_flow.lib.internal.io.open")
+@patch("fluvo.lib.internal.io.write_csv")
+@patch("fluvo.lib.internal.io.open")
 def test_write_file_no_launchfile(
     mock_open: MagicMock, mock_write_csv: MagicMock, tmp_path: Path
 ) -> None:
@@ -82,7 +82,7 @@ def test_write_file_import_command(tmp_path: Path) -> None:
     )
     assert script_file.exists()
     content = script_file.read_text()
-    assert "odoo-data-flow import" in content
+    assert "fluvo import" in content
     assert f"--config {shlex.quote('conf/custom.conf')}" in content
     assert f"--file {shlex.quote(str(data_file))}" in content
     assert f"--model {shlex.quote('my.model')}" in content
@@ -92,7 +92,7 @@ def test_write_file_import_command(tmp_path: Path) -> None:
     assert f"--ignore {shlex.quote('field_to_ignore')}" in content
     assert f"--context {shlex.quote(str({'active_test': False}))}" in content
     assert "--fail" in content
-    assert content.count("odoo-data-flow import") == 2
+    assert content.count("fluvo import") == 2
 
 
 def test_write_file_export_command(tmp_path: Path) -> None:
@@ -111,7 +111,7 @@ def test_write_file_export_command(tmp_path: Path) -> None:
     )
     assert script_file.exists()
     content = script_file.read_text()
-    assert "odoo-data-flow export" in content
+    assert "fluvo export" in content
     assert f"--model {shlex.quote('res.partner')}" in content
     assert f"--fields {shlex.quote('id,name')}" in content
     expected_domain_str = f"--domain {shlex.quote(domain_str)}"
@@ -139,9 +139,9 @@ def test_write_file_auto_model_name(tmp_path: Path) -> None:
     assert f"--model {shlex.quote('res.partner')}" in content
 
 
-@patch("odoo_data_flow.lib.internal.io.write_csv")
-@patch("odoo_data_flow.lib.internal.io.open")
-@patch("odoo_data_flow.lib.internal.io.log.error")
+@patch("fluvo.lib.internal.io.write_csv")
+@patch("fluvo.lib.internal.io.open")
+@patch("fluvo.lib.internal.io.log.error")
 def test_write_file_oserror(
     mock_log_error: MagicMock, mock_open: MagicMock, mock_write_csv: MagicMock
 ) -> None:
@@ -166,7 +166,7 @@ def test_write_file_oserror(
     assert "Failed to write to launch file" in mock_log_error.call_args[0][0]
 
 
-@patch("odoo_data_flow.lib.internal.io.log.error")
+@patch("fluvo.lib.internal.io.log.error")
 def test_write_file_invalid_command(mock_log_error: MagicMock) -> None:
     """Tests that an error is logged for an invalid command type."""
     write_file(

@@ -1,6 +1,6 @@
 # Configuration Guide
 
-This guide provides a detailed reference for the `connection.conf` file, which is essential for connecting the `odoo-data-flow` tool to your Odoo instance.
+This guide provides a detailed reference for the `connection.conf` file, which is essential for connecting the `fluvo` tool to your Odoo instance.
 
 ## The Connection File
 
@@ -84,10 +84,10 @@ You can override the protocol setting from your config file using the `--protoco
 
 ```bash
 # Use JSON-RPC for better performance
-odoo-data-flow import --protocol jsonrpc --connection-file conf/connection.conf ...
+fluvo import --protocol jsonrpc --connection-file conf/connection.conf ...
 
 # Use JSON-2 for Odoo 19+
-odoo-data-flow import --protocol json2 --connection-file conf/connection.conf ...
+fluvo import --protocol json2 --connection-file conf/connection.conf ...
 ```
 
 ---

@@ -7,8 +7,8 @@ clean CSV file.
 
 import os
 
-from odoo_data_flow.lib import mapper
-from odoo_data_flow.lib.transform import Processor
+from fluvo.lib import mapper
+from fluvo.lib.transform import Processor
 
 # --- Configuration ---
 SOURCE_FILE = os.path.join("tests", "origin", "data.xml")

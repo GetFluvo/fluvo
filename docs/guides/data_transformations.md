@@ -2,7 +2,7 @@
 
 Mappers are the core of the data transformation process. They are powerful, reusable functions that you use within your mapping dictionary to define how each column of your destination file should be generated.
 
-This guide provides a comprehensive reference for all mappers available in the `odoo_data_flow.lib.mapper` module.
+This guide provides a comprehensive reference for all mappers available in the `fluvo.lib.mapper` module.
 
 ---
 
@@ -18,8 +18,8 @@ In your `transform.py` script, after initializing the `Processor` but before cal
 
 ```{code-block} python
 :caption: transform.py
-from odoo_data_flow.lib import checker
-from odoo_data_flow.lib.transform import Processor
+from fluvo.lib import checker
+from fluvo.lib.transform import Processor
 
 # Initialize processor
 processor = Processor('origin/my_data.csv')
@@ -36,7 +36,7 @@ processor.check(checker.id_validity_checker('SKU', r'^[A-Z]{2}-\d{4}$'))
 
 ### Available Checker Functions
 
-The following checkers are available in the `odoo_data_flow.lib.checker` module.
+The following checkers are available in the `fluvo.lib.checker` module.
 
 #### `checker.line_length_checker(expected_length)`
 
@@ -268,8 +268,8 @@ You provide the attribute values (e.g., "Blue", "L") as a comma-separated string
 #### Example Transformation Script (Modern)
 ```python
 # In your transform.py
-from odoo_data_flow.lib import mapper
-from odoo_data_flow.lib.transform import ProductProcessorV10
+from fluvo.lib import mapper
+from fluvo.lib.transform import ProductProcessorV10
 
 # Initialize the modern processor
 processor = ProductProcessorV10('origin/products.csv')
@@ -302,8 +302,8 @@ This approach is for older Odoo versions and requires a more manual, three-file 
 #### Example Transformation Script (Legacy)
 ```python
 # In your transform.py
-from odoo_data_flow.lib import mapper
-from odoo_data_flow.lib.transform import ProductProcessorV9
+from fluvo.lib import mapper
+from fluvo.lib.transform import ProductProcessorV9
 
 # Initialize the legacy processor
 processor = ProductProcessorV9('origin/products.csv')
@@ -521,7 +521,7 @@ This special mapper takes a full mapping dictionary to create related records (e
 
 **Transformation Code**
 ```python
-from odoo_data_flow.lib import mapper
+from fluvo.lib import mapper
 
 def get_order_id(val, state):
     if val:
@@ -569,7 +569,7 @@ When importing data from external sources, values often need sanitization before
 The `clean_expr` module returns Polars expressions for vectorized operations. Use this with the `expr` module for maximum performance.
 
 ```python
-from odoo_data_flow.lib import expr, clean_expr
+from fluvo.lib import expr, clean_expr
 
 mapping = {
     "phone": clean_expr.phone("Phone"),           # Keep digits + leading +
@@ -585,7 +585,7 @@ mapping = {
 The `clean` module returns callables for use with the mapper's `postprocess` parameter. Use this for stateful operations or with existing mapper-based code.
 
 ```python
-from odoo_data_flow.lib import mapper, clean
+from fluvo.lib import mapper, clean
 
 mapping = {
     "phone": mapper.val("Phone", postprocess=clean.phone()),
@@ -674,7 +674,7 @@ Normalize business entity suffixes to their canonical forms. Handles variations 
 **Usage with mapper (row-by-row):**
 
 ```python
-from odoo_data_flow.lib import mapper, clean
+from fluvo.lib import mapper, clean
 
 mapping = {
     "name": mapper.val("CompanyName", postprocess=clean.company_suffix()),
@@ -693,7 +693,7 @@ mapping = {
 **Usage with Polars expressions:**
 
 ```python
-from odoo_data_flow.lib import clean_expr
+from fluvo.lib import clean_expr
 
 mapping = {
     "name": clean_expr.company_suffix("CompanyName"),
@@ -708,7 +708,7 @@ custom_suffixes = {"xyz": "X.Y.Z.", "abc": "A.B.C."}
 clean.company_suffix(suffixes=custom_suffixes)
 
 # Or extend the default mapping
-from odoo_data_flow.lib import clean
+from fluvo.lib import clean
 clean.COMPANY_SUFFIX_CANONICAL["myco"] = "MyCo."
 ```
 
@@ -768,7 +768,7 @@ The `street()` cleaner:
 Use `pipe()` to chain multiple cleaners:
 
 ```python
-from odoo_data_flow.lib import clean
+from fluvo.lib import clean
 
 # Chain cleaners left-to-right
 mapping = {
@@ -785,7 +785,7 @@ mapping = {
 Some cleaners share data between fields. For example, deriving a website from an email domain:
 
 ```python
-from odoo_data_flow.lib import mapper, clean
+from fluvo.lib import mapper, clean
 
 mapping = {
     # email() stores the domain in shared state
@@ -805,7 +805,7 @@ Common email providers (gmail.com, yahoo.com, etc.) are automatically filtered o
 All default constants can be extended:
 
 ```python
-from odoo_data_flow.lib import clean
+from fluvo.lib import clean
 
 # Add your own email providers to exclude
 clean.COMMON_EMAIL_PROVIDERS.add("yourcompany.com")
@@ -842,7 +842,7 @@ Instead of hardcoding city/country mappings in the library (which become stale),
 ### Basic Usage
 
 ```python
-from odoo_data_flow.lib import geonames, clean
+from fluvo.lib import geonames, clean
 
 # Load cities (downloads and caches on first use)
 cities = geonames.get_cities_lookup()
@@ -866,7 +866,7 @@ clean.detect_country(city="Париж", cities=cities)      # Returns: 'FR' (Rus
 
 ```python
 import polars as pl
-from odoo_data_flow.lib import geonames
+from fluvo.lib import geonames
 
 # Load as Polars DataFrame for analysis
 df = geonames.load_cities(dataset="cities15000", min_population=100000)
@@ -885,7 +885,7 @@ geonames.get_city_coordinates("Paris", country="FR")
 ### Postal Code Lookups
 
 ```python
-from odoo_data_flow.lib import geonames
+from fluvo.lib import geonames
 
 # Load postal codes for specific countries
 lookup = geonames.get_postal_lookup(["NL", "BE", "DE"])
@@ -897,10 +897,10 @@ lookup["BE"]["1000"]    # Returns: 'Bruxelles'
 
 ### Caching
 
-Data is automatically cached in `~/.cache/odoo-data-flow/geonames/`:
+Data is automatically cached in `~/.cache/fluvo/geonames/`:
 
 ```python
-from odoo_data_flow.lib import geonames
+from fluvo.lib import geonames
 
 # Check cache directory
 cache_dir = geonames.get_cache_dir()
@@ -914,7 +914,7 @@ geonames.download_dataset("cities15000", force=True)
 Combining GeoNames with `detect_country` for smart country detection:
 
 ```python
-from odoo_data_flow.lib import geonames, clean, mapper
+from fluvo.lib import geonames, clean, mapper
 
 # Load city lookup once at the start
 cities = geonames.get_cities_lookup()

@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock
 
-from odoo_data_flow.lib import retry
+from fluvo.lib import retry
 
 
 class TestErrorCategorization:

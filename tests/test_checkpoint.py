@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from odoo_data_flow.lib import checkpoint as ckpt
+from fluvo.lib import checkpoint as ckpt
 
 
 @pytest.fixture
@@ -106,7 +106,7 @@ class TestCheckpointPaths:
     def test_get_checkpoint_dir(self, sample_csv: str) -> None:
         """Test checkpoint directory path."""
         cp_dir = ckpt.get_checkpoint_dir(sample_csv)
-        assert cp_dir.name == ".odf_checkpoint"
+        assert cp_dir.name == ".fluvo_checkpoint"
         assert str(cp_dir.parent) == os.path.dirname(sample_csv)
 
     def test_get_checkpoint_path(self, sample_csv: str) -> None:

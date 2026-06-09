@@ -7,7 +7,7 @@ is exact, and self-referential relations still resolve in Pass 2.
 
 Run with, e.g.::
 
-    ODF_E2E_SCALE=100000 pytest tests/e2e/test_integrity_scale.py -m large
+    FLUVO_E2E_SCALE=100000 pytest tests/e2e/test_integrity_scale.py -m large
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-# Odoo Data Flow - CRUSH.md
+# Fluvo - CRUSH.md
 
 ## Build/Lint/Test Commands
 - Setup: `nox -s setup` (if available) or `uv sync`
@@ -15,11 +15,11 @@
 - Types: Use lowercase built-ins (list, dict), fully type-hinted code
 - Naming: snake_case for variables/functions, PascalCase for classes
 - Docstrings: Google style (Args:, Returns:) with one-line summary
-- Error handling: Use exceptions from src/odoo_data_flow/lib/internal/exceptions.py
+- Error handling: Use exceptions from src/fluvo/lib/internal/exceptions.py
 - Tests: Pytest with descriptive names, follow existing patterns in tests/
 
 ## Project Structure
-- src/odoo_data_flow/: Main source code
+- src/fluvo/: Main source code
 - tests/: Unit and integration tests
 - docs/: Documentation source
 - conf/: Configuration files

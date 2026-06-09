@@ -24,7 +24,7 @@ VAT validation settings are backed up to a JSON file before being disabled.
 This ensures that if restoration fails (e.g., due to a 503 error), the original
 settings are preserved and will be used on the next import run.
 
-**Backup location:** ``~/.odoo-data-flow/vat_settings_backup/``
+**Backup location:** ``~/.fluvo/vat_settings_backup/``
 
 Each database has its own backup file: ``vat_settings_{host}_{database}.json``
 
@@ -36,7 +36,7 @@ backed-up settings instead of polling the database (which may have incorrect
 **Manual restoration:** If you notice VAT validation is stuck in "disabled"
 state, you can manually restore settings::
 
-    from odoo_data_flow.lib.actions.vies_manager import (
+    from fluvo.lib.actions.vies_manager import (
         restore_vat_settings_from_backup,
         check_vat_settings_backup_status,
     )
@@ -74,7 +74,7 @@ from ...logging_config import log
 
 # Default backup file location (in user's home directory)
 DEFAULT_VAT_SETTINGS_BACKUP_DIR = (
-    Path.home() / ".odoo-data-flow" / "vat_settings_backup"
+    Path.home() / ".fluvo" / "vat_settings_backup"
 )
 
 # Retry configuration for restoration

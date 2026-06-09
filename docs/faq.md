@@ -1,16 +1,16 @@
 # FAQ & Troubleshooting
 
-This document answers frequently asked questions and provides solutions to common problems you may encounter while using `odoo-data-flow`.
+This document answers frequently asked questions and provides solutions to common problems you may encounter while using `fluvo`.
 
 ## Frequently Asked Questions
 
-### What is `odoo-data-flow`?
+### What is `fluvo`?
 
 It is a powerful Python library designed to handle the import and export of data to and from Odoo. It allows you to define complex data transformations in Python, providing a robust and repeatable process for data migrations.
 
 ### How is this different from Odoo's standard import tool?
 
-While Odoo's built-in import is great for simple tasks, `odoo-data-flow` offers several key advantages for complex or large-scale migrations:
+While Odoo's built-in import is great for simple tasks, `fluvo` offers several key advantages for complex or large-scale migrations:
 
 - **Separation of Concerns**: It cleanly separates the data **transformation** logic (cleaning your source data) from the data
 
@@ -24,11 +24,11 @@ While Odoo's built-in import is great for simple tasks, `odoo-data-flow` offers 
 
 ### Can I use this for both importing and exporting?
 
-Yes. The library provides tools for both workflows. The `Processor` and `mapper` modules are used for transforming and preparing data for import, while the `odoo-data-flow export` command is used to export data from Odoo into CSV files.
+Yes. The library provides tools for both workflows. The `Processor` and `mapper` modules are used for transforming and preparing data for import, while the `fluvo export` command is used to export data from Odoo into CSV files.
 
 ### Can I migrate data directly between two Odoo databases?
 
-Yes. The library includes a powerful `odoo-data-flow migrate` command that performs a complete export, transform, and import from one Odoo instance to another in a single step, without creating intermediate files. This is ideal for migrating data from a staging server to production.
+Yes. The library includes a powerful `fluvo migrate` command that performs a complete export, transform, and import from one Odoo instance to another in a single step, without creating intermediate files. This is ideal for migrating data from a staging server to production.
 
 > For detailed instructions, see the [Server-to-Server Migration Guide](guides/server_to_server_migration.md).
 
@@ -42,7 +42,7 @@ The `Processor` can be initialized directly with in-memory data. If your source 
 
 ```python
 import csv
-from odoo_data_flow.lib.transform import Processor
+from fluvo.lib.transform import Processor
 
 # 1. Define the header manually
 my_header = ['LegacyID', 'FirstName', 'LastName', 'Email']
@@ -64,11 +64,11 @@ processor = Processor(header=my_header, data=my_data)
 
 A full example project, demonstrating a realistic data migration workflow with multiple models and complex transformations, is available on GitHub. This is an excellent resource for seeing how all the pieces fit together.
 
-- **[Odoo Data Flow Example Repository](https://github.com/OdooDataFlow/odoo-data-flow-example/tree/18.0)**
+- **[Fluvo Example Repository](https://github.com/getfluvo/fluvo-example/tree/18.0)**
 
-### Can `odoo-data-flow` connect directly to Google Sheets?
+### Can `fluvo` connect directly to Google Sheets?
 
-No, the `odoo-data-flow` library cannot connect directly to Google Sheets to read data.
+No, the `fluvo` library cannot connect directly to Google Sheets to read data.
 
 The tool is designed to read data from local files on your computer, specifically in either **CSV** or **XML** format. It does not have the built-in functionality to authenticate with Google's services and pull data directly from a spreadsheet URL.
 
@@ -82,10 +82,10 @@ The standard and easiest way to use your data from Google Sheets is to first dow
 
 
 4.  This will save the current sheet as a `.csv` file to your computer's "Downloads" folder.
-5.  You can then use that downloaded file with the `odoo-data-flow` command:
+5.  You can then use that downloaded file with the `fluvo` command:
 
     ```bash
-    odoo-data-flow import --file /path/to/your/downloaded-sheet.csv
+    fluvo import --file /path/to/your/downloaded-sheet.csv
     ```
 
 This workflow ensures that you have a local copy of the data at the time of import and allows you to use all the powerful transformation features of the library on your spreadsheet data.
@@ -165,7 +165,7 @@ When you run the import again with the `--fail` flag, it enters a dedicated reco
 
 **Your recommended workflow should be:**
 
-1. Run your `load.sh` script or the `odoo-data-flow import` command.
+1. Run your `load.sh` script or the `fluvo import` command.
 
 2. If a `<model_name>_fail.csv` file is created, run the command again with the `--fail` flag.
 
@@ -191,7 +191,7 @@ Sometimes, the number of records in your source file doesn't match the number of
 
 ### Connection Errors
 
-These errors usually happen when the `odoo-data-flow` client cannot reach your Odoo instance.
+These errors usually happen when the `fluvo` client cannot reach your Odoo instance.
 
 - **Error:** `Connection refused`
   - **Cause:** The `hostname` or `port` in your `conf/connection.conf` is incorrect, or the Odoo server is not running.
@@ -244,7 +244,7 @@ his can happen for two main reasons:
 
   2.  There might be a typo in the field name you provided in the --fields argument.
 
-To check for the second case, look at the console output when you run the export command. If the field name is invalid, odoo-data-flow will show a warning like this:
+To check for the second case, look at the console output when you run the export command. If the field name is invalid, fluvo will show a warning like this:
 
 `WARNING  Field 'your_field_name' (base: 'your_field_name') not found on model 'res.partner'. An empty column will be created.`
 If you see this warning, correct the field name in your command and run the export again.
@@ -255,14 +255,14 @@ When importing contact data, the importer temporarily disables VAT validation (V
 
 **Symptoms:**
 - VIES VAT validation no longer runs when saving contacts
-- You see a backup file at `~/.odoo-data-flow/vat_settings_backup/`
+- You see a backup file at `~/.fluvo/vat_settings_backup/`
 
 **Solution:**
 
 The importer uses a file-based backup system to preserve original settings. You can manually restore them:
 
 ```python
-from odoo_data_flow.lib.actions.vies_manager import restore_vat_settings_from_backup
+from fluvo.lib.actions.vies_manager import restore_vat_settings_from_backup
 
 success = restore_vat_settings_from_backup("conf/connection.conf")
 if success:
@@ -272,7 +272,7 @@ if success:
 Or check the backup status first:
 
 ```python
-from odoo_data_flow.lib.actions.vies_manager import check_vat_settings_backup_status
+from fluvo.lib.actions.vies_manager import check_vat_settings_backup_status
 
 status = check_vat_settings_backup_status("conf/connection.conf")
 print(f"Backup exists: {status['exists']}")

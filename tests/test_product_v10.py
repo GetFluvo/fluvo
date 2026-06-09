@@ -9,8 +9,8 @@ import os
 
 import polars as pl
 
-from odoo_data_flow.lib import mapper
-from odoo_data_flow.lib.transform import ProductProcessorV10
+from fluvo.lib import mapper
+from fluvo.lib.transform import ProductProcessorV10
 
 # --- Configuration ---
 TEMPLATE_PREFIX = "PRODUCT_TEMPLATE"

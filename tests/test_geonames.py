@@ -8,7 +8,7 @@ from unittest import mock
 import polars as pl
 import pytest
 
-from odoo_data_flow.lib import geonames
+from fluvo.lib import geonames
 
 
 class TestConstants:
@@ -333,7 +333,7 @@ class TestIntegrationWithClean:
 
     def test_cities_lookup_with_detect_country(self, sample_cities_file: Path) -> None:
         """Test using geonames lookup with clean.detect_country."""
-        from odoo_data_flow.lib import clean
+        from fluvo.lib import clean
 
         with mock.patch.object(
             geonames, "_get_cached_file", return_value=sample_cities_file

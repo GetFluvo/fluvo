@@ -2,7 +2,7 @@
 
 from sphinx.application import Sphinx
 
-project = "Odoo Data Flow"
+project = "Fluvo"
 author = "bosd"
 copyright = "2025, bosd"
 extensions = [

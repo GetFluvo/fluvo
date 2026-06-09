@@ -40,8 +40,8 @@ from odoolib.tools import JsonRPCException
 from ..logging_config import log
 
 # Generous default; a single large batch load can take well over httpx's 5s
-# default. Override with ODF_RPC_TIMEOUT (seconds).
-_DEFAULT_TIMEOUT = float(os.environ.get("ODF_RPC_TIMEOUT", "600"))
+# default. Override with FLUVO_RPC_TIMEOUT (seconds).
+_DEFAULT_TIMEOUT = float(os.environ.get("FLUVO_RPC_TIMEOUT", "600"))
 
 _client: httpx.Client | None = None
 _client_lock = threading.Lock()

@@ -14,14 +14,14 @@ CLEAN_COMMAND = """
 import glob, os, shutil;
 shutil.rmtree('build', ignore_errors=True);
 shutil.rmtree('dist', ignore_errors=True);
-shutil.rmtree('src/odoo_data_flow.egg-info', ignore_errors=True);
-for f in glob.glob('src/odoo_data_flow/*.so'): os.remove(f);
-for f in glob.glob('src/odoo_data_flow/*.c'): os.remove(f);
+shutil.rmtree('src/fluvo.egg-info', ignore_errors=True);
+for f in glob.glob('src/fluvo/*.so'): os.remove(f);
+for f in glob.glob('src/fluvo/*.c'): os.remove(f);
 """
 
 nox.options.default_venv_backend = "uv"
 
-package = "odoo_data_flow"
+package = "fluvo"
 python_versions = ["3.12", "3.13", "3.11", "3.10", "3.9"]
 nox.needs_version = ">= 2021.6.6"
 nox.options.sessions = (
@@ -185,10 +185,10 @@ def e2e(session: nox.Session) -> None:
 
     Brings up a disposable Postgres+Odoo stack via compose (podman or docker;
     see tests/e2e/conftest.py) and runs the data-integrity scenarios. Point
-    ODF_E2E_ODOO_URL at an existing Odoo (e.g. doodba) to skip container mgmt.
+    FLUVO_E2E_ODOO_URL at an existing Odoo (e.g. doodba) to skip container mgmt.
 
     The default small tier runs here; pass ``-- -m large`` (with a larger
-    ODF_E2E_SCALE) for the opt-in stress tier.
+    FLUVO_E2E_SCALE) for the opt-in stress tier.
     """
     session.install("pytest", "pytest-mock")
     session.install("-e", ".")
@@ -210,7 +210,7 @@ def tests_compiled(session: nox.Session) -> None:
     session.install("pytest", "pytest-mock")
 
     # Install the project WITH the env var to trigger mypyc compilation
-    session.install("-e", ".", env={"ODF_COMPILE_MYPYC": "1"})
+    session.install("-e", ".", env={"FLUVO_COMPILE_MYPYC": "1"})
 
     session.run("pytest", *session.posargs)
 

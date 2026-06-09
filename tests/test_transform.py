@@ -10,9 +10,9 @@ import pytest
 from polars.exceptions import ColumnNotFoundError
 from polars.testing import assert_frame_equal
 
-from odoo_data_flow.lib import mapper
-from odoo_data_flow.lib.internal.exceptions import SkippingError
-from odoo_data_flow.lib.transform import (
+from fluvo.lib import mapper
+from fluvo.lib.internal.exceptions import SkippingError
+from fluvo.lib.transform import (
     MapperRepr,
     Processor,
     ProductProcessorV9,
@@ -37,8 +37,8 @@ def test_processor_init_fails_without_source() -> None:
         Processor(mapping={})
 
 
-@patch("odoo_data_flow.lib.transform.build_polars_schema")
-@patch("odoo_data_flow.lib.transform.pl.read_csv")
+@patch("fluvo.lib.transform.build_polars_schema")
+@patch("fluvo.lib.transform.pl.read_csv")
 def test_processor_init_with_connection_and_model(
     mock_read_csv: MagicMock, mock_build_schema: MagicMock
 ) -> None:
@@ -161,7 +161,7 @@ def test_process_m2m() -> None:
     assert actual_data == set(expected_data)
 
 
-@patch("odoo_data_flow.lib.transform.etree")
+@patch("fluvo.lib.transform.etree")
 def test_read_file_xml_generic_exception(mock_etree: MagicMock, tmp_path: Path) -> None:
     """Tests that a generic exception during XML reading is handled."""
     mock_etree.parse.side_effect = RuntimeError("Generic XML read error")
@@ -175,7 +175,7 @@ def test_read_file_xml_generic_exception(mock_etree: MagicMock, tmp_path: Path) 
     assert processor.dataframe.is_empty()
 
 
-@patch("odoo_data_flow.lib.transform.pl.read_csv")
+@patch("fluvo.lib.transform.pl.read_csv")
 def test_read_file_csv_generic_exception(
     mock_read_csv: MagicMock, tmp_path: Path
 ) -> None:
@@ -187,7 +187,7 @@ def test_read_file_csv_generic_exception(
     assert processor.dataframe.is_empty()
 
 
-@patch("odoo_data_flow.lib.transform.log.warning")
+@patch("fluvo.lib.transform.log.warning")
 def test_check_failure(mock_log_warning: MagicMock) -> None:
     """Tests that the check method logs a warning when a check fails."""
     processor = Processor(mapping={}, dataframe=pl.DataFrame())
@@ -212,7 +212,7 @@ def test_join_file_missing_key(tmp_path: Path) -> None:
         )
 
 
-@patch("odoo_data_flow.lib.transform.Console")
+@patch("fluvo.lib.transform.Console")
 def test_join_file_dry_run(mock_console_class: MagicMock, tmp_path: Path) -> None:
     """Tests that join_file in dry_run mode does not modify data."""
     master_df = pl.DataFrame({"id": [1], "name": ["master_record"]})
@@ -231,7 +231,7 @@ def test_join_file_dry_run(mock_console_class: MagicMock, tmp_path: Path) -> Non
     mock_console_class.return_value.print.assert_called_once()
 
 
-@patch("odoo_data_flow.lib.transform.Console")
+@patch("fluvo.lib.transform.Console")
 def test_process_dry_run(mock_console_class: MagicMock) -> None:
     """Tests that dry_run mode prints a table and does not write files."""
     df = pl.DataFrame({"col1": ["A"]})
@@ -494,7 +494,7 @@ def test_process_with_boolean_type_in_mapping() -> None:
     assert_frame_equal(result, expected)
 
 
-@patch("odoo_data_flow.lib.transform.write_file")
+@patch("fluvo.lib.transform.write_file")
 def test_write_to_file_uses_default_config(mock_write_file: MagicMock) -> None:
     """Test write file default conifg.
 

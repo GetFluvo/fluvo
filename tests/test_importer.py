@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from odoo_data_flow.importer import (
+from fluvo.importer import (
     _count_lines,
     _get_env_from_config,
     _get_fail_filename,
@@ -79,8 +79,8 @@ class TestEnvFromConfig:
 class TestFailFilePath:
     """Tests for fail file path resolution with environment-specific folders."""
 
-    @patch("odoo_data_flow.importer.import_threaded.import_data")
-    @patch("odoo_data_flow.importer._run_preflight_checks")
+    @patch("fluvo.importer.import_threaded.import_data")
+    @patch("fluvo.importer._run_preflight_checks")
     def test_fail_file_uses_env_folder(
         self,
         mock_preflight: MagicMock,
@@ -131,8 +131,8 @@ class TestFailFilePath:
         assert fail_path.parent == data_dir / "uat"
         assert fail_path.name == "res_partner_fail.csv"
 
-    @patch("odoo_data_flow.importer.import_threaded.import_data")
-    @patch("odoo_data_flow.importer._run_preflight_checks")
+    @patch("fluvo.importer.import_threaded.import_data")
+    @patch("fluvo.importer._run_preflight_checks")
     def test_fail_file_no_env_uses_same_dir(
         self,
         mock_preflight: MagicMock,
@@ -189,8 +189,8 @@ class TestFailFilePath:
 class TestRunImport:
     """Tests for the main run_import orchestrator function."""
 
-    @patch("odoo_data_flow.importer.import_threaded.import_data")
-    @patch("odoo_data_flow.importer._run_preflight_checks")
+    @patch("fluvo.importer.import_threaded.import_data")
+    @patch("fluvo.importer._run_preflight_checks")
     def test_run_import_success_path(
         self,
         mock_preflight: MagicMock,
@@ -230,8 +230,8 @@ class TestRunImport:
         mock_preflight.assert_called_once()
         mock_import_data.assert_called_once()
 
-    @patch("odoo_data_flow.importer.import_threaded.import_data")
-    @patch("odoo_data_flow.importer._run_preflight_checks")
+    @patch("fluvo.importer.import_threaded.import_data")
+    @patch("fluvo.importer._run_preflight_checks")
     def test_run_import_refuses_to_defer_required_relational_field(
         self,
         mock_preflight: MagicMock,
@@ -284,8 +284,8 @@ class TestRunImport:
             "Non-required deferred field was wrongly dropped."
         )
 
-    @patch("odoo_data_flow.importer._infer_model_from_filename")
-    @patch("odoo_data_flow.importer._show_error_panel")
+    @patch("fluvo.importer._infer_model_from_filename")
+    @patch("fluvo.importer._show_error_panel")
     def test_run_import_fails_if_model_not_found(
         self,
         mock_show_error: MagicMock,
@@ -321,7 +321,7 @@ class TestRunImport:
         mock_show_error.assert_called_once()
         assert "Model Not Found" in mock_show_error.call_args[0]
 
-    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    @patch("fluvo.importer.import_threaded.import_data")
     def test_import_data_simple_success(
         self,
         mock_import_data: MagicMock,
@@ -354,7 +354,7 @@ class TestRunImport:
         )
         mock_import_data.assert_called_once()
 
-    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    @patch("fluvo.importer.import_threaded.import_data")
     def test_import_data_two_pass_success(
         self,
         mock_import_data: MagicMock,
@@ -388,8 +388,8 @@ class TestRunImport:
         mock_import_data.assert_called_once()
 
 
-@patch("odoo_data_flow.importer.import_threaded.import_data")
-@patch("odoo_data_flow.importer._run_preflight_checks", return_value=False)
+@patch("fluvo.importer.import_threaded.import_data")
+@patch("fluvo.importer._run_preflight_checks", return_value=False)
 def test_run_import_preflight_fails(
     mock_preflight: MagicMock,
     mock_import_data: MagicMock,
@@ -421,8 +421,8 @@ def test_run_import_preflight_fails(
     mock_import_data.assert_not_called()
 
 
-@patch("odoo_data_flow.importer.import_threaded.import_data")
-@patch("odoo_data_flow.importer._run_preflight_checks", return_value=True)
+@patch("fluvo.importer.import_threaded.import_data")
+@patch("fluvo.importer._run_preflight_checks", return_value=True)
 def test_run_import_fail_mode(
     mock_preflight: MagicMock,
     mock_import_data: MagicMock,
@@ -461,9 +461,9 @@ def test_run_import_fail_mode(
     assert mock_import_data.call_args.kwargs["file_csv"] == str(fail_file)
 
 
-@patch("odoo_data_flow.importer.sort.sort_for_self_referencing")
-@patch("odoo_data_flow.importer.import_threaded.import_data")
-@patch("odoo_data_flow.importer._run_preflight_checks")
+@patch("fluvo.importer.sort.sort_for_self_referencing")
+@patch("fluvo.importer.import_threaded.import_data")
+@patch("fluvo.importer._run_preflight_checks")
 def test_run_import_sort_strategy(
     mock_preflight: MagicMock,
     mock_import_data: MagicMock,
@@ -509,7 +509,7 @@ def test_run_import_sort_strategy(
     assert mock_import_data.call_args.kwargs["file_csv"] == str(sorted_file)
 
 
-@patch("odoo_data_flow.importer.import_threaded.import_data")
+@patch("fluvo.importer.import_threaded.import_data")
 def test_run_import_for_migration(mock_import_data: MagicMock) -> None:
     """Test the run_import_for_migration function."""
     mock_import_data.return_value = (True, {})
@@ -522,7 +522,7 @@ def test_run_import_for_migration(mock_import_data: MagicMock) -> None:
     mock_import_data.assert_called_once()
 
 
-@patch("odoo_data_flow.importer._show_error_panel")
+@patch("fluvo.importer._show_error_panel")
 def test_run_import_invalid_context(mock_show_error: MagicMock) -> None:
     """Test that run_import handles invalid context."""
     run_import(
@@ -548,9 +548,9 @@ def test_run_import_invalid_context(mock_show_error: MagicMock) -> None:
     mock_show_error.assert_called_once()
 
 
-@patch("odoo_data_flow.importer.relational_import.run_direct_relational_import")
-@patch("odoo_data_flow.importer.import_threaded.import_data")
-@patch("odoo_data_flow.importer._run_preflight_checks")
+@patch("fluvo.importer.relational_import.run_direct_relational_import")
+@patch("fluvo.importer.import_threaded.import_data")
+@patch("fluvo.importer._run_preflight_checks")
 def test_run_import_fail_mode_with_strategies(
     mock_preflight: MagicMock,
     mock_import_data: MagicMock,
@@ -611,7 +611,7 @@ class TestImporterEdgeCases:
         """Test line count returns 0 for non-existent file."""
         assert _count_lines("/nonexistent/file.csv") == 0
 
-    @patch("odoo_data_flow.importer._show_error_panel")
+    @patch("fluvo.importer._show_error_panel")
     def test_run_import_context_type_error(self, mock_show_error: MagicMock) -> None:
         """Test run_import handles context that parses to non-dict."""
         result = run_import(
@@ -637,7 +637,7 @@ class TestImporterEdgeCases:
         assert result is None
         mock_show_error.assert_called_once()
 
-    @patch("odoo_data_flow.importer._show_error_panel")
+    @patch("fluvo.importer._show_error_panel")
     def test_run_import_context_non_string_non_dict(
         self, mock_show_error: MagicMock
     ) -> None:
@@ -665,8 +665,8 @@ class TestImporterEdgeCases:
         assert result is None
         mock_show_error.assert_called_once()
 
-    @patch("odoo_data_flow.importer.import_threaded.import_data")
-    @patch("odoo_data_flow.importer._run_preflight_checks")
+    @patch("fluvo.importer.import_threaded.import_data")
+    @patch("fluvo.importer._run_preflight_checks")
     def test_run_import_fail_mode_no_records(
         self,
         mock_preflight: MagicMock,
@@ -708,8 +708,8 @@ class TestImporterEdgeCases:
         assert result is None
         mock_import_data.assert_not_called()
 
-    @patch("odoo_data_flow.importer.import_threaded.import_data")
-    @patch("odoo_data_flow.importer._run_preflight_checks")
+    @patch("fluvo.importer.import_threaded.import_data")
+    @patch("fluvo.importer._run_preflight_checks")
     def test_run_import_fail_mode_adds_error_reason_ignore(
         self,
         mock_preflight: MagicMock,
@@ -753,8 +753,8 @@ class TestImporterEdgeCases:
         call_kwargs = mock_import_data.call_args.kwargs
         assert "_ERROR_REASON" in call_kwargs.get("ignore", [])
 
-    @patch("odoo_data_flow.importer.import_threaded.import_data")
-    @patch("odoo_data_flow.importer._run_preflight_checks")
+    @patch("fluvo.importer.import_threaded.import_data")
+    @patch("fluvo.importer._run_preflight_checks")
     def test_run_import_auto_defer_uses_detected_fields(
         self,
         mock_preflight: MagicMock,
@@ -796,8 +796,8 @@ class TestImporterEdgeCases:
         call_kwargs = mock_import_data.call_args.kwargs
         assert call_kwargs["deferred_fields"] == ["parent_id", "user_id"]
 
-    @patch("odoo_data_flow.importer.import_threaded.import_data")
-    @patch("odoo_data_flow.importer._run_preflight_checks")
+    @patch("fluvo.importer.import_threaded.import_data")
+    @patch("fluvo.importer._run_preflight_checks")
     def test_run_import_deferred_fields_logs_when_detected(
         self,
         mock_preflight: MagicMock,
@@ -840,8 +840,8 @@ class TestImporterEdgeCases:
         call_kwargs = mock_import_data.call_args.kwargs
         assert call_kwargs["deferred_fields"] == []
 
-    @patch("odoo_data_flow.importer.import_threaded.import_data")
-    @patch("odoo_data_flow.importer._show_error_panel")
+    @patch("fluvo.importer.import_threaded.import_data")
+    @patch("fluvo.importer._show_error_panel")
     def test_run_import_returns_none_on_failure(
         self,
         mock_show_error: MagicMock,
@@ -878,11 +878,11 @@ class TestImporterEdgeCases:
         assert result is None
         mock_show_error.assert_called_once()
 
-    @patch("odoo_data_flow.importer.os.remove")
-    @patch("odoo_data_flow.importer.os.path.exists", return_value=True)
-    @patch("odoo_data_flow.importer.sort.sort_for_self_referencing")
-    @patch("odoo_data_flow.importer.import_threaded.import_data")
-    @patch("odoo_data_flow.importer._run_preflight_checks")
+    @patch("fluvo.importer.os.remove")
+    @patch("fluvo.importer.os.path.exists", return_value=True)
+    @patch("fluvo.importer.sort.sort_for_self_referencing")
+    @patch("fluvo.importer.import_threaded.import_data")
+    @patch("fluvo.importer._run_preflight_checks")
     def test_run_import_cleans_up_sorted_temp_file(
         self,
         mock_preflight: MagicMock,

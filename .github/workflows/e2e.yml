@@ -25,8 +25,8 @@ jobs:
               || fromJSON('["16.0", "17.0", "18.0", "19.0"]') }}
     env:
       # Small CI tier: fast, still exercises every integrity scenario.
-      ODF_E2E_SCALE: "5000"
-      ODF_E2E_ODOO_VERSION: ${{ matrix.odoo_version }}
+      FLUVO_E2E_SCALE: "5000"
+      FLUVO_E2E_ODOO_VERSION: ${{ matrix.odoo_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5

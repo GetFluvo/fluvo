@@ -1,0 +1,26 @@
+Fluvo (formerly "Fluvo")
+Copyright © Strategic Efficiency B.V. and the Fluvo contributors
+
+This product is free software licensed under the GNU Lesser General Public
+License v3.0 (LGPL-3.0). See the LICENSE file for the full license text.
+
+--------------------------------------------------------------------------
+Attribution (LGPL-3.0)
+--------------------------------------------------------------------------
+
+This project is a derivative work. It originated as the data-import and
+transformation framework "odoo_csv_import" / "odoo-import-export-client"
+created by Thibault Francois, and has since been substantially reworked and
+extended (Polars-backed engine, redesigned import/export pipeline, CLI, and
+related tooling).
+
+Original work:
+    Copyright © 2014–2016 Thibault Francois <tfr@openerp.com>
+    https://github.com/tfrancoi/odoo_csv_import
+
+Modifications, additions, and the current distribution:
+    Copyright © 2024–2026 Strategic Efficiency B.V. and contributors
+
+Both the original work and the modifications are licensed under the
+LGPL-3.0. The copyright notices above must be preserved in all copies and
+derivative works, as required by the license.

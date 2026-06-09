@@ -45,7 +45,7 @@ def _build_import_command(
         else model
     )
     command_parts = [
-        "odoo-data-flow",
+        "fluvo",
         "import",
         "--config",
         shlex.quote(kwargs.get("conf_file", "conf/connection.conf")),
@@ -74,7 +74,7 @@ def _build_import_command(
 def _build_export_command(filename: str, model: str, **kwargs: Any) -> list[str]:
     """Builds the command parts for an 'export' shell command."""
     return [
-        "odoo-data-flow",
+        "fluvo",
         "export",
         "--config",
         shlex.quote(kwargs.get("conf_file", "conf/connection.conf")),

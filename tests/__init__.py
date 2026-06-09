@@ -1,1 +1,1 @@
-"""Test suite for the odoo-data-flow package."""
+"""Test suite for the fluvo package."""

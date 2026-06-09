@@ -9,8 +9,8 @@ import httpx
 import pytest
 from rich.progress import Progress, TaskID
 
-from odoo_data_flow import write_threaded
-from odoo_data_flow.write_threaded import RPCThreadWrite, write_data
+from fluvo import write_threaded
+from fluvo.write_threaded import RPCThreadWrite, write_data
 
 
 @patch("csv.field_size_limit")
@@ -98,7 +98,7 @@ class TestRPCThreadWrite:
         lines = [["101", "False"]]
         rpc_thread = RPCThreadWrite(1, mock_model, header)
 
-        with patch("odoo_data_flow.write_threaded.log.error") as mock_log:
+        with patch("fluvo.write_threaded.log.error") as mock_log:
             result = rpc_thread._execute_batch(lines, 1)
             assert result["failed"] == 1
             mock_log.assert_called_once()
@@ -138,7 +138,7 @@ class TestRPCThreadWrite:
     @pytest.mark.parametrize(
         "progress, task_id", [(None, TaskID(1)), (Progress(), None)]
     )
-    @patch("odoo_data_flow.lib.internal.rpc_thread.RpcThread.wait")
+    @patch("fluvo.lib.internal.rpc_thread.RpcThread.wait")
     def test_wait_fallback_without_progress(
         self,
         mock_super_wait: MagicMock,
@@ -213,7 +213,7 @@ class TestRPCThreadWrite:
         rpc_thread.futures = [future]
 
         with (
-            patch("odoo_data_flow.write_threaded.log.error") as mock_log,
+            patch("fluvo.write_threaded.log.error") as mock_log,
             patch("concurrent.futures.as_completed", return_value=[future]),
         ):
             rpc_thread.wait()
@@ -258,10 +258,10 @@ class TestRPCThreadWrite:
 class TestWriteData:
     """Tests for the main write_data orchestrator function."""
 
-    @patch("odoo_data_flow.write_threaded.RPCThreadWrite")
-    @patch("odoo_data_flow.write_threaded.Progress")
+    @patch("fluvo.write_threaded.RPCThreadWrite")
+    @patch("fluvo.write_threaded.Progress")
     @patch("builtins.open", new_callable=mock_open)
-    @patch("odoo_data_flow.write_threaded.conf_lib")
+    @patch("fluvo.write_threaded.conf_lib")
     def test_write_data_happy_path(
         self,
         mock_conf: MagicMock,
@@ -291,14 +291,14 @@ class TestWriteData:
         mock_rpc_instance.launch_batch.assert_called_once()
         mock_rpc_instance.wait.assert_called_once()
 
-    @patch("odoo_data_flow.write_threaded.conf_lib")
+    @patch("fluvo.write_threaded.conf_lib")
     def test_write_data_connection_fails(self, mock_conf: MagicMock) -> None:
         """Tests that write_data returns False if Odoo connection fails."""
         mock_conf.get_connection_from_config.side_effect = Exception("Conn Error")
         result = write_data("conf.ini", "res.partner", [], [], "")
         assert result is False
 
-    @patch("odoo_data_flow.write_threaded.conf_lib")
+    @patch("fluvo.write_threaded.conf_lib")
     @patch("builtins.open")
     def test_write_data_fail_file_fails(
         self, mock_open_file: MagicMock, mock_conf: MagicMock
@@ -309,10 +309,10 @@ class TestWriteData:
         result = write_data("conf.ini", "res.partner", [], [], "fails.csv")
         assert result is False
 
-    @patch("odoo_data_flow.write_threaded.RPCThreadWrite")
-    @patch("odoo_data_flow.write_threaded.Progress")
+    @patch("fluvo.write_threaded.RPCThreadWrite")
+    @patch("fluvo.write_threaded.Progress")
     @patch("builtins.open", new_callable=mock_open)
-    @patch("odoo_data_flow.write_threaded.conf_lib")
+    @patch("fluvo.write_threaded.conf_lib")
     def test_write_data_with_failures(
         self,
         mock_conf: MagicMock,
@@ -331,9 +331,9 @@ class TestWriteData:
 
         assert result is False
 
-    @patch("odoo_data_flow.write_threaded.RPCThreadWrite")
-    @patch("odoo_data_flow.write_threaded.Progress")
-    @patch("odoo_data_flow.write_threaded.conf_lib")
+    @patch("fluvo.write_threaded.RPCThreadWrite")
+    @patch("fluvo.write_threaded.Progress")
+    @patch("fluvo.write_threaded.conf_lib")
     def test_write_data_no_fail_file(
         self,
         mock_conf: MagicMock,
@@ -352,9 +352,9 @@ class TestWriteData:
             # Check that the writer passed to RPCThreadWrite is None
             assert mock_rpc_thread.call_args.args[3] is None
 
-    @patch("odoo_data_flow.write_threaded.RPCThreadWrite")
-    @patch("odoo_data_flow.write_threaded.Progress")
-    @patch("odoo_data_flow.write_threaded.conf_lib")
+    @patch("fluvo.write_threaded.RPCThreadWrite")
+    @patch("fluvo.write_threaded.Progress")
+    @patch("fluvo.write_threaded.conf_lib")
     def test_write_data_no_data(
         self,
         mock_conf: MagicMock,
@@ -371,9 +371,9 @@ class TestWriteData:
         assert result is True
         mock_rpc_instance.launch_batch.assert_not_called()
 
-    @patch("odoo_data_flow.write_threaded.RPCThreadWrite")
-    @patch("odoo_data_flow.write_threaded.Progress")
-    @patch("odoo_data_flow.write_threaded.conf_lib")
+    @patch("fluvo.write_threaded.RPCThreadWrite")
+    @patch("fluvo.write_threaded.Progress")
+    @patch("fluvo.write_threaded.conf_lib")
     def test_write_data_ignores_undone_futures(
         self,
         mock_conf: MagicMock,
@@ -394,9 +394,9 @@ class TestWriteData:
         result = write_data("conf.ini", "res.partner", [], [["1"]], fail_file="")
         assert result is True
 
-    @patch("odoo_data_flow.write_threaded.RPCThreadWrite")
-    @patch("odoo_data_flow.write_threaded.Progress")
-    @patch("odoo_data_flow.write_threaded.conf_lib")
+    @patch("fluvo.write_threaded.RPCThreadWrite")
+    @patch("fluvo.write_threaded.Progress")
+    @patch("fluvo.write_threaded.conf_lib")
     def test_write_data_ignores_cancelled_futures(
         self,
         mock_conf: MagicMock,

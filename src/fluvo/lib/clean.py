@@ -11,7 +11,7 @@ For better performance with large datasets, prefer the Polars-native `clean_expr
 module when possible.
 
 Usage:
-    from odoo_data_flow.lib import mapper, clean
+    from fluvo.lib import mapper, clean
 
     mapping = {
         "phone": mapper.val("Phone", postprocess=clean.phone()),

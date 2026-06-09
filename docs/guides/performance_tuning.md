@@ -2,7 +2,7 @@
 
 When working with large datasets, the performance of your data import can become critical. This guide covers the key parameters and strategies you can use to tune the import process for maximum speed and efficiency.
 
-The primary way to control performance is by adjusting the parameters passed to the `odoo-data-flow import` command, which you can set in the `params` dictionary in your `transform.py` script.
+The primary way to control performance is by adjusting the parameters passed to the `fluvo import` command, which you can set in the `params` dictionary in your `transform.py` script.
 
 ---
 
@@ -35,7 +35,7 @@ The easiest performance win is choosing the right RPC protocol. For Odoo 10 and 
 
 ```bash
 # Switch to JSON-RPC for better performance
-odoo-data-flow import --protocol jsonrpc --connection-file conf/connection.conf ...
+fluvo import --protocol jsonrpc --connection-file conf/connection.conf ...
 ```
 
 Or set it permanently in your config file:
@@ -108,7 +108,7 @@ For example, with `db_maxconn = 64` and `workers = 4`:
 
 ```bash
 # For a server with 4 Odoo workers and db_maxconn=64
-odoo-data-flow import --worker 12 --protocol jsonrpc ...
+fluvo import --worker 12 --protocol jsonrpc ...
 ```
 
 ```{admonition} Warning
@@ -215,7 +215,7 @@ When you use Odoo's standard import wizard, it's like putting all of your items 
 
 #### How `--size` Solves the Problem: Multiple Small Baskets
 
-The `odoo-data-flow` library allows you to break up your import into smaller, more manageable chunks. When you use `--size 100`, you are telling the tool to use **multiple, smaller baskets**, each containing only 100 items.
+The `fluvo` library allows you to break up your import into smaller, more manageable chunks. When you use `--size 100`, you are telling the tool to use **multiple, smaller baskets**, each containing only 100 items.
 
 This solves both problems:
 
@@ -236,7 +236,7 @@ flowchart TD
           D@{ label: "<font color="red"><b>FAIL</b></font><br>All 1000 records rejected" }
           C["Odoo Database"]
     end
-  subgraph subGraph1["odoo-data-flow with --size=100 (Multiple Small Baskets)"]
+  subgraph subGraph1["fluvo with --size=100 (Multiple Small Baskets)"]
           F{"Transaction 1<br>100 records"}
           E["1000 Records"]
           G["Odoo Database"]
@@ -339,7 +339,7 @@ INFO: Adaptive batch scaling: restored to full batch size 100 (server health: HE
 
 ```bash
 # Enable adaptive throttling for a large import
-odoo-data-flow import \
+fluvo import \
     --connection-file conf/connection.conf \
     --file data/products.csv \
     --model product.product \
@@ -363,14 +363,14 @@ The choice of mappers can impact performance.
 
 - **Slow Mappers**: The `mapper.relation` function should be used with caution. For **every single row**, it performs a live search request to the Odoo database, which can be very slow for large datasets.
 
-**Recommendation**: If you need to map values based on data in Odoo, it is much more performant to first export the necessary mapping data from Odoo (e.g., using `odoo-data-flow export`) into a Python dictionary or a separate CSV file, and then use the much faster `mapper.map_val` or other in-memory lookups to do the translation.
+**Recommendation**: If you need to map values based on data in Odoo, it is much more performant to first export the necessary mapping data from Odoo (e.g., using `fluvo export`) into a Python dictionary or a separate CSV file, and then use the much faster `mapper.map_val` or other in-memory lookups to do the translation.
 
 ---
 ## Performance Strategy for Relational Data (Automatic Two-Pass Import)
 
 A common performance trap when importing data is writing to relational fields (like `parent_id`) that have an inverse relation (like `child_ids`). In a single pass, updating the `parent_id` for 500 child records could cause Odoo to re-write the `child_ids` list on the single parent record 500 times, slowing the import to a crawl.
 
-`odoo-data-flow` solves this problem **automatically** with its smart, two-pass import engine.
+`fluvo` solves this problem **automatically** with its smart, two-pass import engine.
 
 ### The New Workflow: Automatic and Efficient
 

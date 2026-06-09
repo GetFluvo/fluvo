@@ -1,25 +1,25 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/OdooDataFlow/odoo-data-flow/master/docs/_static/icon.png" width="200">
+  <img src="https://raw.githubusercontent.com/getfluvo/fluvo/master/docs/_static/icon.png" width="200">
 </p>
 
-# Odoo Data Flow
+# Fluvo
 
-[![PyPI](https://img.shields.io/pypi/v/odoo-data-flow.svg)][pypi status]
-[![Status](https://img.shields.io/pypi/status/odoo-data-flow.svg)][pypi status]
-[![Python Version](https://img.shields.io/pypi/pyversions/odoo-data-flow)][pypi status]
-[![License](https://img.shields.io/pypi/l/odoo-data-flow)][license]
+[![PyPI](https://img.shields.io/pypi/v/fluvo.svg)][pypi status]
+[![Status](https://img.shields.io/pypi/status/fluvo.svg)][pypi status]
+[![Python Version](https://img.shields.io/pypi/pyversions/fluvo)][pypi status]
+[![License](https://img.shields.io/pypi/l/fluvo)][license]
 
-[![Read the documentation at https://odoodataflow.readthedocs.io/](https://img.shields.io/readthedocs/odoodataflow/latest.svg?label=Read%20the%20Docs)][read the docs]
-[![Tests](https://github.com/OdooDataFlow/odoo-data-flow/workflows/Tests/badge.svg)][tests]
-[![Codecov](https://codecov.io/gh/OdooDataFlow/odoo-data-flow/branch/master/graph/badge.svg)][codecov]
+[![Read the documentation at https://fluvo.readthedocs.io/](https://img.shields.io/readthedocs/fluvo/latest.svg?label=Read%20the%20Docs)][read the docs]
+[![Tests](https://github.com/getfluvo/fluvo/workflows/Tests/badge.svg)][tests]
+[![Codecov](https://codecov.io/gh/getfluvo/fluvo/branch/master/graph/badge.svg)][codecov]
 
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)][pre-commit]
 [![Ruff codestyle][ruff badge]][ruff project]
 
-[pypi status]: https://pypi.org/project/odoo-data-flow/
-[read the docs]: https://odoodataflow.readthedocs.io/
-[tests]: https://github.com/OdooDataFlow/odoo-data-flow/actions?workflow=Tests
-[codecov]: https://app.codecov.io/gh/OdooDataFlow/odoo-data-flow
+[pypi status]: https://pypi.org/project/fluvo/
+[read the docs]: https://fluvo.readthedocs.io/
+[tests]: https://github.com/getfluvo/fluvo/actions?workflow=Tests
+[codecov]: https://app.codecov.io/gh/getfluvo/fluvo
 [pre-commit]: https://github.com/pre-commit/pre-commit
 [ruff badge]: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json
 [ruff project]: https://github.com/charliermarsh/ruff
@@ -43,10 +43,10 @@ A powerful Python library for defining robust, repeatable, and high-performance 
 
 ## Installation
 
-You can install _Odoo Data Flow_ via `uv` or `pip` from [PyPI]:
+You can install _Fluvo_ via `uv` or `pip` from [PyPI]:
 
 ```console
-$ uv pip install odoo-data-flow
+$ uv pip install fluvo
 ```
 
 ## Quick Usage Example
@@ -58,8 +58,8 @@ Create a `transform.py` file to define the mapping from your source file to Odoo
 
 ```python
 # transform.py
-from odoo_data_flow.lib.transform import Processor
-from odoo_data_flow.lib import mapper
+from fluvo.lib.transform import Processor
+from fluvo.lib import mapper
 
 my_mapping = {
     'id': mapper.concat('prod_', 'SKU'),
@@ -80,7 +80,7 @@ The `transform.py` script generates a `load.sh` file containing the correct CLI 
 
 ```bash
 # Contents of the generated load.sh
-odoo-data-flow import --connection-file conf/connection.conf --file data/products_clean.csv --model product.product ...
+fluvo import --connection-file conf/connection.conf --file data/products_clean.csv --model product.product ...
 ```
 
 Then execute the script.
@@ -103,7 +103,7 @@ To learn more, see the [Contributor Guide].
 ## License
 
 Distributed under the terms of the [LGPL 3.0 license][license],
-_Odoo Data Flow_ is free and open source software.
+_Fluvo_ is free and open source software.
 
 ## Issues
 
@@ -119,11 +119,11 @@ This project was generated from [@bosd]'s [uv hypermodern python cookiecutter] t
 [@bosd]: https://github.com/bosd
 [pypi]: https://pypi.org/
 [uv hypermodern python cookiecutter]: https://github.com/bosd/cookiecutter-uv-hypermodern-python
-[file an issue]: https://github.com/OdooDataFlow/odoo-data-flow/issues
+[file an issue]: https://github.com/getfluvo/fluvo/issues
 [pip]: https://pip.pypa.io/
 
 <!-- github-only -->
 
-[license]: https://github.com/OdooDataFlow/odoo-data-flow/blob/main/LICENSE
-[contributor guide]: https://github.com/OdooDataFlow/odoo-data-flow/blob/main/CONTRIBUTING.md
-[command-line reference]: https://odoo-data-flow.readthedocs.io/en/latest/usage.html
+[license]: https://github.com/getfluvo/fluvo/blob/main/LICENSE
+[contributor guide]: https://github.com/getfluvo/fluvo/blob/main/CONTRIBUTING.md
+[command-line reference]: https://fluvo.readthedocs.io/en/latest/usage.html

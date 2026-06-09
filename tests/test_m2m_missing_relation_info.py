@@ -6,12 +6,12 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 
-from odoo_data_flow.enums import PreflightMode
-from odoo_data_flow.lib import preflight, relational_import
+from fluvo.enums import PreflightMode
+from fluvo.lib import preflight, relational_import
 
 
-@patch("odoo_data_flow.lib.preflight.pl.read_csv")
-@patch("odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.preflight.pl.read_csv")
+@patch("fluvo.lib.preflight.conf_lib.get_connection_from_config")
 def test_handle_m2m_field_missing_relation_info(
     mock_conf_lib: MagicMock,
     mock_polars_read_csv: MagicMock,
@@ -57,8 +57,8 @@ def test_handle_m2m_field_missing_relation_info(
     assert import_plan["strategies"]["category_id"]["relation_field"] is None
 
 
-@patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
-@patch("odoo_data_flow.lib.relational_import._resolve_related_ids")
+@patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.relational_import._resolve_related_ids")
 def test_run_write_tuple_import_derives_missing_info(
     mock_resolve_ids: MagicMock,
     mock_get_conn: MagicMock,
@@ -108,8 +108,8 @@ def test_run_write_tuple_import_derives_missing_info(
     assert mock_owning_model.write.call_count >= 1
 
 
-@patch("odoo_data_flow.lib.relational_import._resolve_related_ids")
-@patch("odoo_data_flow.lib.relational_import._derive_missing_relation_info")
+@patch("fluvo.lib.relational_import._resolve_related_ids")
+@patch("fluvo.lib.relational_import._derive_missing_relation_info")
 def test_run_direct_relational_import_derives_missing_info(
     mock_derive_missing: MagicMock,
     mock_resolve_ids: MagicMock,

@@ -4,11 +4,11 @@ This module provides utilities to download, cache, and query GeoNames data
 for city-to-country mapping, postal code validation, and geographic lookups.
 
 Data is downloaded from https://download.geonames.org/export/dump/ and cached
-locally in ~/.cache/odoo-data-flow/geonames/ for reuse across environments.
+locally in ~/.cache/fluvo/geonames/ for reuse across environments.
 
 Example::
 
-    from odoo_data_flow.lib import geonames, clean
+    from fluvo.lib import geonames, clean
 
     # Load cities (downloads and caches on first use)
     cities = geonames.get_cities_lookup()
@@ -138,7 +138,7 @@ POSTAL_COLUMNS = [
 ]
 
 # Default cache directory
-DEFAULT_CACHE_DIR = Path.home() / ".cache" / "odoo-data-flow" / "geonames"
+DEFAULT_CACHE_DIR = Path.home() / ".cache" / "fluvo" / "geonames"
 
 
 # =============================================================================
@@ -150,7 +150,7 @@ def get_cache_dir() -> Path:
     """Get the GeoNames cache directory, creating it if needed.
 
     Returns:
-        Path to cache directory (~/.cache/odoo-data-flow/geonames/)
+        Path to cache directory (~/.cache/fluvo/geonames/)
     """
     cache_dir = DEFAULT_CACHE_DIR
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -192,7 +192,7 @@ def download_dataset(
         dataset: Dataset name. One of: cities500, cities1000, cities5000,
                  cities15000, alternateNamesV2, allCountries
         cache_dir: Directory to cache files.
-                   Defaults to ~/.cache/odoo-data-flow/geonames/
+                   Defaults to ~/.cache/fluvo/geonames/
         force: Force re-download even if cached.
 
     Returns:

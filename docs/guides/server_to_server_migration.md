@@ -1,6 +1,6 @@
 # Guide: Direct Server-to-Server Migration
 
-The `odoo-data-flow` library includes a powerful `migrate` command designed to perform a **direct, in-memory** data migration from one Odoo database to another. This is an advanced feature that chains together the export, transform, and import processes into a single step, without creating intermediate CSV files.
+The `fluvo` library includes a powerful `migrate` command designed to perform a **direct, in-memory** data migration from one Odoo database to another. This is an advanced feature that chains together the export, transform, and import processes into a single step, without creating intermediate CSV files.
 
 > **When to use this?** This method is fast and convenient for simple, one-shot migrations where you don't need to inspect or modify the data mid-process.
 >
@@ -19,7 +19,7 @@ flowchart LR
         F[("Destination Odoo DB")]
   end
  subgraph subGraph2["Migration Process (In-Memory)"]
-        B["odoo-data-flow migrate"]
+        B["fluvo migrate"]
         C{"Exporter"}
         D{"Processor & Mappers"}
         E{"Importer"}
@@ -48,7 +48,7 @@ This command is ideal for scenarios such as:
 - Simple data transfers from a staging server to a production server.
 - Consolidating data from one Odoo instance into another where the data structure is identical.
 
-## The `odf migrate` Command
+## The `fluvo migrate` Command
 
 The migration is handled by the `migrate` sub-command. It works by exporting data from a source instance, applying an in-memory transformation, and then immediately importing the result into a destination instance.
 
@@ -86,7 +86,7 @@ If you need to transform the data, create a transformer file (e.g., `partner_mig
 ```python
 # partner_migrator.py
 import polars as pl
-from odoo_data_flow.lib.transform import Processor
+from fluvo.lib.transform import Processor
 
 processor = Processor(
     mapping={
@@ -101,7 +101,7 @@ processor = Processor(
 You would run the following command from your terminal:
 
 ```bash
-odf migrate \
+fluvo migrate \
     --config-export "conf/staging.conf" \
     --config-import "conf/production.conf" \
     --model "res.partner" \

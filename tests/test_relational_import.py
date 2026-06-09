@@ -8,10 +8,10 @@ import pytest
 from polars.testing import assert_frame_equal
 from rich.progress import Progress
 
-from odoo_data_flow.lib import relational_import
+from fluvo.lib import relational_import
 
 
-@patch("odoo_data_flow.lib.relational_import.cache.load_id_map")
+@patch("fluvo.lib.relational_import.cache.load_id_map")
 def test_run_direct_relational_import(
     mock_load_id_map: MagicMock,
     tmp_path: Path,
@@ -76,8 +76,8 @@ def test_run_direct_relational_import(
         Path(temp_csv_path).unlink(missing_ok=True)
 
 
-@patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
-@patch("odoo_data_flow.lib.relational_import._resolve_related_ids")
+@patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.relational_import._resolve_related_ids")
 def test_run_write_tuple_import(
     mock_resolve_ids: MagicMock,
     mock_get_conn: MagicMock,
@@ -127,8 +127,8 @@ def test_run_write_tuple_import(
     assert mock_owning_model.write.call_count >= 1
 
 
-@patch("odoo_data_flow.lib.relational_import.cache.load_id_map", return_value=None)
-@patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.relational_import.cache.load_id_map", return_value=None)
+@patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
 def test_resolve_related_ids_failure(
     mock_get_conn: MagicMock,
     mock_load_id_map: MagicMock,
@@ -141,7 +141,7 @@ def test_resolve_related_ids_failure(
     assert result is None
 
 
-@patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_dict")
+@patch("fluvo.lib.relational_import.conf_lib.get_connection_from_dict")
 def test_resolve_related_ids_with_dict(mock_get_conn_dict: MagicMock) -> None:
     """Test _resolve_related_ids with a dictionary config."""
     mock_get_conn_dict.return_value.get_model.return_value.search_read.return_value = []
@@ -151,9 +151,9 @@ def test_resolve_related_ids_with_dict(mock_get_conn_dict: MagicMock) -> None:
     assert result is None
 
 
-@patch("odoo_data_flow.lib.relational_import.cache.load_id_map", return_value=None)
+@patch("fluvo.lib.relational_import.cache.load_id_map", return_value=None)
 @patch(
-    "odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config",
+    "fluvo.lib.relational_import.conf_lib.get_connection_from_config",
     side_effect=Exception("Connection failed"),
 )
 def test_resolve_related_ids_connection_error(
@@ -167,7 +167,7 @@ def test_resolve_related_ids_connection_error(
         )
 
 
-@patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
 def test_run_write_o2m_tuple_import(mock_get_conn: MagicMock) -> None:
     """Verify the o2m tuple import workflow."""
     # Arrange
@@ -238,7 +238,7 @@ class TestQueryRelationInfoFromOdoo:
         )
         assert result is None
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_query_relation_info_found(self, mock_get_conn: MagicMock) -> None:
         """Test successful query from ir.model.relation."""
         mock_relation_model = MagicMock()
@@ -259,7 +259,7 @@ class TestQueryRelationInfoFromOdoo:
         assert result[0] == "partner_category_rel"
         assert result[1] == "res_partner_id"
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_query_relation_info_not_found(self, mock_get_conn: MagicMock) -> None:
         """Test when no relation is found in ir.model.relation."""
         mock_relation_model = MagicMock()
@@ -272,7 +272,7 @@ class TestQueryRelationInfoFromOdoo:
 
         assert result is None
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_query_relation_info_invalid_field_error(
         self, mock_get_conn: MagicMock
     ) -> None:
@@ -289,7 +289,7 @@ class TestQueryRelationInfoFromOdoo:
 
         assert result is None
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_query_relation_info_other_value_error(
         self, mock_get_conn: MagicMock
     ) -> None:
@@ -303,7 +303,7 @@ class TestQueryRelationInfoFromOdoo:
                 "dummy.conf", "res.partner", "res.partner.category"
             )
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_dict")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_dict")
     def test_query_relation_info_with_dict_config(
         self, mock_get_conn: MagicMock
     ) -> None:
@@ -319,7 +319,7 @@ class TestQueryRelationInfoFromOdoo:
         assert result is None
         mock_get_conn.assert_called_once()
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_query_relation_info_connection_error(
         self, mock_get_conn: MagicMock
     ) -> None:
@@ -336,7 +336,7 @@ class TestQueryRelationInfoFromOdoo:
 class TestResolveRelatedIds:
     """Additional tests for _resolve_related_ids."""
 
-    @patch("odoo_data_flow.lib.relational_import.cache.load_id_map")
+    @patch("fluvo.lib.relational_import.cache.load_id_map")
     def test_resolve_related_ids_cache_hit(self, mock_load_id_map: MagicMock) -> None:
         """Test successful cache hit."""
         expected_df = pl.DataFrame({"external_id": ["cat1"], "db_id": [11]})
@@ -349,8 +349,8 @@ class TestResolveRelatedIds:
         assert result is not None
         assert result.shape == expected_df.shape
 
-    @patch("odoo_data_flow.lib.relational_import.cache.load_id_map", return_value=None)
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.cache.load_id_map", return_value=None)
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_resolve_related_ids_no_valid_ids(
         self, mock_get_conn: MagicMock, mock_load_id_map: MagicMock
     ) -> None:
@@ -360,8 +360,8 @@ class TestResolveRelatedIds:
         )
         assert result is None
 
-    @patch("odoo_data_flow.lib.relational_import.cache.load_id_map", return_value=None)
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.cache.load_id_map", return_value=None)
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_resolve_related_ids_mixed_valid_invalid(
         self, mock_get_conn: MagicMock, mock_load_id_map: MagicMock
     ) -> None:
@@ -383,8 +383,8 @@ class TestResolveRelatedIds:
         assert result is not None
         assert len(result) == 1
 
-    @patch("odoo_data_flow.lib.relational_import.cache.load_id_map", return_value=None)
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.cache.load_id_map", return_value=None)
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_resolve_related_ids_bulk_success(
         self, mock_get_conn: MagicMock, mock_load_id_map: MagicMock
     ) -> None:
@@ -403,8 +403,8 @@ class TestResolveRelatedIds:
         assert result is not None
         assert len(result) == 2
 
-    @patch("odoo_data_flow.lib.relational_import.cache.load_id_map", return_value=None)
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.cache.load_id_map", return_value=None)
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_resolve_related_ids_exception_handling(
         self, mock_get_conn: MagicMock, mock_load_id_map: MagicMock
     ) -> None:
@@ -423,7 +423,7 @@ class TestResolveRelatedIds:
 class TestDeriveMissingRelationInfo:
     """Tests for _derive_missing_relation_info."""
 
-    @patch("odoo_data_flow.lib.relational_import._query_relation_info_from_odoo")
+    @patch("fluvo.lib.relational_import._query_relation_info_from_odoo")
     def test_derive_missing_uses_odoo_query_result(self, mock_query: MagicMock) -> None:
         """Test that Odoo query result is used when available."""
         mock_query.return_value = ("odoo_relation_table", "odoo_relation_field")
@@ -439,8 +439,8 @@ class TestDeriveMissingRelationInfo:
 
         assert result == ("odoo_relation_table", "odoo_relation_field")
 
-    @patch("odoo_data_flow.lib.relational_import._query_relation_info_from_odoo")
-    @patch("odoo_data_flow.lib.relational_import._derive_relation_info")
+    @patch("fluvo.lib.relational_import._query_relation_info_from_odoo")
+    @patch("fluvo.lib.relational_import._derive_relation_info")
     def test_derive_missing_falls_back_to_derivation(
         self, mock_derive: MagicMock, mock_query: MagicMock
     ) -> None:
@@ -463,7 +463,7 @@ class TestDeriveMissingRelationInfo:
 class TestRunDirectRelationalImportEdgeCases:
     """Edge case tests for run_direct_relational_import."""
 
-    @patch("odoo_data_flow.lib.relational_import.cache.load_id_map")
+    @patch("fluvo.lib.relational_import.cache.load_id_map")
     def test_run_direct_relational_import_missing_relation_table(
         self, mock_load_id_map: MagicMock
     ) -> None:
@@ -491,9 +491,9 @@ class TestRunDirectRelationalImportEdgeCases:
         assert result is None
 
     @patch(
-        "odoo_data_flow.lib.relational_import._resolve_related_ids", return_value=None
+        "fluvo.lib.relational_import._resolve_related_ids", return_value=None
     )
-    @patch("odoo_data_flow.lib.relational_import.cache.load_id_map")
+    @patch("fluvo.lib.relational_import.cache.load_id_map")
     def test_run_direct_relational_import_resolve_fails(
         self, mock_load_id_map: MagicMock, mock_resolve: MagicMock
     ) -> None:
@@ -551,7 +551,7 @@ class TestRunWriteTupleImportEdgeCases:
         assert result is False
 
     @patch(
-        "odoo_data_flow.lib.relational_import._resolve_related_ids", return_value=None
+        "fluvo.lib.relational_import._resolve_related_ids", return_value=None
     )
     def test_run_write_tuple_import_resolve_fails(
         self, mock_resolve: MagicMock
@@ -582,8 +582,8 @@ class TestRunWriteTupleImportEdgeCases:
 
         assert result is False
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
-    @patch("odoo_data_flow.lib.relational_import._resolve_related_ids")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import._resolve_related_ids")
     def test_run_write_tuple_import_field_not_found(
         self, mock_resolve: MagicMock, mock_get_conn: MagicMock
     ) -> None:
@@ -620,8 +620,8 @@ class TestRunWriteTupleImportEdgeCases:
 class TestFieldIdSuffix:
     """Tests for field/id suffix handling."""
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
-    @patch("odoo_data_flow.lib.relational_import._resolve_related_ids")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import._resolve_related_ids")
     def test_run_direct_relational_import_with_id_suffix(
         self, mock_resolve: MagicMock, mock_get_conn: MagicMock
     ) -> None:
@@ -664,7 +664,7 @@ class TestFieldIdSuffix:
 class TestRunWriteO2MTupleImportEdgeCases:
     """Edge case tests for run_write_o2m_tuple_import."""
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_dict")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_dict")
     def test_run_write_o2m_tuple_import_with_dict_config(
         self, mock_get_conn: MagicMock
     ) -> None:
@@ -697,7 +697,7 @@ class TestRunWriteO2MTupleImportEdgeCases:
 
         assert result is True
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_run_write_o2m_tuple_import_field_not_found(
         self, mock_get_conn: MagicMock
     ) -> None:
@@ -723,7 +723,7 @@ class TestRunWriteO2MTupleImportEdgeCases:
 
         assert result is False
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_run_write_o2m_tuple_import_with_id_suffix_field(
         self, mock_get_conn: MagicMock
     ) -> None:
@@ -765,7 +765,7 @@ class TestRunWriteO2MTupleImportEdgeCases:
 
         assert result is True
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_run_write_o2m_tuple_import_json_decode_error(
         self, mock_get_conn: MagicMock
     ) -> None:
@@ -798,7 +798,7 @@ class TestRunWriteO2MTupleImportEdgeCases:
 
         assert result is False
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_run_write_o2m_tuple_import_not_a_list_error(
         self, mock_get_conn: MagicMock
     ) -> None:
@@ -831,7 +831,7 @@ class TestRunWriteO2MTupleImportEdgeCases:
 
         assert result is False
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_run_write_o2m_tuple_import_parent_not_in_id_map(
         self, mock_get_conn: MagicMock
     ) -> None:
@@ -867,9 +867,9 @@ class TestRunWriteO2MTupleImportEdgeCases:
         mock_parent_model.write.assert_called_once()
 
     @patch(
-        "odoo_data_flow.lib.relational_import.writer.write_relational_failures_to_csv"
+        "fluvo.lib.relational_import.writer.write_relational_failures_to_csv"
     )
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_run_write_o2m_tuple_import_write_exception(
         self, mock_get_conn: MagicMock, mock_write_failures: MagicMock
     ) -> None:
@@ -908,7 +908,7 @@ class TestRunWriteO2MTupleImportEdgeCases:
 class TestCreateRelationalRecords:
     """Tests for _create_relational_records."""
 
-    @patch("odoo_data_flow.lib.relational_import.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_create_relational_records_model_access_error(
         self, mock_get_conn: MagicMock
     ) -> None:

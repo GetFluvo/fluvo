@@ -11,7 +11,7 @@ from __future__ import annotations
 import csv
 from typing import Any
 
-from odoo_data_flow import exporter
+from fluvo import exporter
 
 from . import assertions as A
 from . import generators as G

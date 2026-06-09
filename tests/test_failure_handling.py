@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Any, Optional
 from unittest.mock import MagicMock, patch
 
-from odoo_data_flow import import_threaded
+from fluvo import import_threaded
 
 
-@patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+@patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
 def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> None:
     """Test two tier failure handling.
 
@@ -135,7 +135,7 @@ def test_create_fallback_handles_malformed_rows(tmp_path: Path) -> None:
 
     # 2. ACT
     with patch(
-        "odoo_data_flow.import_threaded.conf_lib.get_connection_from_config"
+        "fluvo.import_threaded.conf_lib.get_connection_from_config"
     ) as mock_get_conn:
         mock_get_conn.return_value.get_model.return_value = mock_model
         result, _ = import_threaded.import_data(
@@ -165,7 +165,7 @@ def test_create_fallback_handles_malformed_rows(tmp_path: Path) -> None:
     assert "Row has 2 columns, but header has 3" in failed_row[-1]
 
 
-@patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+@patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
 def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> None:
     """Test fallback handling with a dirty CSV containing various errors."""
     # 1. ARRANGE
@@ -259,7 +259,7 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
     assert "Row has 0 columns, but header has 3" in failed_rows[2][-1]
 
 
-@patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+@patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
 def test_load_with_ignored_columns(mock_get_conn: MagicMock, tmp_path: Path) -> None:
     """Test that the load method is called with correctly filtered data."""
     # 1. ARRANGE

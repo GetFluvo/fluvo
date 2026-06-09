@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import polars as pl
 
-from odoo_data_flow.converter import (
+from fluvo.converter import (
     run_path_to_image,
     run_url_to_image,
     to_base64,
@@ -81,7 +81,7 @@ def test_run_path_to_image(tmp_path: Path) -> None:
     assert result_data[2]["image_path"] == "", "Empty path should result in empty"
 
 
-@patch("odoo_data_flow.lib.mapper.httpx.get")
+@patch("fluvo.lib.mapper.httpx.get")
 def test_run_url_to_image(mock_httpx_get: MagicMock, tmp_path: Path) -> None:
     """Tests the run_url_to_image function.
 
@@ -161,7 +161,7 @@ def test_to_base64(tmp_path: Path) -> None:
     assert to_base64("non_existing_file.txt") == ""
 
 
-@patch("odoo_data_flow.converter.Processor.process")
+@patch("fluvo.converter.Processor.process")
 def test_run_path_to_image_with_cast(mock_process: MagicMock, tmp_path: Path) -> None:
     """Tests run_path_to_image with a dataframe that needs casting."""
     mock_process.return_value = pl.DataFrame({"col1": [1], "col2": ["a"]})
@@ -172,7 +172,7 @@ def test_run_path_to_image_with_cast(mock_process: MagicMock, tmp_path: Path) ->
     assert out.exists()
 
 
-@patch("odoo_data_flow.converter.Processor.process")
+@patch("fluvo.converter.Processor.process")
 def test_run_url_to_image_with_cast(mock_process: MagicMock, tmp_path: Path) -> None:
     """Tests run_url_to_image with a dataframe that needs casting."""
     mock_process.return_value = pl.DataFrame({"col1": [1], "col2": ["a"]})
@@ -183,7 +183,7 @@ def test_run_url_to_image_with_cast(mock_process: MagicMock, tmp_path: Path) -> 
     assert out.exists()
 
 
-@patch("odoo_data_flow.converter.Processor.process")
+@patch("fluvo.converter.Processor.process")
 def test_run_path_to_image_with_object_dtype(
     mock_process: MagicMock, tmp_path: Path
 ) -> None:
@@ -212,7 +212,7 @@ def test_run_path_to_image_with_object_dtype(
     # The function should complete without error
 
 
-@patch("odoo_data_flow.converter.Processor.process")
+@patch("fluvo.converter.Processor.process")
 def test_run_url_to_image_with_object_dtype(
     mock_process: MagicMock, tmp_path: Path
 ) -> None:

@@ -4,13 +4,13 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 
-from odoo_data_flow.lib import mapper
-from odoo_data_flow.migrator import run_migration
+from fluvo.lib import mapper
+from fluvo.migrator import run_migration
 
 
-@patch("odoo_data_flow.migrator.run_import_for_migration")
-@patch("odoo_data_flow.migrator.run_export_for_migration")
-@patch("odoo_data_flow.migrator.Processor")
+@patch("fluvo.migrator.run_import_for_migration")
+@patch("fluvo.migrator.run_export_for_migration")
+@patch("fluvo.migrator.Processor")
 def test_run_migration_success_with_mapping(
     mock_processor: MagicMock,
     mock_run_export: MagicMock,
@@ -51,9 +51,9 @@ def test_run_migration_success_with_mapping(
     mock_run_import.assert_called_once()
 
 
-@patch("odoo_data_flow.migrator.run_import_for_migration")
-@patch("odoo_data_flow.migrator.run_export_for_migration")
-@patch("odoo_data_flow.migrator.Processor")
+@patch("fluvo.migrator.run_import_for_migration")
+@patch("fluvo.migrator.run_export_for_migration")
+@patch("fluvo.migrator.Processor")
 def test_run_migration_success_no_mapping(
     mock_processor: MagicMock,
     mock_run_export: MagicMock,
@@ -88,9 +88,9 @@ def test_run_migration_success_no_mapping(
     mock_run_import.assert_called_once()
 
 
-@patch("odoo_data_flow.migrator.run_import_for_migration")
-@patch("odoo_data_flow.migrator.run_export_for_migration")
-@patch("odoo_data_flow.migrator.log.warning")
+@patch("fluvo.migrator.run_import_for_migration")
+@patch("fluvo.migrator.run_export_for_migration")
+@patch("fluvo.migrator.log.warning")
 def test_run_migration_no_data_exported(
     mock_log_warning: MagicMock,
     mock_run_export: MagicMock,

@@ -1,6 +1,6 @@
 """Tests for the health-aware throttling module."""
 
-from odoo_data_flow.lib import throttle
+from fluvo.lib import throttle
 
 
 class TestServerHealth:

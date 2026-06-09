@@ -9,7 +9,7 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
-from odoo_data_flow.export_threaded import (
+from fluvo.export_threaded import (
     RPCThreadExport,
     _clean_and_transform_batch,
     _clean_batch,
@@ -23,7 +23,7 @@ from odoo_data_flow.export_threaded import (
 def mock_conf_lib() -> Generator[MagicMock, None, None]:
     """Fixture to mock conf_lib.get_connection_from_config."""
     with patch(
-        "odoo_data_flow.export_threaded.conf_lib.get_connection_from_config"
+        "fluvo.export_threaded.conf_lib.get_connection_from_config"
     ) as mock_conn:
         mock_model_obj = MagicMock()
         mock_model_obj.fields_get.return_value = {
@@ -41,7 +41,7 @@ def mock_conf_lib() -> Generator[MagicMock, None, None]:
 class TestInitializeExport:
     """Tests for the _initialize_export helper function."""
 
-    @patch("odoo_data_flow.export_threaded.log")
+    @patch("fluvo.export_threaded.log")
     def test_initialize_export_warns_for_non_existent_field(
         self, mock_log: MagicMock, mock_conf_lib: MagicMock
     ) -> None:
@@ -74,7 +74,7 @@ class TestInitializeExport:
             in call_args[0]
         )
 
-    @patch("odoo_data_flow.export_threaded.log")
+    @patch("fluvo.export_threaded.log")
     def test_initialize_export_does_not_warn_for_valid_and_special_fields(
         self, mock_log: MagicMock, mock_conf_lib: MagicMock
     ) -> None:
@@ -162,7 +162,7 @@ class TestRPCThreadExport:
         )
 
         # 2. Action
-        with patch("odoo_data_flow.export_threaded.log.error") as mock_log_error:
+        with patch("fluvo.export_threaded.log.error") as mock_log_error:
             result = thread._execute_batch([1], 1)
 
             # 3. Assert
@@ -364,7 +364,7 @@ class TestExportData:
     def test_export_handles_connection_failure(self) -> None:
         """Tests that None is returned if the initial connection fails."""
         with patch(
-            "odoo_data_flow.export_threaded.conf_lib.get_connection_from_config",
+            "fluvo.export_threaded.conf_lib.get_connection_from_config",
             side_effect=Exception("Connection Error"),
         ):
             success, _, _, result = export_data(
@@ -538,7 +538,7 @@ class TestExportData:
         assert model_obj is None
         assert fields_info is None
 
-    @patch("odoo_data_flow.export_threaded._determine_export_strategy")
+    @patch("fluvo.export_threaded._determine_export_strategy")
     def test_export_data_streaming_no_output(
         self, mock_determine_export_strategy: MagicMock
     ) -> None:
@@ -996,8 +996,8 @@ class TestExportData:
         assert result_df.schema["id"] == pl.String
         assert_frame_equal(result_df, expected_df)
 
-    @patch("odoo_data_flow.export_threaded.concurrent.futures.as_completed")
-    @patch("odoo_data_flow.export_threaded.RPCThreadExport")
+    @patch("fluvo.export_threaded.concurrent.futures.as_completed")
+    @patch("fluvo.export_threaded.RPCThreadExport")
     def test_export_auto_enables_read_mode_for_selection_field(
         self,
         mock_rpc_thread_class: MagicMock,
@@ -1046,8 +1046,8 @@ class TestExportData:
         expected_df = pl.DataFrame({"name": ["Test Record"], "state": ["done"]})
         assert_frame_equal(result_df, expected_df, check_dtypes=False)
 
-    @patch("odoo_data_flow.export_threaded.concurrent.futures.as_completed")
-    @patch("odoo_data_flow.export_threaded.RPCThreadExport")
+    @patch("fluvo.export_threaded.concurrent.futures.as_completed")
+    @patch("fluvo.export_threaded.RPCThreadExport")
     def test_export_auto_enables_read_mode_for_binary_field(
         self,
         mock_rpc_thread_class: MagicMock,
@@ -1096,9 +1096,9 @@ class TestExportData:
         expected_df = pl.DataFrame({"name": ["test.zip"], "datas": ["UEsDBAoAAAAA..."]})
         assert_frame_equal(result_df, expected_df)
 
-    @patch("odoo_data_flow.export_threaded.concurrent.futures.as_completed")
-    @patch("odoo_data_flow.export_threaded._clean_batch")
-    @patch("odoo_data_flow.export_threaded.Progress")
+    @patch("fluvo.export_threaded.concurrent.futures.as_completed")
+    @patch("fluvo.export_threaded._clean_batch")
+    @patch("fluvo.export_threaded.Progress")
     def test_process_export_batches_handles_inconsistent_schemas(
         self,
         mock_progress: MagicMock,

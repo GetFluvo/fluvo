@@ -93,7 +93,7 @@ def test_optimized_matches_naive_and_reports_timing(
     )
 
     # (b) Report wall-time (improvement scales with distinct-relation cardinality
-    # and dataset size; meaningful at larger ODF_E2E_SCALE).
+    # and dataset size; meaningful at larger FLUVO_E2E_SCALE).
     ratio = naive_secs / opt_secs if opt_secs else float("inf")
     print(
         f"\n[ORM-min timing] naive={naive_secs:.2f}s optimized={opt_secs:.2f}s "

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 
-from odoo_data_flow.lib import auto_clean, cache, relational_import
+from fluvo.lib import auto_clean, cache, relational_import
 
 # --- auto_clean ----------------------------------------------------------------
 
@@ -135,7 +135,7 @@ def test_export_id_map_builds_key_xmlid_dbid(tmp_path: object) -> None:
 
     cfg = {"hostname": "h", "port": 1, "database": "d", "login": "a", "password": "b"}
     with patch.object(cache, "resolve_cache_dir", return_value=None), patch(
-        "odoo_data_flow.lib.conf_lib.get_connection_from_dict", return_value=conn
+        "fluvo.lib.conf_lib.get_connection_from_dict", return_value=conn
     ):
         df = cache.export_id_map(cfg, "res.country", "name")
 

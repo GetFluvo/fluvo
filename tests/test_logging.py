@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from rich.logging import RichHandler
 
-from odoo_data_flow.logging_config import log, setup_logging, suppress_console_handler
+from fluvo.logging_config import log, setup_logging, suppress_console_handler
 
 
 def test_setup_logging_console_only() -> None:
@@ -102,8 +102,8 @@ def test_log_output_is_written_to_file(tmp_path: Path) -> None:
     assert test_message in log_content
 
 
-@patch("odoo_data_flow.logging_config.logging.FileHandler")
-@patch("odoo_data_flow.logging_config.log.error")
+@patch("fluvo.logging_config.logging.FileHandler")
+@patch("fluvo.logging_config.log.error")
 def test_setup_logging_file_creation_error(
     mock_log_error: MagicMock, mock_file_handler: MagicMock
 ) -> None:
@@ -145,7 +145,7 @@ def test_suppress_console_handler_with_handler() -> None:
 
 def test_suppress_console_handler_without_handler() -> None:
     """Tests that suppress_console_handler works even without a handler."""
-    import odoo_data_flow.logging_config as lc
+    import fluvo.logging_config as lc
 
     # Temporarily set _console_handler to None
     original_handler = lc._console_handler

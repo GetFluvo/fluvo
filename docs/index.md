@@ -4,11 +4,11 @@ end-before: <!-- github-only -->
 ---
 ```
 
-# Odoo Data Flow
+# Fluvo
 
 **A robust Python toolkit for high-performance, intelligent Odoo data workflows.**
 
-Odoo Data Flow is a powerful and flexible library designed to simplify complex data imports and exports with Odoo. It features a smart import engine with automatic error recovery, multi-threading, and a two-pass strategy for relational data, allowing you to manage complex transformations and validations with confidence.
+Fluvo is a powerful and flexible library designed to simplify complex data imports and exports with Odoo. It features a smart import engine with automatic error recovery, multi-threading, and a two-pass strategy for relational data, allowing you to manage complex transformations and validations with confidence.
 
 This library is the successor to the `odoo-csv-import-export` library, refactored for modern development practices and enhanced clarity.
 
@@ -21,7 +21,7 @@ flowchart TD
  subgraph subGraph0["External Data"]
         A["CSV / XML File"]
   end
- subgraph s1["odoo-data-flow"]
+ subgraph s1["fluvo"]
         B{"Model Definition in Python"}
         C["@field Decorators"]
         D["Transformation & Validation Logic"]
@@ -77,6 +77,6 @@ faq
 contributing
 Code of Conduct <codeofconduct>
 License <license>
-Changelog <https://github.com/OdooDataFlow/odoo-data-flow/releases>
+Changelog <https://github.com/getfluvo/fluvo/releases>
 ROADMAP
 ```

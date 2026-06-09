@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from odoo_data_flow.lib.conf_lib import (
+from fluvo.lib.conf_lib import (
     _read_config_file,
     get_connection_from_config,
     get_connection_from_dict,
@@ -13,7 +13,7 @@ from odoo_data_flow.lib.conf_lib import (
 
 
 # --- Tests for file-based configuration ---
-@patch("odoo_data_flow.lib.conf_lib.odoolib.get_connection")
+@patch("fluvo.lib.conf_lib.odoolib.get_connection")
 def test_get_connection_from_config_success(
     mock_get_connection: MagicMock, tmp_path: Path
 ) -> None:
@@ -57,7 +57,7 @@ def test_get_connection_missing_key_from_file(tmp_path: Path) -> None:
 
 
 # --- Tests for dictionary-based configuration ---
-@patch("odoo_data_flow.lib.conf_lib.odoolib.get_connection")
+@patch("fluvo.lib.conf_lib.odoolib.get_connection")
 def test_get_connection_from_dict_success(mock_get_connection: MagicMock) -> None:
     """Tests successful connection configuration parsing from a dictionary."""
     config_dict = {
@@ -97,7 +97,7 @@ def test_get_connection_malformed_value_from_dict() -> None:
         get_connection_from_dict(config_dict)
 
 
-@patch("odoo_data_flow.lib.conf_lib.odoolib.get_connection")
+@patch("fluvo.lib.conf_lib.odoolib.get_connection")
 def test_get_connection_from_dict_generic_exception(
     mock_get_connection: MagicMock,
 ) -> None:
@@ -114,7 +114,7 @@ def test_get_connection_from_dict_generic_exception(
 
 
 # --- Tests for _config_file handling ---
-@patch("odoo_data_flow.lib.conf_lib.odoolib.get_connection")
+@patch("fluvo.lib.conf_lib.odoolib.get_connection")
 def test_get_connection_from_dict_with_config_file_override(
     mock_get_connection: MagicMock, tmp_path: Path
 ) -> None:
@@ -150,12 +150,12 @@ password = base-pass
 
 
 # --- Tests for connection caching ---
-@patch("odoo_data_flow.lib.conf_lib.odoolib.get_connection")
+@patch("fluvo.lib.conf_lib.odoolib.get_connection")
 def test_get_connection_from_config_caches_connection(
     mock_get_connection: MagicMock, tmp_path: Path
 ) -> None:
     """Tests that connections are cached and reused."""
-    from odoo_data_flow.lib.conf_lib import _connection_cache
+    from fluvo.lib.conf_lib import _connection_cache
 
     # Clear cache first
     _connection_cache.clear()

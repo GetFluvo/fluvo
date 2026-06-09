@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from odoo_data_flow.lib import validation as val
+from fluvo.lib import validation as val
 
 
 @pytest.fixture
@@ -426,12 +426,12 @@ class TestDisplayValidationResults:
 class TestDryRunCLI:
     """Tests for the --dry-run CLI option."""
 
-    @patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.conf_lib.get_connection_from_config")
     def test_dry_run_validation(self, mock_get_conn: MagicMock, temp_dir: str) -> None:
         """Test dry-run validation via CLI."""
         from click.testing import CliRunner
 
-        from odoo_data_flow.__main__ import cli
+        from fluvo.__main__ import cli
 
         # Create test CSV
         csv_path = Path(temp_dir) / "test.csv"
@@ -591,7 +591,7 @@ class TestValidateCsvDataEdgeCases:
         csv_path.write_text("id;name;state\n1;Product;draft\n")
 
         # Make csv.reader raise an exception
-        with patch("odoo_data_flow.lib.validation.csv.reader") as mock_reader:
+        with patch("fluvo.lib.validation.csv.reader") as mock_reader:
             mock_reader.side_effect = Exception("Unexpected error")
 
             result = val.validate_csv_data(

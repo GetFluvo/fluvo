@@ -46,8 +46,8 @@ The Processor automatically flattens the nested structure, so you can access tag
 
 
 ```python
-from odoo_data_flow.lib.transform import Processor
-from odoo_data_flow.lib import mapper
+from fluvo.lib.transform import Processor
+from fluvo.lib import mapper
 
 # Access nested XML tags using dot notation.
 res_partner_mapping = {
@@ -100,7 +100,7 @@ P101,Product B,COMPANY_EU
 Your mapping dictionary can use the `CompanyCode` to link to the correct company record in Odoo using its external ID.
 
 ```python
-from odoo_data_flow.lib import mapper
+from fluvo.lib import mapper
 
 product_mapping = {
     'id': mapper.m2o_map('prod_', 'SKU'),
@@ -156,7 +156,7 @@ When you import products with `--sudo --all-companies`, the cost price is only s
 ```bash
 # This creates products across all companies, BUT...
 # standard_price is only set for Company 1!
-odoo-data-flow import \
+fluvo import \
     --file data/products.csv \
     --model product.product \
     --sudo --all-companies
@@ -170,13 +170,13 @@ Either exclude `standard_price` from your CSV, or use `--ignore`:
 
 ```bash
 # Option A: CSV without standard_price
-odoo-data-flow import \
+fluvo import \
     --file data/products.csv \
     --model product.product \
     --sudo --all-companies
 
 # Option B: Ignore the cost price field
-odoo-data-flow import \
+fluvo import \
     --file data/products_with_costs.csv \
     --model product.product \
     --sudo --all-companies \
@@ -198,13 +198,13 @@ Import for each company:
 
 ```bash
 # Import costs for Company 1 (using database ID)
-odoo-data-flow import \
+fluvo import \
     --file data/costs_company_1.csv \
     --model product.product \
     --company-id 1
 
 # Import costs for Company 2 (using XML ID)
-odoo-data-flow import \
+fluvo import \
     --file data/costs_company_2.csv \
     --model product.product \
     --company-id my_module.company_germany
@@ -220,8 +220,8 @@ odoo-data-flow import \
 Update your transformation scripts to generate company-specific cost files:
 
 ```python
-from odoo_data_flow.lib.transform import Processor
-from odoo_data_flow.lib import mapper
+from fluvo.lib.transform import Processor
+from fluvo.lib import mapper
 
 # Main product mapping (without standard_price)
 product_mapping = {
@@ -275,7 +275,7 @@ CONFIG="conf/connection.conf"
 
 # Step 1: Import products (without costs)
 echo "Step 1: Importing products..."
-odoo-data-flow import \
+fluvo import \
     --connection-file "$CONFIG" \
     --file data/products.csv \
     --model product.product \
@@ -288,7 +288,7 @@ for COMPANY_ID in "${COMPANIES[@]}"; do
     COST_FILE="data/costs_company_${COMPANY_ID}.csv"
     if [ -f "$COST_FILE" ]; then
         echo "Step 2: Importing costs for company $COMPANY_ID..."
-        odoo-data-flow import \
+        fluvo import \
             --connection-file "$CONFIG" \
             --file "$COST_FILE" \
             --model product.product \
@@ -306,7 +306,7 @@ echo "Done!"
 After import, verify that cost prices are correctly set for each company:
 
 ```python
-from odoo_data_flow.lib.conf_lib import get_connection_from_config
+from fluvo.lib.conf_lib import get_connection_from_config
 
 conn = get_connection_from_config("conf/connection.conf")
 product = conn.get_model('product.product')
@@ -374,7 +374,7 @@ project/
 
 **Import to UAT:**
 ```bash
-odoo-data-flow import \
+fluvo import \
     --connection-file uat_connection.conf \
     --file data/res_partner.csv \
     --model res.partner
@@ -384,7 +384,7 @@ If any records fail, they are written to `data/uat/res_partner_fail.csv`.
 
 **Retry Failed Records:**
 ```bash
-odoo-data-flow import \
+fluvo import \
     --connection-file uat_connection.conf \
     --file data/res_partner.csv \
     --model res.partner \
@@ -442,7 +442,7 @@ While you can use a `transform.py` script to generate the load script, for a sim
 **Command-line Example:**
 
 ```bash
-odoo-data-flow import \
+fluvo import \
     --config conf/connection.conf \
     --file product_template_FR.csv \
     --model product.template \
@@ -476,8 +476,8 @@ INV,INV2023/12/001,2023-12-31,,,
 **Transformation Script**
 
 ```python
-from odoo_data_flow.lib.transform import Processor
-from odoo_data_flow.lib import mapper
+from fluvo.lib.transform import Processor
+from fluvo.lib import mapper
 
 # ... (see Data Transformations guide for full stateful processing example)
 
@@ -532,7 +532,7 @@ params = {
 }
 ```
 
-The generated `load.sh` script will then include the `--o2m` flag in the `odoo-data-flow import` command.
+The generated `load.sh` script will then include the `--o2m` flag in the `fluvo import` command.
 
 ### Important Limitations
 
@@ -603,8 +603,8 @@ You first initialize a `Processor` with your primary file. Then, you call `.join
 
 ```{code-block} python
 :caption: transform_merge.py
-from odoo_data_flow.lib.transform import Processor
-from odoo_data_flow.lib import mapper
+from fluvo.lib.transform import Processor
+from fluvo.lib import mapper
 
 # 1. Initialize a processor with the primary file (orders)
 processor = Processor('origin/orders.csv')
@@ -648,8 +648,8 @@ You can then iterate over this dictionary to process each chunk independently.
 
 ```{code-block} python
 :caption: transform_split.py
-from odoo_data_flow.lib.transform import Processor
-from odoo_data_flow.lib import mapper
+from fluvo.lib.transform import Processor
+from fluvo.lib import mapper
 
 # 1. Define your mapping as usual
 product_mapping = {
@@ -688,7 +688,7 @@ To prevent settings from being permanently lost, the importer uses a **file-base
 3. **On successful restore**: The backup file is deleted
 4. **On failed restore**: The backup file is preserved for the next run
 
-**Backup location:** `~/.odoo-data-flow/vat_settings_backup/`
+**Backup location:** `~/.fluvo/vat_settings_backup/`
 
 Each database has its own backup file named: `vat_settings_{host}_{database}.json`
 
@@ -707,7 +707,7 @@ If you notice that VAT validation is stuck in a "disabled" state, you can manual
 **Check if a backup exists:**
 
 ```python
-from odoo_data_flow.lib.actions.vies_manager import check_vat_settings_backup_status
+from fluvo.lib.actions.vies_manager import check_vat_settings_backup_status
 
 status = check_vat_settings_backup_status("conf/connection.conf")
 
@@ -723,7 +723,7 @@ else:
 **Restore settings from backup:**
 
 ```python
-from odoo_data_flow.lib.actions.vies_manager import restore_vat_settings_from_backup
+from fluvo.lib.actions.vies_manager import restore_vat_settings_from_backup
 
 success = restore_vat_settings_from_backup("conf/connection.conf")
 
@@ -761,7 +761,7 @@ Error: Quant's editing is restricted, you can't do this operation.
 ### The Solution
 
 ```bash
-odoo-data-flow import \
+fluvo import \
     --connection-file conf/connection.conf \
     --file data/stock.quant.csv \
     --model stock.quant \
@@ -804,7 +804,7 @@ Importing stock levels requires special handling due to Odoo's inventory managem
 Stock quant imports require `inventory_mode: True` in the context:
 
 ```bash
-odoo-data-flow import \
+fluvo import \
     --connection-file conf/connection.conf \
     --file data/stock.quant.csv \
     --model stock.quant \
@@ -897,7 +897,7 @@ When importing opening inventory (e.g., for a new Odoo implementation or fiscal 
 The `--move-date` flag updates the stock move dates after inventory adjustment:
 
 ```bash
-odoo-data-flow import \
+fluvo import \
     --connection-file conf/connection.conf \
     --file data/stock.quant.csv \
     --model stock.quant \
@@ -948,7 +948,7 @@ opening.quant_SKU003_WH2;PRODUCT.SKU003;STOCK.WH2_STOCK;25.0;
 CONFIG="conf/connection.conf"
 OPENING_DATE="2026-01-01"
 
-odoo-data-flow import \
+fluvo import \
     --connection-file "$CONFIG" \
     --file data/stock.quant.csv \
     --model stock.quant \

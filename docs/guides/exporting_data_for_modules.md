@@ -2,7 +2,7 @@
 
 A common requirement for Odoo developers is to package data (e.g., default settings, master data like countries or states) into XML files within a custom module. This ensures the data is loaded automatically when the module is installed.
 
-While `odoo-data-flow` does not export directly to Odoo's XML format, it is the perfect tool for the first and most critical step: extracting the data from a database into a clean, reliable format.
+While `fluvo` does not export directly to Odoo's XML format, it is the perfect tool for the first and most critical step: extracting the data from a database into a clean, reliable format.
 
 This guide provides a standard workflow for exporting data to a CSV file and then converting that file into a properly formatted Odoo XML data file.
 
@@ -13,7 +13,7 @@ config:
 ---
 flowchart LR
  subgraph subGraph0["Step 1: Export from Odoo"]
-        B{"odoo-data-flow export"}
+        B{"fluvo export"}
         A[("Odoo Database")]
         C["temp_data.csv"]
   end
@@ -47,7 +47,7 @@ flowchart LR
 
 The process involves two simple steps:
 
-1. **Export to CSV**: Use the `odoo-data-flow export` command to pull the data you need from your Odoo instance into a clean CSV file.
+1. **Export to CSV**: Use the `fluvo export` command to pull the data you need from your Odoo instance into a clean CSV file.
 2. **Convert to XML**: Use a simple Python script to read the CSV and generate an XML file in the exact format Odoo requires for data files.
 
 ### Step 1: Export the Data to a CSV File
@@ -55,7 +55,7 @@ The process involves two simple steps:
 First, use the `export` command to get the data you want to include in your module. For this example, let's export all the US states from the `res.country.state` model.
 
 ```bash
-odoo-data-flow export \
+fluvo export \
   --config conf/my_db.conf \
   --model res.country.state \
   --domain "[('country_id.code', '=', 'US')]" \
@@ -177,4 +177,4 @@ The final step is to tell Odoo to load this file when your module is installed o
 }
 ```
 
-Now, when you install or upgrade your module, Odoo will automatically load all the US states from your XML file. This workflow combines the power of `odoo-data-flow` for data extraction with a simple, reusable script for generating module data.
+Now, when you install or upgrade your module, Odoo will automatically load all the US states from your XML file. This workflow combines the power of `fluvo` for data extraction with a simple, reusable script for generating module data.

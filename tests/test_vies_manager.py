@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from odoo_data_flow.lib.actions.vies_manager import (
+from fluvo.lib.actions.vies_manager import (
     EU_COUNTRY_CODES,
     VAT_PATTERNS,
     VatValidationSettings,
@@ -290,7 +290,7 @@ class TestGetVatValidationSettings:
     """Tests for get_vat_validation_settings function."""
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_get_settings_success(self, mock_get_connection: MagicMock) -> None:
         """Test getting VAT validation settings successfully."""
@@ -315,7 +315,7 @@ class TestGetVatValidationSettings:
         assert settings.vies_settings == {1: True, 2: False}
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_get_settings_connection_error(
         self, mock_get_connection: MagicMock
@@ -327,7 +327,7 @@ class TestGetVatValidationSettings:
         assert settings is None
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_get_settings_specific_companies(
         self, mock_get_connection: MagicMock
@@ -358,7 +358,7 @@ class TestDisableVatValidation:
     """Tests for disable_vat_validation function."""
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_disable_vies(self, mock_get_connection: MagicMock) -> None:
         """Test disabling VIES validation."""
@@ -386,7 +386,7 @@ class TestDisableVatValidation:
         mock_company_obj.write.assert_called()
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_disable_stdnum(self, mock_get_connection: MagicMock) -> None:
         """Test disabling stdnum validation."""
@@ -416,7 +416,7 @@ class TestRestoreVatValidationSettings:
     """Tests for restore_vat_validation_settings function."""
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_restore_settings_success(self, mock_get_connection: MagicMock) -> None:
         """Test restoring VAT validation settings."""
@@ -443,7 +443,7 @@ class TestRestoreVatValidationSettings:
         mock_param_obj.set_param.assert_called_once()
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_restore_settings_connection_error(
         self, mock_get_connection: MagicMock
@@ -469,7 +469,7 @@ class TestRunViesValidation:
     """Tests for run_vies_validation function."""
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_validation_no_partners(self, mock_get_connection: MagicMock) -> None:
         """Test validation with no partners to validate."""
@@ -486,7 +486,7 @@ class TestRunViesValidation:
         assert result.valid_count == 0
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_validation_connection_error(self, mock_get_connection: MagicMock) -> None:
         """Test handling connection error."""
@@ -500,8 +500,8 @@ class TestRunViesValidation:
 class TestRunImportWithVatValidationDisabled:
     """Tests for run_import_with_vat_validation_disabled function."""
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.restore_vat_validation_settings")
-    @patch("odoo_data_flow.lib.actions.vies_manager.disable_vat_validation")
+    @patch("fluvo.lib.actions.vies_manager.restore_vat_validation_settings")
+    @patch("fluvo.lib.actions.vies_manager.disable_vat_validation")
     def test_import_workflow(
         self,
         mock_disable: MagicMock,
@@ -529,8 +529,8 @@ class TestRunImportWithVatValidationDisabled:
         assert call_args[0][0] == "dummy.conf"
         assert call_args[0][1] == mock_settings
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.restore_vat_validation_settings")
-    @patch("odoo_data_flow.lib.actions.vies_manager.disable_vat_validation")
+    @patch("fluvo.lib.actions.vies_manager.restore_vat_validation_settings")
+    @patch("fluvo.lib.actions.vies_manager.disable_vat_validation")
     def test_import_restores_on_error(
         self,
         mock_disable: MagicMock,
@@ -553,8 +553,8 @@ class TestRunImportWithVatValidationDisabled:
         # Settings should still be restored
         mock_restore.assert_called_once()
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.restore_vat_validation_settings")
-    @patch("odoo_data_flow.lib.actions.vies_manager.disable_vat_validation")
+    @patch("fluvo.lib.actions.vies_manager.restore_vat_validation_settings")
+    @patch("fluvo.lib.actions.vies_manager.disable_vat_validation")
     def test_import_proceeds_without_settings(
         self,
         mock_disable: MagicMock,
@@ -709,7 +709,7 @@ class TestRetriableError:
 class TestDisableVatValidationWithBackup:
     """Tests for disable_vat_validation with file-based backup."""
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_creates_backup_file_on_first_run(
         self, mock_get_connection: MagicMock, tmp_path: Path
     ) -> None:
@@ -746,7 +746,7 @@ class TestDisableVatValidationWithBackup:
         backup_path = _get_backup_file_path(config, backup_dir=tmp_path)
         assert backup_path.exists()
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_uses_existing_backup_if_present(
         self, mock_get_connection: MagicMock, tmp_path: Path
     ) -> None:
@@ -787,7 +787,7 @@ class TestDisableVatValidationWithBackup:
 class TestRestoreVatValidationSettingsWithRetry:
     """Tests for restore_vat_validation_settings with retries."""
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_deletes_backup_on_success(
         self, mock_get_connection: MagicMock, tmp_path: Path
     ) -> None:
@@ -812,8 +812,8 @@ class TestRestoreVatValidationSettingsWithRetry:
         assert result is True
         assert not backup_path.exists()  # Backup should be deleted
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.time.sleep")
-    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    @patch("fluvo.lib.actions.vies_manager.time.sleep")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_retries_on_503_error(
         self,
         mock_get_connection: MagicMock,
@@ -852,8 +852,8 @@ class TestRestoreVatValidationSettingsWithRetry:
         assert mock_company_obj.write.call_count == 3
         assert mock_sleep.call_count == 2  # Slept before retries
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.time.sleep")
-    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    @patch("fluvo.lib.actions.vies_manager.time.sleep")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_preserves_backup_on_max_retries_exceeded(
         self,
         mock_get_connection: MagicMock,
@@ -887,7 +887,7 @@ class TestRestoreVatValidationSettingsWithRetry:
         assert result is False
         assert backup_path.exists()  # Backup should be preserved
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_no_retry_on_permanent_error(
         self, mock_get_connection: MagicMock, tmp_path: Path
     ) -> None:
@@ -913,7 +913,7 @@ class TestRestoreVatValidationSettingsWithRetry:
 class TestRestoreFromBackup:
     """Tests for restore_vat_settings_from_backup function."""
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_restores_from_backup_file(
         self, mock_get_connection: MagicMock, tmp_path: Path
     ) -> None:
@@ -1070,7 +1070,7 @@ class TestValidateVatLocalEdgeCases:
 class TestGetVatValidationSettingsEdgeCases:
     """Additional tests for get_vat_validation_settings edge cases."""
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_get_settings_with_dict_config(
         self, mock_get_connection: MagicMock
     ) -> None:
@@ -1095,7 +1095,7 @@ class TestGetVatValidationSettingsEdgeCases:
         mock_get_connection.assert_called_once_with(config)
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_get_settings_stdnum_param_error(
         self, mock_get_connection: MagicMock
@@ -1118,7 +1118,7 @@ class TestGetVatValidationSettingsEdgeCases:
         assert settings.stdnum_settings == {}
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_get_settings_search_read_error(
         self, mock_get_connection: MagicMock
@@ -1139,7 +1139,7 @@ class TestGetVatValidationSettingsEdgeCases:
 class TestDisableVatValidationEdgeCases:
     """Additional tests for disable_vat_validation edge cases."""
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_disable_with_dict_config(
         self, mock_get_connection: MagicMock, tmp_path: Path
     ) -> None:
@@ -1162,7 +1162,7 @@ class TestDisableVatValidationEdgeCases:
         assert settings is not None
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_disable_connection_error_after_saving_settings(
         self, mock_get_connection: MagicMock, tmp_path: Path
@@ -1203,7 +1203,7 @@ class TestDisableVatValidationEdgeCases:
         assert settings.vies_settings == {1: True}
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_disable_write_error(
         self, mock_get_connection: MagicMock, tmp_path: Path
@@ -1233,7 +1233,7 @@ class TestDisableVatValidationEdgeCases:
         assert settings is not None
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_disable_stdnum_set_param_error(
         self, mock_get_connection: MagicMock, tmp_path: Path
@@ -1262,7 +1262,7 @@ class TestDisableVatValidationEdgeCases:
         assert settings is not None
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_disable_save_settings_false(
         self, mock_get_connection: MagicMock, tmp_path: Path
@@ -1306,8 +1306,8 @@ class TestRestoreVatValidationSettingsEdgeCases:
         assert result is True
         assert not backup_path.exists()
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.time.sleep")
-    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    @patch("fluvo.lib.actions.vies_manager.time.sleep")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_restore_connection_retriable_error(
         self, mock_get_connection: MagicMock, mock_sleep: MagicMock, tmp_path: Path
     ) -> None:
@@ -1335,7 +1335,7 @@ class TestRestoreVatValidationSettingsEdgeCases:
         assert result is True
         assert mock_sleep.called
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_restore_stdnum_error_non_retriable(
         self, mock_get_connection: MagicMock, tmp_path: Path
     ) -> None:
@@ -1359,8 +1359,8 @@ class TestRestoreVatValidationSettingsEdgeCases:
 
         assert result is False
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.time.sleep")
-    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    @patch("fluvo.lib.actions.vies_manager.time.sleep")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_restore_stdnum_retriable_error(
         self, mock_get_connection: MagicMock, mock_sleep: MagicMock, tmp_path: Path
     ) -> None:
@@ -1400,7 +1400,7 @@ class TestRestoreVatValidationSettingsEdgeCases:
 class TestRunViesValidationEdgeCases:
     """Additional tests for run_vies_validation edge cases."""
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
     def test_validation_with_dict_config(self, mock_get_connection: MagicMock) -> None:
         """Test VIES validation with dict config."""
         mock_partner_obj = MagicMock()
@@ -1417,7 +1417,7 @@ class TestRunViesValidationEdgeCases:
         mock_get_connection.assert_called_once_with(config)
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_validation_with_domain_filter(
         self, mock_get_connection: MagicMock
@@ -1440,7 +1440,7 @@ class TestRunViesValidationEdgeCases:
         assert ("country_id.code", "=", "BE") in call_args
 
     @patch(
-        "odoo_data_flow.lib.actions.vies_manager.conf_lib.get_connection_from_config"
+        "fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config"
     )
     def test_validation_with_max_records(self, mock_get_connection: MagicMock) -> None:
         """Test VIES validation with max_records limit."""
@@ -1460,8 +1460,8 @@ class TestRunViesValidationEdgeCases:
 class TestRunImportWithVatValidationDisabledEdgeCases:
     """Additional tests for run_import_with_vat_validation_disabled."""
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.restore_vat_validation_settings")
-    @patch("odoo_data_flow.lib.actions.vies_manager.disable_vat_validation")
+    @patch("fluvo.lib.actions.vies_manager.restore_vat_validation_settings")
+    @patch("fluvo.lib.actions.vies_manager.disable_vat_validation")
     def test_import_with_local_validation_enabled(
         self,
         mock_disable: MagicMock,
@@ -1483,8 +1483,8 @@ class TestRunImportWithVatValidationDisabledEdgeCases:
 
         assert result == "result"
 
-    @patch("odoo_data_flow.lib.actions.vies_manager.restore_vat_validation_settings")
-    @patch("odoo_data_flow.lib.actions.vies_manager.disable_vat_validation")
+    @patch("fluvo.lib.actions.vies_manager.restore_vat_validation_settings")
+    @patch("fluvo.lib.actions.vies_manager.disable_vat_validation")
     def test_import_disable_only_vies(
         self,
         mock_disable: MagicMock,

@@ -12,7 +12,7 @@ The objective is to produce two CSV files: one listing all the fields for a spec
 
 ## The Workflow
 
-The entire process is done using the `odoo-data-flow export` command, which we will use to query Odoo's internal data dictionary.
+The entire process is done using the `fluvo export` command, which we will use to query Odoo's internal data dictionary.
 
 ```{mermaid}
 ---
@@ -33,8 +33,8 @@ flowchart TD
   end
  subgraph subGraph3["Developer's Local Machine"]
     direction LR
-        C{"odoo-data-flow export<br>--model ir.model.fields"}
-        D{"odoo-data-flow export<br>--model ir.model.fields"}
+        C{"fluvo export<br>--model ir.model.fields"}
+        D{"fluvo export<br>--model ir.model.fields"}
         Analysis
         H["Developer / LLM<br>(fa:fa-user-edit)"]
         I["transform.py<br>(mapping dictionary)"]
@@ -67,7 +67,7 @@ First, run the `export` command pointed at your **source** database configuratio
 * `--fields "name,field_description,ttype"`: We export the technical name, the user-friendly label, and the field type, which is excellent information for comparison.
 
 ```bash
-odoo-data-flow export \
+fluvo export \
   --config conf/source_db.conf \
   --model ir.model.fields \
   --domain "[('model', '=', 'res.partner')]" \
@@ -80,7 +80,7 @@ odoo-data-flow export \
 Next, run the exact same command, but change the configuration to point to your **destination** database.
 
 ```bash
-odoo-data-flow export \
+fluvo export \
   --config conf/destination_db.conf \
   --model ir.model.fields \
   --domain "[('model', '=', 'res.partner')]" \
@@ -121,7 +121,7 @@ Let's imagine your diff tool shows the following differences:
 Based on this analysis, you can now construct your mapping dictionary in your `transform.py` script.
 
 ```python
-from odoo_data_flow.lib import mapper
+from fluvo.lib import mapper
 
 partner_migration_mapping = {
     # Direct 1-to-1 mapping for unchanged fields
@@ -153,7 +153,7 @@ partner_migration_mapping = {
 
     > "I am migrating data between two Odoo databases. Below are two CSV files listing the field definitions for the `res.partner` model from the source and destination databases.
     >
-    > Compare these two files and generate a Python dictionary for the `odoo-data-flow` library that maps the source fields to the destination fields.
+    > Compare these two files and generate a Python dictionary for the `fluvo` library that maps the source fields to the destination fields.
     >
     > -   For fields that have the same name, create a direct `mapper.val()` mapping.
     > -   For fields that appear to have been renamed (e.g., based on the description), map the old name to the new one.

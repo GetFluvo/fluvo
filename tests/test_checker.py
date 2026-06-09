@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 
-from odoo_data_flow.lib import checker
+from fluvo.lib import checker
 
 
 class TestCheckers:
@@ -18,7 +18,7 @@ class TestCheckers:
         check_func = checker.id_validity_checker("id", r"^SKU-\d{3}$")
         assert check_func(df) is True
 
-    @patch("odoo_data_flow.lib.checker.log.warning")
+    @patch("fluvo.lib.checker.log.warning")
     def test_id_validity_checker_failure(self, mock_log_warning: MagicMock) -> None:
         """Tests that id_validity_checker returns False for invalid data."""
         df = pl.DataFrame({"id": ["SKU-001", "BAD-ID"], "name": ["A", "B"]})
@@ -27,7 +27,7 @@ class TestCheckers:
         mock_log_warning.assert_called_once()
         assert "does not match pattern" in mock_log_warning.call_args[0][0]
 
-    @patch("odoo_data_flow.lib.checker.log.error")
+    @patch("fluvo.lib.checker.log.error")
     def test_id_validity_checker_bad_regex(self, mock_log_error: MagicMock) -> None:
         """Tests that id_validity_checker handles an invalid regex pattern."""
         df = pl.DataFrame({"id": ["SKU-001"], "name": ["A"]})
@@ -52,7 +52,7 @@ class TestCheckers:
         check_func = checker.line_length_checker(2)
         assert check_func(df) is True
 
-    @patch("odoo_data_flow.lib.checker.log.warning")
+    @patch("fluvo.lib.checker.log.warning")
     def test_line_length_checker_failure(self, mock_log_warning: MagicMock) -> None:
         """Tests that line_length_checker returns False for invalid data."""
         df = pl.DataFrame({"id": ["1"], "name": ["A"], "extra_col": ["C"]})
@@ -67,7 +67,7 @@ class TestCheckers:
         check_func = checker.line_number_checker(2)
         assert check_func(df) is True
 
-    @patch("odoo_data_flow.lib.checker.log.warning")
+    @patch("fluvo.lib.checker.log.warning")
     def test_line_number_checker_failure(self, mock_log_warning: MagicMock) -> None:
         """Tests that line_number_checker returns False for invalid data."""
         df = pl.DataFrame({"id": ["1"]})
@@ -82,7 +82,7 @@ class TestCheckers:
         check_func = checker.cell_len_checker(10)
         assert check_func(df) is True
 
-    @patch("odoo_data_flow.lib.checker.log.warning")
+    @patch("fluvo.lib.checker.log.warning")
     def test_cell_len_checker_failure(self, mock_log_warning: MagicMock) -> None:
         """Tests that cell_len_checker returns False for invalid data."""
         df = pl.DataFrame(
@@ -96,7 +96,7 @@ class TestCheckers:
         mock_log_warning.assert_called_once()
         assert "which exceeds the max of 20" in mock_log_warning.call_args[0][0]
 
-    @patch("odoo_data_flow.lib.checker.log.warning")
+    @patch("fluvo.lib.checker.log.warning")
     def test_cell_len_checker_failure_no_header(
         self, mock_log_warning: MagicMock
     ) -> None:

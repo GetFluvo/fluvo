@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from odoo_data_flow import __main__
+from fluvo import __main__
 
 
 @pytest.fixture
@@ -15,7 +15,7 @@ def runner() -> CliRunner:
 
 
 # --- Project Mode Tests ---
-@patch("odoo_data_flow.__main__.run_project_flow")
+@patch("fluvo.__main__.run_project_flow")
 def test_project_mode_with_explicit_flow_file(
     mock_run_flow: MagicMock, runner: CliRunner
 ) -> None:
@@ -28,7 +28,7 @@ def test_project_mode_with_explicit_flow_file(
         mock_run_flow.assert_called_once_with("test_flow.yml", None)
 
 
-@patch("odoo_data_flow.__main__.run_project_flow")
+@patch("fluvo.__main__.run_project_flow")
 def test_project_mode_with_default_flow_file(
     mock_run_flow: MagicMock, runner: CliRunner
 ) -> None:
@@ -67,7 +67,7 @@ def test_import_fails_without_required_options(runner: CliRunner) -> None:
     assert "--connection-file" in result.output
 
 
-@patch("odoo_data_flow.__main__.run_import")
+@patch("fluvo.__main__.run_import")
 def test_import_command_calls_runner(
     mock_run_import: MagicMock, runner: CliRunner
 ) -> None:
@@ -95,7 +95,7 @@ def test_import_command_calls_runner(
         assert call_kwargs["model"] == "res.partner"
 
 
-@patch("odoo_data_flow.__main__.run_export")
+@patch("fluvo.__main__.run_export")
 def test_export_command_calls_runner(
     mock_run_export: MagicMock, runner: CliRunner
 ) -> None:
@@ -123,7 +123,7 @@ def test_export_command_calls_runner(
         assert call_kwargs["config"] == "conn.conf"
 
 
-@patch("odoo_data_flow.__main__.run_module_installation")
+@patch("fluvo.__main__.run_module_installation")
 def test_module_install_command(mock_run_install: MagicMock, runner: CliRunner) -> None:
     """Tests the 'module install' command with the new connection file."""
     with runner.isolated_filesystem():
@@ -146,7 +146,7 @@ def test_module_install_command(mock_run_install: MagicMock, runner: CliRunner) 
         )
 
 
-@patch("odoo_data_flow.__main__.run_write")
+@patch("fluvo.__main__.run_write")
 def test_write_command_calls_runner(
     mock_run_write: MagicMock, runner: CliRunner
 ) -> None:
@@ -172,7 +172,7 @@ def test_write_command_calls_runner(
         assert call_kwargs["config"] == "conn.conf"
 
 
-@patch("odoo_data_flow.__main__.run_path_to_image")
+@patch("fluvo.__main__.run_path_to_image")
 def test_path_to_image_command_calls_runner(
     mock_run_path_to_image: MagicMock, runner: CliRunner
 ) -> None:
@@ -184,7 +184,7 @@ def test_path_to_image_command_calls_runner(
     mock_run_path_to_image.assert_called_once()
 
 
-@patch("odoo_data_flow.__main__.run_url_to_image")
+@patch("fluvo.__main__.run_url_to_image")
 def test_url_to_image_command_calls_runner(
     mock_run_url_to_image: MagicMock, runner: CliRunner
 ) -> None:
@@ -196,7 +196,7 @@ def test_url_to_image_command_calls_runner(
     mock_run_url_to_image.assert_called_once()
 
 
-@patch("odoo_data_flow.__main__.run_migration")
+@patch("fluvo.__main__.run_migration")
 def test_migrate_command_bad_mapping_syntax(
     mock_run_migration: MagicMock, runner: CliRunner
 ) -> None:
@@ -222,7 +222,7 @@ def test_migrate_command_bad_mapping_syntax(
     mock_run_migration.assert_not_called()
 
 
-@patch("odoo_data_flow.__main__.run_migration")
+@patch("fluvo.__main__.run_migration")
 def test_migrate_command_mapping_not_a_dict(
     mock_run_migration: MagicMock, runner: CliRunner
 ) -> None:
@@ -248,7 +248,7 @@ def test_migrate_command_mapping_not_a_dict(
     mock_run_migration.assert_not_called()
 
 
-@patch("odoo_data_flow.__main__.run_invoice_v9_workflow")
+@patch("fluvo.__main__.run_invoice_v9_workflow")
 def test_workflow_command_calls_runner(
     mock_run_workflow: MagicMock, runner: CliRunner
 ) -> None:
@@ -279,7 +279,7 @@ def test_workflow_command_calls_runner(
         assert call_kwargs["config"] == "my.conf"
 
 
-@patch("odoo_data_flow.__main__.run_update_module_list")
+@patch("fluvo.__main__.run_update_module_list")
 def test_module_update_list_command(
     mock_run_update: MagicMock, runner: CliRunner
 ) -> None:
@@ -294,7 +294,7 @@ def test_module_update_list_command(
         mock_run_update.assert_called_once_with(config="c.conf")
 
 
-@patch("odoo_data_flow.__main__.run_module_uninstallation")
+@patch("fluvo.__main__.run_module_uninstallation")
 def test_module_uninstall_command(
     mock_run_uninstall: MagicMock, runner: CliRunner
 ) -> None:
@@ -319,7 +319,7 @@ def test_module_uninstall_command(
         )
 
 
-@patch("odoo_data_flow.__main__.run_language_installation")
+@patch("fluvo.__main__.run_language_installation")
 def test_module_install_languages_command(
     mock_run_install: MagicMock, runner: CliRunner
 ) -> None:
@@ -347,8 +347,8 @@ def test_module_install_languages_command(
 # --- All-Companies Flag Tests ---
 
 
-@patch("odoo_data_flow.__main__.run_import")
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.__main__.run_import")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_all_companies_flag_sets_context(
     mock_get_conn: MagicMock, mock_run_import: MagicMock, runner: CliRunner
 ) -> None:
@@ -384,8 +384,8 @@ def test_all_companies_flag_sets_context(
         assert call_kwargs["context"]["allowed_company_ids"] == [1, 2, 3]
 
 
-@patch("odoo_data_flow.__main__.run_import")
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.__main__.run_import")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_all_companies_flag_handles_empty_companies(
     mock_get_conn: MagicMock, mock_run_import: MagicMock, runner: CliRunner
 ) -> None:
@@ -419,8 +419,8 @@ def test_all_companies_flag_handles_empty_companies(
         assert "No company access found" in result.output
 
 
-@patch("odoo_data_flow.__main__.run_import")
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.__main__.run_import")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_all_companies_flag_handles_connection_error(
     mock_get_conn: MagicMock, mock_run_import: MagicMock, runner: CliRunner
 ) -> None:
@@ -449,7 +449,7 @@ def test_all_companies_flag_handles_connection_error(
         assert "Failed to fetch user companies" in result.output
 
 
-@patch("odoo_data_flow.__main__.run_import")
+@patch("fluvo.__main__.run_import")
 def test_company_id_flag_sets_context(
     mock_run_import: MagicMock, runner: CliRunner
 ) -> None:
@@ -479,8 +479,8 @@ def test_company_id_flag_sets_context(
         assert call_kwargs["context"]["allowed_company_ids"] == [5]
 
 
-@patch("odoo_data_flow.__main__.run_export")
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.__main__.run_export")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_export_all_companies_flag_sets_context_and_domain(
     mock_get_conn: MagicMock, mock_run_export: MagicMock, runner: CliRunner
 ) -> None:
@@ -531,8 +531,8 @@ def test_export_all_companies_flag_sets_context_and_domain(
         assert call_kwargs["domain"] == expected_domain
 
 
-@patch("odoo_data_flow.__main__.run_export")
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.__main__.run_export")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_export_all_companies_flag_handles_empty_companies(
     mock_get_conn: MagicMock, mock_run_export: MagicMock, runner: CliRunner
 ) -> None:
@@ -568,8 +568,8 @@ def test_export_all_companies_flag_handles_empty_companies(
         assert "No company access found" in result.output
 
 
-@patch("odoo_data_flow.__main__.run_export")
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.__main__.run_export")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_export_all_companies_flag_handles_connection_error(
     mock_get_conn: MagicMock, mock_run_export: MagicMock, runner: CliRunner
 ) -> None:
@@ -600,8 +600,8 @@ def test_export_all_companies_flag_handles_connection_error(
         assert "Failed to fetch user companies" in result.output
 
 
-@patch("odoo_data_flow.__main__.run_export")
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.__main__.run_export")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_export_all_companies_flag_combines_with_existing_domain(
     mock_get_conn: MagicMock, mock_run_export: MagicMock, runner: CliRunner
 ) -> None:
@@ -652,8 +652,8 @@ def test_export_all_companies_flag_combines_with_existing_domain(
         assert call_kwargs["domain"] == expected_domain
 
 
-@patch("odoo_data_flow.__main__.run_export")
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.__main__.run_export")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_export_sudo_flag_disables_and_reenables_rules(
     mock_get_conn: MagicMock, mock_run_export: MagicMock, runner: CliRunner
 ) -> None:
@@ -702,8 +702,8 @@ def test_export_sudo_flag_disables_and_reenables_rules(
         mock_run_export.assert_called_once()
 
 
-@patch("odoo_data_flow.__main__.run_import")
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.__main__.run_import")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_import_sudo_flag_disables_and_reenables_rules(
     mock_get_conn: MagicMock, mock_run_import: MagicMock, runner: CliRunner
 ) -> None:
@@ -752,8 +752,8 @@ def test_import_sudo_flag_disables_and_reenables_rules(
         mock_run_import.assert_called_once()
 
 
-@patch("odoo_data_flow.__main__._execute_post_action")
-@patch("odoo_data_flow.__main__.run_import")
+@patch("fluvo.__main__._execute_post_action")
+@patch("fluvo.__main__.run_import")
 def test_import_post_action_called_on_success(
     mock_run_import: MagicMock,
     mock_post_action: MagicMock,
@@ -791,8 +791,8 @@ def test_import_post_action_called_on_success(
         assert call_args[0][3] == {"ext_id_1": 1, "ext_id_2": 2}  # id_map
 
 
-@patch("odoo_data_flow.__main__._execute_post_action")
-@patch("odoo_data_flow.__main__.run_import")
+@patch("fluvo.__main__._execute_post_action")
+@patch("fluvo.__main__.run_import")
 def test_import_post_action_not_called_on_failure(
     mock_run_import: MagicMock,
     mock_post_action: MagicMock,
@@ -825,10 +825,10 @@ def test_import_post_action_not_called_on_failure(
         mock_post_action.assert_not_called()
 
 
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_execute_post_action_calls_method(mock_get_conn: MagicMock) -> None:
     """Tests that _execute_post_action calls the correct method on records."""
-    from odoo_data_flow.__main__ import _execute_post_action
+    from fluvo.__main__ import _execute_post_action
 
     mock_conn = MagicMock()
     mock_model = MagicMock()
@@ -853,10 +853,10 @@ def test_execute_post_action_calls_method(mock_get_conn: MagicMock) -> None:
     assert set(call_args[0][0]) == {10, 20, 30}
 
 
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_execute_post_action_handles_empty_id_map(mock_get_conn: MagicMock) -> None:
     """Tests that _execute_post_action handles empty id_map gracefully."""
-    from odoo_data_flow.__main__ import _execute_post_action
+    from fluvo.__main__ import _execute_post_action
 
     _execute_post_action(
         config="conn.conf",
@@ -869,10 +869,10 @@ def test_execute_post_action_handles_empty_id_map(mock_get_conn: MagicMock) -> N
     mock_get_conn.assert_not_called()
 
 
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_execute_post_action_handles_missing_model(mock_get_conn: MagicMock) -> None:
     """Tests that _execute_post_action handles missing model gracefully."""
-    from odoo_data_flow.__main__ import _execute_post_action
+    from fluvo.__main__ import _execute_post_action
 
     _execute_post_action(
         config="conn.conf",
@@ -885,10 +885,10 @@ def test_execute_post_action_handles_missing_model(mock_get_conn: MagicMock) -> 
     mock_get_conn.assert_not_called()
 
 
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_execute_post_action_returns_true_on_success(mock_get_conn: MagicMock) -> None:
     """Tests that _execute_post_action returns True on success."""
-    from odoo_data_flow.__main__ import _execute_post_action
+    from fluvo.__main__ import _execute_post_action
 
     mock_conn = MagicMock()
     mock_model = MagicMock()
@@ -907,7 +907,7 @@ def test_execute_post_action_returns_true_on_success(mock_get_conn: MagicMock) -
     assert result is True
 
 
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_execute_post_action_returns_true_on_timeout(mock_get_conn: MagicMock) -> None:
     """Tests that _execute_post_action returns True on timeout.
 
@@ -915,7 +915,7 @@ def test_execute_post_action_returns_true_on_timeout(mock_get_conn: MagicMock) -
     """
     import socket
 
-    from odoo_data_flow.__main__ import _execute_post_action
+    from fluvo.__main__ import _execute_post_action
 
     mock_conn = MagicMock()
     mock_model = MagicMock()
@@ -937,12 +937,12 @@ def test_execute_post_action_returns_true_on_timeout(mock_get_conn: MagicMock) -
     assert result is True
 
 
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_execute_post_action_returns_false_on_other_error(
     mock_get_conn: MagicMock,
 ) -> None:
     """Tests that _execute_post_action returns False on non-timeout errors."""
-    from odoo_data_flow.__main__ import _execute_post_action
+    from fluvo.__main__ import _execute_post_action
 
     mock_conn = MagicMock()
     mock_model = MagicMock()
@@ -961,10 +961,10 @@ def test_execute_post_action_returns_false_on_other_error(
     assert result is False
 
 
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_get_product_ids_from_quants(mock_get_conn: MagicMock) -> None:
     """Tests that _get_product_ids_from_quants extracts product IDs correctly."""
-    from odoo_data_flow.__main__ import _get_product_ids_from_quants
+    from fluvo.__main__ import _get_product_ids_from_quants
 
     mock_conn = MagicMock()
     mock_quant_model = MagicMock()
@@ -982,10 +982,10 @@ def test_get_product_ids_from_quants(mock_get_conn: MagicMock) -> None:
     mock_quant_model.read.assert_called_once_with([1, 2, 3], ["product_id"])
 
 
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_get_product_ids_from_quants_empty_input(mock_get_conn: MagicMock) -> None:
     """Tests that _get_product_ids_from_quants handles empty input."""
-    from odoo_data_flow.__main__ import _get_product_ids_from_quants
+    from fluvo.__main__ import _get_product_ids_from_quants
 
     product_ids = _get_product_ids_from_quants("conn.conf", [])
 
@@ -993,10 +993,10 @@ def test_get_product_ids_from_quants_empty_input(mock_get_conn: MagicMock) -> No
     mock_get_conn.assert_not_called()
 
 
-@patch("odoo_data_flow.lib.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.conf_lib.get_connection_from_config")
 def test_update_inventory_move_dates(mock_get_conn: MagicMock) -> None:
     """Tests that _update_inventory_move_dates updates move dates correctly."""
-    from odoo_data_flow.__main__ import _update_inventory_move_dates
+    from fluvo.__main__ import _update_inventory_move_dates
 
     mock_conn = MagicMock()
     mock_location_model = MagicMock()
@@ -1039,10 +1039,10 @@ def test_update_inventory_move_dates(mock_get_conn: MagicMock) -> None:
     assert write_args[0][1] == {"date": "2026-01-01 00:00:00"}
 
 
-@patch("odoo_data_flow.__main__._update_inventory_move_dates")
-@patch("odoo_data_flow.__main__._get_product_ids_from_quants")
-@patch("odoo_data_flow.__main__._execute_post_action")
-@patch("odoo_data_flow.__main__.run_import")
+@patch("fluvo.__main__._update_inventory_move_dates")
+@patch("fluvo.__main__._get_product_ids_from_quants")
+@patch("fluvo.__main__._execute_post_action")
+@patch("fluvo.__main__.run_import")
 def test_import_move_date_triggers_update(
     mock_run_import: MagicMock,
     mock_post_action: MagicMock,
@@ -1093,10 +1093,10 @@ def test_import_move_date_triggers_update(
         assert update_args[0][3] == [101, 102]  # product_ids
 
 
-@patch("odoo_data_flow.__main__._update_inventory_move_dates")
-@patch("odoo_data_flow.__main__._get_product_ids_from_quants")
-@patch("odoo_data_flow.__main__._execute_post_action")
-@patch("odoo_data_flow.__main__.run_import")
+@patch("fluvo.__main__._update_inventory_move_dates")
+@patch("fluvo.__main__._get_product_ids_from_quants")
+@patch("fluvo.__main__._execute_post_action")
+@patch("fluvo.__main__.run_import")
 def test_import_move_date_not_triggered_without_post_action(
     mock_run_import: MagicMock,
     mock_post_action: MagicMock,
@@ -1134,10 +1134,10 @@ def test_import_move_date_not_triggered_without_post_action(
         mock_update_dates.assert_not_called()
 
 
-@patch("odoo_data_flow.__main__._update_inventory_move_dates")
-@patch("odoo_data_flow.__main__._get_product_ids_from_quants")
-@patch("odoo_data_flow.__main__._execute_post_action")
-@patch("odoo_data_flow.__main__.run_import")
+@patch("fluvo.__main__._update_inventory_move_dates")
+@patch("fluvo.__main__._get_product_ids_from_quants")
+@patch("fluvo.__main__._execute_post_action")
+@patch("fluvo.__main__.run_import")
 def test_import_move_date_triggered_even_on_timeout(
     mock_run_import: MagicMock,
     mock_post_action: MagicMock,
@@ -1177,10 +1177,10 @@ def test_import_move_date_triggered_even_on_timeout(
         mock_update_dates.assert_called_once()
 
 
-@patch("odoo_data_flow.__main__._update_inventory_move_dates")
-@patch("odoo_data_flow.__main__._get_product_ids_from_quants")
-@patch("odoo_data_flow.__main__._execute_post_action")
-@patch("odoo_data_flow.__main__.run_import")
+@patch("fluvo.__main__._update_inventory_move_dates")
+@patch("fluvo.__main__._get_product_ids_from_quants")
+@patch("fluvo.__main__._execute_post_action")
+@patch("fluvo.__main__.run_import")
 def test_import_move_date_not_triggered_when_post_action_fails(
     mock_run_import: MagicMock,
     mock_post_action: MagicMock,
@@ -1221,10 +1221,10 @@ def test_import_move_date_not_triggered_when_post_action_fails(
         mock_update_dates.assert_not_called()
 
 
-@patch("odoo_data_flow.__main__._update_inventory_move_dates")
-@patch("odoo_data_flow.__main__._get_product_ids_from_quants")
-@patch("odoo_data_flow.__main__._execute_post_action")
-@patch("odoo_data_flow.__main__.run_import")
+@patch("fluvo.__main__._update_inventory_move_dates")
+@patch("fluvo.__main__._get_product_ids_from_quants")
+@patch("fluvo.__main__._execute_post_action")
+@patch("fluvo.__main__.run_import")
 def test_import_move_date_not_triggered_when_no_products_extracted(
     mock_run_import: MagicMock,
     mock_post_action: MagicMock,

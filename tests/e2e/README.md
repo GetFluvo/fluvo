@@ -1,6 +1,6 @@
 # End-to-end data-integrity suite
 
-These tests exercise odoo-data-flow against a **real Odoo** to prove the thing that
+These tests exercise fluvo against a **real Odoo** to prove the thing that
 unit tests can't: that no record is ever silently lost, mis-related, or
 type-mangled during an import/export. They reproduce the failure classes we hit on
 real migrations.
@@ -12,13 +12,13 @@ real migrations.
 nox -s e2e
 
 # Directly, keeping the stack up between runs for fast iteration:
-ODF_E2E_SCALE=200 pytest tests/e2e -o addopts= -m "not large" --keep-stack
+FLUVO_E2E_SCALE=200 pytest tests/e2e -o addopts= -m "not large" --keep-stack
 
 # Large stress tier (opt-in):
-ODF_E2E_SCALE=100000 pytest tests/e2e -o addopts= -m large
+FLUVO_E2E_SCALE=100000 pytest tests/e2e -o addopts= -m large
 
 # Against an existing Odoo (e.g. a doodba stack) instead of containers:
-ODF_E2E_ODOO_URL=http://localhost:8069 ODF_E2E_DB=mydb pytest tests/e2e -o addopts=
+FLUVO_E2E_ODOO_URL=http://localhost:8069 FLUVO_E2E_DB=mydb pytest tests/e2e -o addopts=
 ```
 
 The suite is excluded from the default `pytest` / `nox -s tests` run.
@@ -28,12 +28,12 @@ The suite is excluded from the default `pytest` / `nox -s tests` run.
 - **Fresh target DB per run.** Assertions count records by a per-test name prefix and
   expect exact totals, so a clean database is assumed (CI provisions one each run).
   For local `--keep-stack` iteration, reset between full runs with a
-  `DROP DATABASE ... WITH (FORCE)` + re-init, or use a new `ODF_E2E_DB`.
-- `ODF_E2E_ODOO_URL` — use an external Odoo; skips container management.
-- `ODF_E2E_ODOO_VERSION` (default `18.0`), `ODF_E2E_ODOO_PORT` (default `8069`).
-- `ODF_E2E_DB` (default `odf_e2e_target`), `ODF_E2E_ADMIN_PWD` (default `admin`),
-  `ODF_E2E_PROTOCOL` (default `jsonrpc`).
-- `ODF_E2E_SCALE` — rows per scenario (default 200 local; CI 5000; large 100000+).
+  `DROP DATABASE ... WITH (FORCE)` + re-init, or use a new `FLUVO_E2E_DB`.
+- `FLUVO_E2E_ODOO_URL` — use an external Odoo; skips container management.
+- `FLUVO_E2E_ODOO_VERSION` (default `18.0`), `FLUVO_E2E_ODOO_PORT` (default `8069`).
+- `FLUVO_E2E_DB` (default `fluvo_e2e_target`), `FLUVO_E2E_ADMIN_PWD` (default `admin`),
+  `FLUVO_E2E_PROTOCOL` (default `jsonrpc`).
+- `FLUVO_E2E_SCALE` — rows per scenario (default 200 local; CI 5000; large 100000+).
 
 ## Layout
 

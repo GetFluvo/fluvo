@@ -1,6 +1,6 @@
 # Core Concepts
 
-The `odoo-data-flow` library is built on a few key concepts that enable robust and manageable data migrations. Understanding these will help you get the most out of the tool for both importing and exporting data.
+The `fluvo` library is built on a few key concepts that enable robust and manageable data migrations. Understanding these will help you get the most out of the tool for both importing and exporting data.
 
 ## The Two-Phase Import Workflow
 
@@ -28,7 +28,7 @@ flowchart TD
     style D fill:#FFF9C4
 ```
 
-2. **Load Phase**: This phase focuses purely on data import. The generated shell script or the direct `odoo-data-flow import` command takes the clean CSV files and loads them into Odoo.
+2. **Load Phase**: This phase focuses purely on data import. The generated shell script or the direct `fluvo import` command takes the clean CSV files and loads them into Odoo.
 
 
 ```{mermaid}
@@ -62,7 +62,7 @@ This separation provides several key advantages:
 
 ## The Import Strategy: One File, One Model
 
-It is important to understand that the `odoo-data-flow import` command is designed to load **one data file into one specific Odoo model** at a time. This means that a complete data migration (e.g., for partners, products, and sales orders) will require you to run the transform and load process several times with different data files and different target models.
+It is important to understand that the `fluvo import` command is designed to load **one data file into one specific Odoo model** at a time. This means that a complete data migration (e.g., for partners, products, and sales orders) will require you to run the transform and load process several times with different data files and different target models.
 
 This deliberate design ensures clarity and respects Odoo's internal logic. Data is not inserted directly into the database; instead, it is loaded by calling Odoo's standard `load` method. This ensures that all the business logic, validations, and automations associated with each model are triggered correctly, just as they would be in the Odoo user interface.
 
@@ -88,18 +88,18 @@ flowchart TD
  subgraph subGraph0["1 Environment Setup"]
     direction LR
         B[("Odoo Database")]
-        A{"odoo-data-flow module<br>update-list / install"}
+        A{"fluvo module<br>update-list / install"}
   end
  subgraph subGraph1["2 Data Migration"]
     direction LR
         D{"Transform Script"}
         C["Raw Source Data"]
         E["Cleaned / Transformed Data"]
-        F{"odoo-data-flow import"}
+        F{"fluvo import"}
   end
  subgraph subGraph2["3 Post-Import Workflow"]
     direction LR
-        G{"odoo-data-flow workflow<br>(e.g., invoice-v9)"}
+        G{"fluvo workflow<br>(e.g., invoice-v9)"}
   end
     A L_A_B_0@--> B
     C --> D
@@ -174,10 +174,10 @@ config:
   theme: redux
 ---
 flowchart TD
-    A["res_partner.csv<br>(100 records)"] --> B{"First Pass<br>odoo-data-flow import"}
+    A["res_partner.csv<br>(100 records)"] --> B{"First Pass<br>fluvo import"}
     B -- 95 successful records --> C["Odoo Database"]
     B -- 5 failed records --> D["res_partner_fail.csv<br>(5 records)"]
-    D --> E{"Second Pass<br>odoo-data-flow import --fail"}
+    D --> E{"Second Pass<br>fluvo import --fail"}
     E -- 3 recovered records --> C
     E -- 2 true errors --> F["fa:fa-user-edit res_partner_YYMMDD_failed.csv<br>(2 records to fix)"]
 
@@ -208,12 +208,12 @@ This automatic behavior means you no longer need to manually use `--ignore` or s
 
 ### Tier 3: Internal Caching for Speed
 
-To further accelerate the import process, `odoo-data-flow` implements an internal caching mechanism. It automatically caches metadata fetched from Odoo, such as:
+To further accelerate the import process, `fluvo` implements an internal caching mechanism. It automatically caches metadata fetched from Odoo, such as:
 
 - Field definitions for models
 - `ir.model.data` records (external IDs)
 
-This cache is stored in the `.odf_cache` directory in your project root. On subsequent runs, the importer uses the cached data instead of repeatedly querying the Odoo server, leading to a significant speed-up, especially in large projects with many files or complex models. The cache is intelligently invalidated when the corresponding model in Odoo changes.
+This cache is stored in the `.fluvo_cache` directory in your project root. On subsequent runs, the importer uses the cached data instead of repeatedly querying the Odoo server, leading to a significant speed-up, especially in large projects with many files or complex models. The cache is intelligently invalidated when the corresponding model in Odoo changes.
 
 
 ## The Export Concept
@@ -228,7 +228,7 @@ config:
   theme: redux
 ---
 flowchart TD
-    ExportA["Odoo Instance"] L_ExportA_ExportB_0@--> ExportB{"odoo-data-flow export"}
+    ExportA["Odoo Instance"] L_ExportA_ExportB_0@--> ExportB{"fluvo export"}
     ExportC["Configuration<br>(CLI Options)"] --> ExportB
     ExportB L_ExportB_ExportD_0@--> ExportD["Output File<br>(e.g., exported_partners.csv)"]
     ExportA@{ shape: cyl}

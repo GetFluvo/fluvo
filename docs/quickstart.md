@@ -4,7 +4,7 @@
 This guide demonstrates a realistic and robust workflow for importing data. Instead of a single script that does everything, we will separate the process into two distinct phases, which is highly recommended for any serious data migration:
 
 1.  **Transform Phase**: A Python script reads a raw source file, cleans the data using the library's powerful **mappers**, and produces a clean CSV file ready for Odoo. It also generates a shell script for the next phase.
-2.  **Load Phase**: The generated shell script uses the new `odoo-data-flow` command-line tool to efficiently load the clean CSV data into Odoo.
+2.  **Load Phase**: The generated shell script uses the new `fluvo` command-line tool to efficiently load the clean CSV data into Odoo.
 
 This separation makes the process more manageable, easier to debug, and allows you to reuse the transformed data for multiple Odoo instances (e.g., staging and production).
 
@@ -66,8 +66,8 @@ Create the file `transform.py`:
 
 ```{code-block} python
 :caption: transform.py
-from odoo_data_flow.lib.transform import Processor
-from odoo_data_flow.lib import mapper
+from fluvo.lib.transform import Processor
+from fluvo.lib import mapper
 
 # 1. Define the mapping rules in a dictionary.
 res_partner_mapping = {
@@ -125,15 +125,15 @@ example_client_C002,"Jane Smith",jane.s@test.com,False
 ```
 
 **File: `load.sh` (The Loading Script)**
-This file now contains commands that use the new, clean `odoo-data-flow` command-line interface.
+This file now contains commands that use the new, clean `fluvo` command-line interface.
 
 ```{code-block} bash
 :caption: load.sh
 #!/bin/bash
 # Pass 1: Runs the main import using the smart engine.
-odoo-data-flow import --config conf/connection.conf --file data/res_partner.csv --model res.partner --context "{'tracking_disable': True}"
+fluvo import --config conf/connection.conf --file data/res_partner.csv --model res.partner --context "{'tracking_disable': True}"
 # Pass 2: If the first pass created a _fail.csv, this retries those records.
-odoo-data-flow import --config conf/connection.conf --fail --file data/res_partner.csv --model res.partner --context "{'tracking_disable': True}"
+fluvo import --config conf/connection.conf --fail --file data/res_partner.csv --model res.partner --context "{'tracking_disable': True}"
 ```
 
 ## Step 7: Load the Data into Odoo
@@ -144,7 +144,7 @@ Finally, execute the generated shell script to upload the data.
 bash load.sh
 ```
 
-The `odoo-data-flow` tool will connect to your database and execute the first command.
+The `fluvo` tool will connect to your database and execute the first command.
 
 Because the import engine is "smart," it automatically detects relational fields to select the most performant import strategy and uses its `load` -> `create` fallback to rescue good records if any batch fails, ensuring the highest possible success rate.
 
@@ -152,4 +152,4 @@ The second command with the `--fail` flag will then automatically process any re
 
 Log in to your Odoo instance and navigate to the **Contacts** app to see your newly imported contacts.
 
-Congratulations! You have successfully completed a full transform and load workflow with the new `odoo-data-flow` tool.
+Congratulations! You have successfully completed a full transform and load workflow with the new `fluvo` tool.

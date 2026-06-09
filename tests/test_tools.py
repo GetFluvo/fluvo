@@ -1,6 +1,6 @@
 """Tests for the tools module."""
 
-from odoo_data_flow.lib.internal.tools import (
+from fluvo.lib.internal.tools import (
     AttributeLineDict,
     batch,
     to_m2m,

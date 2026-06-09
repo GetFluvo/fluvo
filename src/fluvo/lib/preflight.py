@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm
 
-from odoo_data_flow.enums import PreflightMode
+from fluvo.enums import PreflightMode
 
 from ..logging_config import log
 from . import cache, conf_lib, sort
@@ -439,8 +439,8 @@ def _validate_header(  # noqa: C901
             "  1. Import products WITHOUT these fields (or --ignore them)\n"
             "  2. Import these fields separately per company using --company-id X\n\n"
             "Example:\n"
-            "  odoo-data-flow import --file costs.csv --company-id 1\n"
-            "  odoo-data-flow import --file costs.csv --company-id 2"
+            "  fluvo import --file costs.csv --company-id 1\n"
+            "  fluvo import --file costs.csv --company-id 2"
         )
         _show_warning_panel("Company-Dependent Fields Detected", warning_message)
 

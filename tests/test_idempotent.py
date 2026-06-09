@@ -3,7 +3,7 @@
 from typing import Any
 from unittest.mock import MagicMock
 
-from odoo_data_flow.lib import idempotent
+from fluvo.lib import idempotent
 
 
 class TestNormalizeValue:

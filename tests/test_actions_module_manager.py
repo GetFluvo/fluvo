@@ -2,14 +2,14 @@
 
 from unittest.mock import MagicMock, patch
 
-from odoo_data_flow.lib.actions.module_manager import (
+from fluvo.lib.actions.module_manager import (
     run_module_installation,
     run_module_uninstallation,
     run_update_module_list,
 )
 
 
-@patch("odoo_data_flow.lib.actions.module_manager.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")
 def test_run_update_module_list(mock_get_connection: MagicMock) -> None:
     """Test the update module list action.
 
@@ -32,8 +32,8 @@ def test_run_update_module_list(mock_get_connection: MagicMock) -> None:
     mock_module_obj.search_count.assert_called_once_with([])
 
 
-@patch("odoo_data_flow.lib.actions.module_manager.log.error")
-@patch("odoo_data_flow.lib.actions.module_manager.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.actions.module_manager.log.error")
+@patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")
 def test_run_update_module_list_connection_error(
     mock_get_connection: MagicMock, mock_log_error: MagicMock
 ) -> None:
@@ -45,8 +45,8 @@ def test_run_update_module_list_connection_error(
     assert "Failed to connect to Odoo" in mock_log_error.call_args[0][0]
 
 
-@patch("odoo_data_flow.lib.actions.module_manager.log.error")
-@patch("odoo_data_flow.lib.actions.module_manager.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.actions.module_manager.log.error")
+@patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")
 def test_run_update_module_list_api_error(
     mock_get_connection: MagicMock, mock_log_error: MagicMock
 ) -> None:
@@ -65,7 +65,7 @@ def test_run_update_module_list_api_error(
     )
 
 
-@patch("odoo_data_flow.lib.actions.module_manager.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")
 def test_run_module_installation_install_and_upgrade(
     mock_get_connection: MagicMock,
 ) -> None:
@@ -99,7 +99,7 @@ def test_run_module_installation_install_and_upgrade(
     mock_module_obj.button_immediate_upgrade.assert_called_once_with([2, 3])
 
 
-@patch("odoo_data_flow.lib.actions.module_manager.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")
 def test_run_module_installation_install_only(mock_get_connection: MagicMock) -> None:
     """Tests the workflow when only installations are needed."""
     mock_module_obj = MagicMock()
@@ -117,7 +117,7 @@ def test_run_module_installation_install_only(mock_get_connection: MagicMock) ->
     mock_module_obj.button_immediate_upgrade.assert_not_called()
 
 
-@patch("odoo_data_flow.lib.actions.module_manager.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")
 def test_run_module_installation_upgrade_only(mock_get_connection: MagicMock) -> None:
     """Tests the workflow when only upgrades are needed."""
     mock_module_obj = MagicMock()
@@ -138,8 +138,8 @@ def test_run_module_installation_upgrade_only(mock_get_connection: MagicMock) ->
     mock_module_obj.button_immediate_upgrade.assert_called_once_with([2, 3])
 
 
-@patch("odoo_data_flow.lib.actions.module_manager.log.error")
-@patch("odoo_data_flow.lib.actions.module_manager.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.actions.module_manager.log.error")
+@patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")
 def test_run_module_installation_api_error(
     mock_get_connection: MagicMock, mock_log_error: MagicMock
 ) -> None:
@@ -160,8 +160,8 @@ def test_run_module_installation_api_error(
     assert "An error occurred during module operation" in mock_log_error.call_args[0][0]
 
 
-@patch("odoo_data_flow.lib.actions.module_manager.log.error")
-@patch("odoo_data_flow.lib.actions.module_manager.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.actions.module_manager.log.error")
+@patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")
 def test_run_module_installation_upgrade_api_error(
     mock_get_connection: MagicMock, mock_log_error: MagicMock
 ) -> None:
@@ -182,8 +182,8 @@ def test_run_module_installation_upgrade_api_error(
     assert "An error occurred during module operation" in mock_log_error.call_args[0][0]
 
 
-@patch("odoo_data_flow.lib.actions.module_manager.log.warning")
-@patch("odoo_data_flow.lib.actions.module_manager.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.actions.module_manager.log.warning")
+@patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")
 def test_run_module_installation_not_found(
     mock_get_connection: MagicMock, mock_log_warning: MagicMock
 ) -> None:
@@ -201,8 +201,8 @@ def test_run_module_installation_not_found(
     )
 
 
-@patch("odoo_data_flow.lib.actions.module_manager.log.error")
-@patch("odoo_data_flow.lib.actions.module_manager.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.actions.module_manager.log.error")
+@patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")
 def test_run_module_installation_connection_error(
     mock_get_connection: MagicMock, mock_log_error: MagicMock
 ) -> None:
@@ -213,7 +213,7 @@ def test_run_module_installation_connection_error(
     assert "Failed to connect to Odoo" in mock_log_error.call_args[0][0]
 
 
-@patch("odoo_data_flow.lib.actions.module_manager.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")
 def test_run_module_uninstallation(mock_get_connection: MagicMock) -> None:
     """Tests that the uninstallation workflow correctly finds and uninstalls modules."""
     mock_module_obj = MagicMock()
@@ -232,8 +232,8 @@ def test_run_module_uninstallation(mock_get_connection: MagicMock) -> None:
     mock_module_obj.button_immediate_uninstall.assert_called_once_with([10, 20])
 
 
-@patch("odoo_data_flow.lib.actions.module_manager.log.warning")
-@patch("odoo_data_flow.lib.actions.module_manager.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.actions.module_manager.log.warning")
+@patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")
 def test_run_module_uninstallation_not_found(
     mock_get_connection: MagicMock, mock_log_warning: MagicMock
 ) -> None:
@@ -252,8 +252,8 @@ def test_run_module_uninstallation_not_found(
     mock_module_obj.button_immediate_uninstall.assert_not_called()
 
 
-@patch("odoo_data_flow.lib.actions.module_manager.log.error")
-@patch("odoo_data_flow.lib.actions.module_manager.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.actions.module_manager.log.error")
+@patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")
 def test_run_module_uninstallation_api_error(
     mock_get_connection: MagicMock, mock_log_error: MagicMock
 ) -> None:
@@ -277,8 +277,8 @@ def test_run_module_uninstallation_api_error(
     )
 
 
-@patch("odoo_data_flow.lib.actions.module_manager.log.error")
-@patch("odoo_data_flow.lib.actions.module_manager.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.actions.module_manager.log.error")
+@patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")
 def test_run_module_uninstallation_connection_error(
     mock_get_connection: MagicMock, mock_log_error: MagicMock
 ) -> None:

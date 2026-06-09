@@ -1,16 +1,16 @@
-"""Fixtures for the odoo-data-flow e2e integrity suite.
+"""Fixtures for the fluvo e2e integrity suite.
 
 By default this manages a disposable Postgres+Odoo stack via compose
-(``tests/e2e/docker-compose.yml``). Point ``ODF_E2E_ODOO_URL`` at an existing Odoo
+(``tests/e2e/docker-compose.yml``). Point ``FLUVO_E2E_ODOO_URL`` at an existing Odoo
 (e.g. a doodba stack) to run the same scenarios against a realistic install instead.
 
 Environment knobs:
-    ODF_E2E_ODOO_URL      Use an external Odoo (``http://host:port``); skips containers.
-    ODF_E2E_ODOO_VERSION  Odoo image tag for the managed stack (default ``18.0``).
-    ODF_E2E_ODOO_PORT     Host port the managed Odoo is published on (default ``8069``).
-    ODF_E2E_DB            Target database name (default ``odf_e2e_target``).
-    ODF_E2E_ADMIN_PWD     Admin password / API key (default ``admin``).
-    ODF_E2E_PROTOCOL      Connection protocol (default ``jsonrpc``).
+    FLUVO_E2E_ODOO_URL      Use an external Odoo (``http://host:port``); skips containers.
+    FLUVO_E2E_ODOO_VERSION  Odoo image tag for the managed stack (default ``18.0``).
+    FLUVO_E2E_ODOO_PORT     Host port the managed Odoo is published on (default ``8069``).
+    FLUVO_E2E_DB            Target database name (default ``fluvo_e2e_target``).
+    FLUVO_E2E_ADMIN_PWD     Admin password / API key (default ``admin``).
+    FLUVO_E2E_PROTOCOL      Connection protocol (default ``jsonrpc``).
 """
 
 from __future__ import annotations
@@ -21,13 +21,13 @@ from urllib.parse import urlparse
 
 import pytest
 
-from odoo_data_flow.lib import conf_lib
+from fluvo.lib import conf_lib
 
 from . import _runtime
 
-DEFAULT_DB = os.environ.get("ODF_E2E_DB", "odf_e2e_target")
-ADMIN_PWD = os.environ.get("ODF_E2E_ADMIN_PWD", "admin")
-PROTOCOL = os.environ.get("ODF_E2E_PROTOCOL", "jsonrpc")
+DEFAULT_DB = os.environ.get("FLUVO_E2E_DB", "fluvo_e2e_target")
+ADMIN_PWD = os.environ.get("FLUVO_E2E_ADMIN_PWD", "admin")
+PROTOCOL = os.environ.get("FLUVO_E2E_PROTOCOL", "jsonrpc")
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -48,7 +48,7 @@ def odoo_endpoint(request: pytest.FixtureRequest) -> Iterator[dict[str, object]]
     Yields:
         Mapping with ``host`` and ``port`` of a ready Odoo server.
     """
-    external = os.environ.get("ODF_E2E_ODOO_URL")
+    external = os.environ.get("FLUVO_E2E_ODOO_URL")
     if external:
         parsed = urlparse(external)
         host = parsed.hostname or "localhost"
@@ -58,7 +58,7 @@ def odoo_endpoint(request: pytest.FixtureRequest) -> Iterator[dict[str, object]]
         return
 
     host = "localhost"
-    port = int(os.environ.get("ODF_E2E_ODOO_PORT", "8069"))
+    port = int(os.environ.get("FLUVO_E2E_ODOO_PORT", "8069"))
     _runtime.up()
     try:
         _runtime.wait_http_ready(host, port)
@@ -73,7 +73,7 @@ def target_db(odoo_endpoint: dict[str, object]) -> str:
     """Ensure a freshly-initialised target database exists; return its name.
 
     For a managed stack the database is created with ``base`` and no demo data.
-    For an external (doodba) Odoo the database named by ``ODF_E2E_DB`` is assumed
+    For an external (doodba) Odoo the database named by ``FLUVO_E2E_DB`` is assumed
     to already exist.
     """
     if not odoo_endpoint["managed"]:
@@ -110,6 +110,6 @@ def scale() -> int:
     """Row count for size-tiered scenarios.
 
     Default 200 keeps local iteration fast; CI sets ~5000; the ``large`` tier sets
-    ~100000+ via ``ODF_E2E_SCALE`` for stress runs.
+    ~100000+ via ``FLUVO_E2E_SCALE`` for stress runs.
     """
-    return int(os.environ.get("ODF_E2E_SCALE", "200"))
+    return int(os.environ.get("FLUVO_E2E_SCALE", "200"))

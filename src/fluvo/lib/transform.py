@@ -381,7 +381,7 @@ class Processor:
         Args:
             mapping: The mapping dictionary defining the transformation rules.
             filename_out: The path where the output CSV file will be saved.
-            params: A dictionary of parameters for the `odoo-data-flow import`
+            params: A dictionary of parameters for the `fluvo import`
                 command, used when generating the load script.
             t: The type of collection to return data in ('list' or 'set').
             null_values: A list of values to be treated as empty.
@@ -451,7 +451,7 @@ class Processor:
             id_column: The column to use as the stable ID (e.g., 'id' or 'ref').
             m2m_columns: A list of columns that contain the m2m values.
             filename_out: The path where the output CSV file will be saved.
-            params: A dictionary of parameters for the `odoo-data-flow import` command.
+            params: A dictionary of parameters for the `fluvo import` command.
             separator: The separator for the values within the m2m columns.
         """
         log.info(f"Processing m2m data for columns: {m2m_columns}")
@@ -488,7 +488,7 @@ class Processor:
             fail: If True, includes a second command with the --fail flag.
             append: If True, appends to the script file instead of overwriting.
             python_exe: The python executable to use in the script.
-            path: The path to prepend to the odoo-data-flow command.
+            path: The path to prepend to the fluvo command.
         """
         init = not append
         for _, info in self.file_to_write.items():

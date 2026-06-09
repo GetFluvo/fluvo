@@ -4,7 +4,7 @@ from typing import Any
 
 import polars as pl
 
-from odoo_data_flow.lib import clean_expr
+from fluvo.lib import clean_expr
 
 
 def apply_expr(expr: pl.Expr, value: Any) -> Any:

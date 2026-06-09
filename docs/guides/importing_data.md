@@ -7,12 +7,12 @@ This guide expands on the import workflow, providing a detailed look at the `Pro
 The primary way to import data is through the `import` command. If your configuration file is in the default location and your CSV file is named after the Odoo model, the command is very simple:
 
 ```bash
-odoo-data-flow import --file path/to/res_partner.csv
+fluvo import --file path/to/res_partner.csv
 ```
 
 ## Pre-flight Checks
 
-To save time and prevent common errors, `odoo-data-flow` automatically runs a series of pre-flight checks before starting the import process. These checks validate your environment and data to catch systemic issues that would otherwise cause the entire import to fail record by record.
+To save time and prevent common errors, `fluvo` automatically runs a series of pre-flight checks before starting the import process. These checks validate your environment and data to catch systemic issues that would otherwise cause the entire import to fail record by record.
 
 Currently, the following checks are performed by default:
 
@@ -24,13 +24,13 @@ Currently, the following checks are performed by default:
 * **Disabling Checks**: If you need to bypass these validations for any reason, you can use the `--no-preflight-checks` flag.
 
     ```bash
-    odoo-data-flow import --file ... --no-preflight-checks
+    fluvo import --file ... --no-preflight-checks
     ```
 
 * **Headless Mode**: The language check may prompt you to install missing languages. To run the import in a non-interactive environment (like a CI/CD pipeline), use the `--headless` flag. This will automatically approve the installation of any missing languages.
 
     ```bash
-    odoo-data-flow import --file ... --headless
+    fluvo import --file ... --headless
     ```
 
 ### Key Options for `import`
@@ -45,7 +45,7 @@ Currently, the following checks are performed by default:
 
 ## Automatic Field Verification
 
-To prevent common errors, `odoo-data-flow` automatically verifies that every column in your CSV header exists as a field on the target Odoo model. This is a core part of the pre-flight checks that run by default before any data is imported.
+To prevent common errors, `fluvo` automatically verifies that every column in your CSV header exists as a field on the target Odoo model. This is a core part of the pre-flight checks that run by default before any data is imported.
 
 This powerful check allows you to "fail fast" with a clear error message, rather than waiting for a large import to fail midway through due to a single typo in a column name.
 
@@ -54,7 +54,7 @@ This powerful check allows you to "fail fast" with a clear error message, rather
 
 ## The "Upsert" Strategy: How External IDs Work
 
-A core feature of `odoo-data-flow` is its ability to safely handle both creating new records and updating existing ones in a single process. This is often called an "upsert" (update or insert) operation, and it is the default behavior of the tool.
+A core feature of `fluvo` is its ability to safely handle both creating new records and updating existing ones in a single process. This is often called an "upsert" (update or insert) operation, and it is the default behavior of the tool.
 
 This makes your data imports **idempotent**, meaning you can run the same import script multiple times without creating duplicate records.
 
@@ -85,14 +85,14 @@ This means for most standard cases, the import will work without any extra flags
 
 ```bash
 # If your file has an 'id' column, this is all you need.
-odoo-data-flow import --file path/to/res_partner_with_parents.csv --model res.partner
+fluvo import --file path/to/res_partner_with_parents.csv --model res.partner
 ```
 
 If your unique identifier column is named something else (e.g., external_id), you must specify it using the --unique-id-field option.
 
 ```bash
 # Use this if your unique ID column is not named 'id'.
-odoo-data-flow import \
+fluvo import \
     --file path/to/my_data.csv \
     --unique-id-field "external_id"
     --model res.partner
@@ -180,7 +180,7 @@ The `Processor` is the central component of the transform phase. It handles read
 You initialize the processor by providing the path to your source data file and optional formatting parameters.
 
 ```python
-from odoo_data_flow.lib.transform import Processor
+from fluvo.lib.transform import Processor
 
 processor = Processor(
     'origin/my_data.csv',      # Path to the source file
@@ -213,7 +213,7 @@ The method takes these key arguments:
 
 * **`mapping` (dict)**: **Required**. The mapping dictionary that defines the transformation rules for each column.
 * **`filename_out` (str)**: **Required**. The path where the clean, transformed CSV file will be saved.
-* **`params` (dict, optional)**: A crucial dictionary that holds the configuration for the `odoo-data-flow import` command. These parameters will be used when generating the `load.sh` script.
+* **`params` (dict, optional)**: A crucial dictionary that holds the configuration for the `fluvo import` command. These parameters will be used when generating the `load.sh` script.
 
 ### Testing Your Mapping with a Dry Run
 
@@ -248,9 +248,9 @@ This will produce a table in your console, making it easy to see if your `concat
 
 ### Configuring the Import Client with `params`
 
-The `params` dictionary allows you to control the behavior of the import client without ever leaving your Python script. The keys in this dictionary map directly to the command-line options of the `odoo-data-flow import` command.
+The `params` dictionary allows you to control the behavior of the import client without ever leaving your Python script. The keys in this dictionary map directly to the command-line options of the `fluvo import` command.
 
-| `params` Key | `odoo-data-flow import` Option | Description                                                                                                       |
+| `params` Key | `fluvo import` Option | Description                                                                                                       |
 | ------------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `config`     | `--config`                     | **For Migrations**. Path to the destination config file. Overrides the `config_file` from the Processor for the final import script. |
 | `model`      | `--model`                      | **Optional**. The technical name of the Odoo model (e.g., `sale.order`). If you omit this, the tool infers it from the filename. |
@@ -276,8 +276,8 @@ Here is a complete `transform.py` script that ties everything together.
 
 ```{code-block} python
 :caption: transform.py
-from odoo_data_flow.lib.transform import Processor
-from odoo_data_flow.lib import mapper
+from fluvo.lib.transform import Processor
+from fluvo.lib import mapper
 from files import * # Imports source_config_file and destination_config_file
 
 # 1. Define the mapping rules

@@ -8,7 +8,7 @@ import random
 
 import polars as pl
 
-from odoo_data_flow.lib import mapper, transform
+from fluvo.lib import mapper, transform
 
 # --- Configuration ---
 PARTNER_PREFIX = "partner_generated"

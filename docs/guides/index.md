@@ -1,6 +1,6 @@
 # How-To Guides
 
-This section provides detailed, step-by-step guides for common tasks and advanced features of the `odoo-data-flow` library.
+This section provides detailed, step-by-step guides for common tasks and advanced features of the `fluvo` library.
 
 ```{toctree}
 :maxdepth: 1

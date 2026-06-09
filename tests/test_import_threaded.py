@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rich.progress import Progress
 
-from odoo_data_flow.import_threaded import (
+from fluvo.import_threaded import (
     _count_csv_rows,
     _create_batch_individually,
     _create_batches,
@@ -31,9 +31,9 @@ from odoo_data_flow.import_threaded import (
 class TestImportData:
     """Tests for the main `import_data` orchestrator."""
 
-    @patch("odoo_data_flow.import_threaded._read_data_file")
-    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
-    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    @patch("fluvo.import_threaded._read_data_file")
+    @patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
+    @patch("fluvo.import_threaded._run_threaded_pass")
     def test_import_data_success_path_no_defer(
         self,
         mock_run_pass: MagicMock,
@@ -62,9 +62,9 @@ class TestImportData:
         assert result is True
         mock_run_pass.assert_called_once()  # Only Pass 1 should run
 
-    @patch("odoo_data_flow.import_threaded._read_data_file")
-    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
-    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    @patch("fluvo.import_threaded._read_data_file")
+    @patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
+    @patch("fluvo.import_threaded._run_threaded_pass")
     def test_import_data_success_path_with_defer(
         self,
         mock_run_pass: MagicMock,
@@ -103,7 +103,7 @@ class TestImportData:
         assert result[0] is True
         assert mock_run_pass.call_count == 2  # Both passes should run
 
-    @patch("odoo_data_flow.import_threaded._read_data_file")
+    @patch("fluvo.import_threaded._read_data_file")
     def test_import_data_fails_if_unique_id_not_in_header(
         self, mock_read_file: MagicMock
     ) -> None:
@@ -122,8 +122,8 @@ class TestImportData:
         # Assert
         assert result is False
 
-    @patch("odoo_data_flow.import_threaded._create_batches")
-    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    @patch("fluvo.import_threaded._create_batches")
+    @patch("fluvo.import_threaded._run_threaded_pass")
     def test_orchestrate_pass_1_does_not_sort_for_o2m(
         self, mock_run_pass: MagicMock, mock_create_batches: MagicMock
     ) -> None:
@@ -166,7 +166,7 @@ class TestImportData:
 class TestExecuteLoadBatch:
     """Tests for the _execute_load_batch function's resilience features."""
 
-    @patch("odoo_data_flow.import_threaded._create_batch_individually")
+    @patch("fluvo.import_threaded._create_batch_individually")
     def test_batch_scales_down_on_memory_error(
         self, mock_create_individually: MagicMock
     ) -> None:
@@ -212,8 +212,8 @@ class TestExecuteLoadBatch:
             "Reducing chunk size to 1."
         )
 
-    @patch("odoo_data_flow.import_threaded.time.sleep")
-    @patch("odoo_data_flow.import_threaded._create_batch_individually")
+    @patch("fluvo.import_threaded.time.sleep")
+    @patch("fluvo.import_threaded._create_batch_individually")
     def test_batch_scales_down_on_gateway_error(
         self, mock_create_individually: MagicMock, mock_sleep: MagicMock
     ) -> None:
@@ -253,7 +253,7 @@ class TestExecuteLoadBatch:
             "Reducing chunk size to 2."
         )
 
-    @patch("odoo_data_flow.import_threaded._load_batch_with_binary_fallback")
+    @patch("fluvo.import_threaded._load_batch_with_binary_fallback")
     def test_batch_falls_back_for_non_scalable_error(
         self, mock_binary_fallback: MagicMock
     ) -> None:
@@ -341,7 +341,7 @@ class TestBatchingHelpers:
 class TestPass2Batching:
     """Tests for the Pass 2 batching and writing logic."""
 
-    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    @patch("fluvo.import_threaded._run_threaded_pass")
     def test_pass_2_groups_writes_correctly(self, mock_run_pass: MagicMock) -> None:
         """Verify that Pass 2 groups records by identical write values."""
         # Arrange
@@ -418,7 +418,7 @@ class TestPass2Batching:
         assert group3_key in batch_dict
         assert batch_dict[group3_key] == [4]
 
-    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    @patch("fluvo.import_threaded._run_threaded_pass")
     def test_pass_2_handles_failed_batch(self, mock_run_pass: MagicMock) -> None:
         """Verify that a failed batch write in Pass 2 is handled correctly."""
         # Arrange
@@ -593,14 +593,14 @@ class TestImportThreadedEdgeCases:
         assert result["error_summary"] == "Malformed CSV row detected"
 
     @patch(
-        "odoo_data_flow.import_threaded.concurrent.futures.as_completed",
+        "fluvo.import_threaded.concurrent.futures.as_completed",
         side_effect=KeyboardInterrupt,
     )
     def test_run_threaded_pass_keyboard_interrupt(
         self, mock_as_completed: MagicMock
     ) -> None:
         """Test that a KeyboardInterrupt is handled gracefully."""
-        from odoo_data_flow.import_threaded import RPCThreadImport, _run_threaded_pass
+        from fluvo.import_threaded import RPCThreadImport, _run_threaded_pass
 
         rpc_thread = RPCThreadImport(1, Progress(), MagicMock())
         rpc_thread.task_id = rpc_thread.progress.add_task("test")
@@ -611,14 +611,14 @@ class TestImportThreadedEdgeCases:
             assert aborted is True
 
     @patch(
-        "odoo_data_flow.import_threaded.conf_lib.get_connection_from_config",
+        "fluvo.import_threaded.conf_lib.get_connection_from_config",
         side_effect=Exception("Conn fail"),
     )
     def test_import_data_connection_failure(self, mock_get_conn: MagicMock) -> None:
         """Test that import_data handles a connection failure gracefully."""
         # Arrange
         with patch(
-            "odoo_data_flow.import_threaded._read_data_file",
+            "fluvo.import_threaded._read_data_file",
             return_value=(["id"], [["a"]]),
         ):
             # Act
@@ -628,16 +628,16 @@ class TestImportThreadedEdgeCases:
             assert success is False
             assert count == {}
 
-    @patch("odoo_data_flow.import_threaded._read_data_file", return_value=([], []))
+    @patch("fluvo.import_threaded._read_data_file", return_value=([], []))
     def test_import_data_no_header(self, mock_read_file: MagicMock) -> None:
         """Test that import_data handles a CSV with no header."""
         success, stats = import_data("dummy.conf", "res.partner", "id", "dummy.csv")
         assert success is False
         assert stats == {}
 
-    @patch("odoo_data_flow.lib.internal.ui._show_error_panel")
+    @patch("fluvo.lib.internal.ui._show_error_panel")
     @patch(
-        "odoo_data_flow.import_threaded.conf_lib.get_connection_from_config",
+        "fluvo.import_threaded.conf_lib.get_connection_from_config",
         side_effect=Exception("Conn fail"),
     )
     def test_import_data_connection_failure_shows_panel(
@@ -646,7 +646,7 @@ class TestImportThreadedEdgeCases:
         """Test that import_data shows the error panel on connection failure."""
         # Arrange
         with patch(
-            "odoo_data_flow.import_threaded._read_data_file",
+            "fluvo.import_threaded._read_data_file",
             return_value=(["id"], [["a"]]),
         ):
             # Act
@@ -660,7 +660,7 @@ class TestImportThreadedEdgeCases:
 
     def test_filter_ignored_columns(self) -> None:
         """Test that ignored columns are correctly filtered."""
-        from odoo_data_flow.import_threaded import _filter_ignored_columns
+        from fluvo.import_threaded import _filter_ignored_columns
 
         header = ["id", "name", "age", "city"]
         data = [
@@ -678,7 +678,7 @@ class TestXmlIdCreation:
 
     def test_create_xmlid_entry_with_module_prefix(self) -> None:
         """Test XML ID creation with module prefix (e.g., 'my_module.identifier')."""
-        from odoo_data_flow.import_threaded import _create_xmlid_entry
+        from fluvo.import_threaded import _create_xmlid_entry
 
         mock_connection = MagicMock()
         mock_ir_model_data = MagicMock()
@@ -701,7 +701,7 @@ class TestXmlIdCreation:
 
     def test_create_xmlid_entry_without_module_prefix(self) -> None:
         """Test XML ID creation without module prefix (uses __import__)."""
-        from odoo_data_flow.import_threaded import _create_xmlid_entry
+        from fluvo.import_threaded import _create_xmlid_entry
 
         mock_connection = MagicMock()
         mock_ir_model_data = MagicMock()
@@ -722,7 +722,7 @@ class TestXmlIdCreation:
 
     def test_create_xmlid_entry_existing_entry_same_res_id(self) -> None:
         """Test that existing entries with same res_id are not updated."""
-        from odoo_data_flow.import_threaded import _create_xmlid_entry
+        from fluvo.import_threaded import _create_xmlid_entry
 
         mock_connection = MagicMock()
         mock_ir_model_data = MagicMock()
@@ -740,7 +740,7 @@ class TestXmlIdCreation:
 
     def test_create_xmlid_entry_existing_entry_different_res_id(self) -> None:
         """Test that existing entries with different res_id are updated."""
-        from odoo_data_flow.import_threaded import _create_xmlid_entry
+        from fluvo.import_threaded import _create_xmlid_entry
 
         mock_connection = MagicMock()
         mock_ir_model_data = MagicMock()
@@ -760,7 +760,7 @@ class TestXmlIdCreation:
 
     def test_create_xmlid_entry_handles_exception(self) -> None:
         """Test that exceptions during XML ID creation are handled gracefully."""
-        from odoo_data_flow.import_threaded import _create_xmlid_entry
+        from fluvo.import_threaded import _create_xmlid_entry
 
         mock_connection = MagicMock()
         mock_connection.get_model.side_effect = Exception("Connection error")
@@ -777,7 +777,7 @@ class TestAccessErrorHandling:
 
     def test_extract_access_error_from_private_method(self) -> None:
         """Test extracting error message from 'cannot be called remotely' error."""
-        from odoo_data_flow.import_threaded import _extract_access_error_message
+        from fluvo.import_threaded import _extract_access_error_message
 
         error = (
             "{'code': 0, 'message': 'Odoo Server Error', 'data': {'name': "
@@ -790,7 +790,7 @@ class TestAccessErrorHandling:
 
     def test_extract_access_error_from_message_field(self) -> None:
         """Test extracting error message from 'message' field."""
-        from odoo_data_flow.import_threaded import _extract_access_error_message
+        from fluvo.import_threaded import _extract_access_error_message
 
         error = "{'message': 'Access denied for model res.partner'}"
         result = _extract_access_error_message(error)
@@ -798,7 +798,7 @@ class TestAccessErrorHandling:
 
     def test_handle_create_error_access_denied(self) -> None:
         """Test that access errors produce clean messages in fail file."""
-        from odoo_data_flow.import_threaded import _handle_create_error
+        from fluvo.import_threaded import _handle_create_error
 
         error = Exception(
             "Private methods (such as 'res.partner.browse') cannot be called remotely."
@@ -816,7 +816,7 @@ class TestAccessErrorHandling:
 
     def test_handle_create_error_truncates_long_errors(self) -> None:
         """Test that very long error messages are truncated."""
-        from odoo_data_flow.import_threaded import _extract_access_error_message
+        from fluvo.import_threaded import _extract_access_error_message
 
         long_error = "AccessError: " + "x" * 500
         result = _extract_access_error_message(long_error)
@@ -828,7 +828,7 @@ class TestRecursiveBatching:
 
     def test_recursive_batching_single_column(self) -> None:
         """Test recursive batching with a single grouping column."""
-        from odoo_data_flow.import_threaded import _recursive_create_batches
+        from fluvo.import_threaded import _recursive_create_batches
 
         header = ["id", "name", "country"]
         data = [
@@ -844,7 +844,7 @@ class TestRecursiveBatching:
 
     def test_recursive_batching_multiple_columns(self) -> None:
         """Test recursive batching with multiple grouping columns."""
-        from odoo_data_flow.import_threaded import _recursive_create_batches
+        from fluvo.import_threaded import _recursive_create_batches
 
         header = ["id", "name", "country", "state"]
         data = [
@@ -867,11 +867,11 @@ class TestRecursiveBatching:
 
     def test_recursive_batching_group_col_not_found(self) -> None:
         """Test that an error is logged if a grouping column is not found."""
-        from odoo_data_flow.import_threaded import _recursive_create_batches
+        from fluvo.import_threaded import _recursive_create_batches
 
         header = ["id", "name"]
         data = [["1", "A"]]
-        with patch("odoo_data_flow.import_threaded.log") as mock_log:
+        with patch("fluvo.import_threaded.log") as mock_log:
             list(_recursive_create_batches(data, ["non_existent"], header, 10, False))
             mock_log.error.assert_called_once_with(
                 "Grouping column 'non_existent' not found. Cannot use --groupby."
@@ -879,7 +879,7 @@ class TestRecursiveBatching:
 
     def test_recursive_batching_with_special_chars_in_col_name(self) -> None:
         """Test batching with special characters in column names."""
-        from odoo_data_flow.import_threaded import _recursive_create_batches
+        from fluvo.import_threaded import _recursive_create_batches
 
         header = ["id", "name", "partner_id/id"]
         data = [
@@ -896,7 +896,7 @@ class TestRecursiveBatching:
 
     def test_recursive_batching_multiple_cols_with_special_chars(self) -> None:
         """Test batching with multiple columns, one with special characters."""
-        from odoo_data_flow.import_threaded import _recursive_create_batches
+        from fluvo.import_threaded import _recursive_create_batches
 
         header = ["id", "name", "partner_id/id", "company_id"]
         data = [
@@ -1146,7 +1146,7 @@ class TestExecuteLoadBatchEdgeCases:
         assert len(call_args[0][1]) == 1  # Single record in data list
         assert result["success"] is True
 
-    @patch("odoo_data_flow.import_threaded._create_batch_individually")
+    @patch("fluvo.import_threaded._create_batch_individually")
     def test_execute_load_batch_timeout_ignored(
         self, mock_create_individually: MagicMock
     ) -> None:
@@ -1172,8 +1172,8 @@ class TestExecuteLoadBatchEdgeCases:
         assert result["success"] is True
         mock_create_individually.assert_not_called()
 
-    @patch("odoo_data_flow.import_threaded._create_batch_individually")
-    @patch("odoo_data_flow.import_threaded.time.sleep")
+    @patch("fluvo.import_threaded._create_batch_individually")
+    @patch("fluvo.import_threaded.time.sleep")
     def test_execute_load_batch_connection_pool_error(
         self, mock_sleep: MagicMock, mock_create_individually: MagicMock
     ) -> None:
@@ -1203,7 +1203,7 @@ class TestExecuteLoadBatchEdgeCases:
             "Reducing chunk size to 1."
         )
 
-    @patch("odoo_data_flow.import_threaded._create_batch_individually")
+    @patch("fluvo.import_threaded._create_batch_individually")
     def test_execute_load_batch_empty_load_lines(
         self, mock_create_individually: MagicMock
     ) -> None:
@@ -1628,9 +1628,9 @@ class TestLoadBatchWithBinaryFallback:
 class TestImportDataWithDictConfig:
     """Tests for import_data with dict config."""
 
-    @patch("odoo_data_flow.import_threaded._read_data_file")
-    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_dict")
-    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    @patch("fluvo.import_threaded._read_data_file")
+    @patch("fluvo.import_threaded.conf_lib.get_connection_from_dict")
+    @patch("fluvo.import_threaded._run_threaded_pass")
     def test_import_data_with_dict_config(
         self,
         mock_run_pass: MagicMock,
@@ -1794,9 +1794,9 @@ class TestStreamingCSV:
 class TestImportDataStreamingMode:
     """Tests for import_data streaming mode."""
 
-    @patch("odoo_data_flow.import_threaded._read_data_file")
-    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
-    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    @patch("fluvo.import_threaded._read_data_file")
+    @patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
+    @patch("fluvo.import_threaded._run_threaded_pass")
     def test_stream_mode_falls_back_when_not_compatible(
         self,
         mock_run_pass: MagicMock,
@@ -1826,9 +1826,9 @@ class TestImportDataStreamingMode:
         # Standard mode reads the file
         mock_read_file.assert_called_once()
 
-    @patch("odoo_data_flow.import_threaded._read_data_file")
-    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
-    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    @patch("fluvo.import_threaded._read_data_file")
+    @patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
+    @patch("fluvo.import_threaded._run_threaded_pass")
     def test_stream_mode_falls_back_with_deferred(
         self,
         mock_run_pass: MagicMock,
@@ -1858,8 +1858,8 @@ class TestImportDataStreamingMode:
         assert result is True
         mock_read_file.assert_called_once()
 
-    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
-    @patch("odoo_data_flow.import_threaded._execute_load_batch")
+    @patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
+    @patch("fluvo.import_threaded._execute_load_batch")
     def test_stream_mode_uses_streaming_orchestrator(
         self,
         mock_execute_batch: MagicMock,
@@ -1895,7 +1895,7 @@ class TestImportDataStreamingMode:
         # Verify streaming was used (execute_load_batch should be called)
         mock_execute_batch.assert_called()
 
-    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+    @patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
     def test_stream_mode_handles_missing_uid_field(
         self,
         mock_get_conn: MagicMock,
@@ -1919,7 +1919,7 @@ class TestImportDataStreamingMode:
         # Should fail gracefully
         assert result is False
 
-    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+    @patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
     def test_stream_mode_handles_file_not_found(
         self,
         mock_get_conn: MagicMock,
@@ -2027,9 +2027,9 @@ class TestWarnEmptyIds:
 class TestSkipExisting:
     """Tests for the skip_existing functionality."""
 
-    @patch("odoo_data_flow.import_threaded._read_data_file")
-    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
-    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    @patch("fluvo.import_threaded._read_data_file")
+    @patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
+    @patch("fluvo.import_threaded._run_threaded_pass")
     def test_skip_existing_filters_out_existing_ids(
         self,
         mock_run_pass: MagicMock,
@@ -2084,9 +2084,9 @@ class TestSkipExisting:
         # Verify only 1 record was imported
         assert stats.get("created_records", 0) == 1
 
-    @patch("odoo_data_flow.import_threaded._read_data_file")
-    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
-    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    @patch("fluvo.import_threaded._read_data_file")
+    @patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
+    @patch("fluvo.import_threaded._run_threaded_pass")
     def test_skip_existing_allows_all_new_records(
         self,
         mock_run_pass: MagicMock,
@@ -2133,9 +2133,9 @@ class TestSkipExisting:
         assert success is True
         assert stats.get("created_records", 0) == 2
 
-    @patch("odoo_data_flow.import_threaded._read_data_file")
-    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
-    @patch("odoo_data_flow.import_threaded._run_threaded_pass")
+    @patch("fluvo.import_threaded._read_data_file")
+    @patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
+    @patch("fluvo.import_threaded._run_threaded_pass")
     def test_skip_existing_handles_ids_without_module_prefix(
         self,
         mock_run_pass: MagicMock,
@@ -2185,8 +2185,8 @@ class TestSkipExisting:
         assert success is True
         assert stats.get("created_records", 0) == 1
 
-    @patch("odoo_data_flow.import_threaded._read_data_file")
-    @patch("odoo_data_flow.import_threaded.conf_lib.get_connection_from_config")
+    @patch("fluvo.import_threaded._read_data_file")
+    @patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
     def test_skip_existing_skips_all_when_all_exist(
         self,
         mock_get_conn: MagicMock,

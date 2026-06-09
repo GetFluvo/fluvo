@@ -1,6 +1,6 @@
 # Project Roadmap
 
-This document outlines the planned future enhancements and major refactoring efforts for the `odoo-data-flow` library. Contributions are welcome!
+This document outlines the planned future enhancements and major refactoring efforts for the `fluvo` library. Contributions are welcome!
 
 ## Planned Features & Enhancements
 
@@ -10,7 +10,7 @@ This document outlines the planned future enhancements and major refactoring eff
 - **Goal:** Refactor the workflow system to support recent Odoo versions (16.0, 17.0, 18.0+).
 - **Tasks:**
   - Create a new `InvoiceWorkflowV18` (or similar) class that uses the modern Odoo API for validating and paying invoices (e.g., calling button actions like `action_post`).
-  - Update the `workflow_runner.py` and the `__main__.py` CLI to allow users to specify which workflow version they want to run (e.g., `odoo-data-flow workflow invoice-v18`).
+  - Update the `workflow_runner.py` and the `__main__.py` CLI to allow users to specify which workflow version they want to run (e.g., `fluvo workflow invoice-v18`).
   - Consider creating a base `Workflow` class that new, custom workflows can inherit from to promote a consistent structure.
 
 ### 2. Add Support for More Data Formats

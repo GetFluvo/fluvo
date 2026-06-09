@@ -1,6 +1,6 @@
-# Agent Instructions for Project: odoo-data-flow
+# Agent Instructions for Project: fluvo
 
-This document guides the AI agent in developing the `odoo-data-flow` project.
+This document guides the AI agent in developing the `fluvo` project.
 
 ## 🎯 Project Context & Goal
 
@@ -10,7 +10,7 @@ This is an **Odoo module**. All code, dependencies, and architectural decisions 
     ```sh
     git rev-parse --abbrev-ref HEAD | sed -n 's/^\([0-9]\{1,2\}\.0\).*/\1/p'
     ```
--   **Strategic Goal:** All implemented functionality must align with the ODF strategic blueprint.
+-   **Strategic Goal:** All implemented functionality must align with the Fluvo strategic blueprint.
 
 ---
 

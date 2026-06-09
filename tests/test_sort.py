@@ -5,7 +5,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from odoo_data_flow.lib.sort import sort_for_self_referencing
+from fluvo.lib.sort import sort_for_self_referencing
 
 
 @pytest.fixture

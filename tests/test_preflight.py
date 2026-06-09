@@ -8,14 +8,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 from polars.exceptions import ColumnNotFoundError
 
-from odoo_data_flow.enums import PreflightMode
-from odoo_data_flow.lib import preflight
+from fluvo.enums import PreflightMode
+from fluvo.lib import preflight
 
 
 @pytest.fixture
 def mock_polars_read_csv() -> Generator[MagicMock, None, None]:
     """Fixture to mock polars.read_csv."""
-    with patch("odoo_data_flow.lib.preflight.pl.read_csv") as mock_read:
+    with patch("fluvo.lib.preflight.pl.read_csv") as mock_read:
         yield mock_read
 
 
@@ -23,7 +23,7 @@ def mock_polars_read_csv() -> Generator[MagicMock, None, None]:
 def mock_conf_lib() -> Generator[MagicMock, None, None]:
     """Fixture to mock conf_lib.get_connection_from_config."""
     with patch(
-        "odoo_data_flow.lib.preflight.conf_lib.get_connection_from_config"
+        "fluvo.lib.preflight.conf_lib.get_connection_from_config"
     ) as mock_conn:
         yield mock_conn
 
@@ -31,28 +31,28 @@ def mock_conf_lib() -> Generator[MagicMock, None, None]:
 @pytest.fixture
 def mock_show_error_panel() -> Generator[MagicMock, None, None]:
     """Fixture to mock _show_error_panel."""
-    with patch("odoo_data_flow.lib.preflight._show_error_panel") as mock_panel:
+    with patch("fluvo.lib.preflight._show_error_panel") as mock_panel:
         yield mock_panel
 
 
 @pytest.fixture
 def mock_cache() -> Generator[MagicMock, None, None]:
     """Fixture to mock the cache module."""
-    with patch("odoo_data_flow.lib.preflight.cache") as mock_cache_module:
+    with patch("fluvo.lib.preflight.cache") as mock_cache_module:
         yield mock_cache_module
 
 
 @pytest.fixture
 def mock_show_warning_panel() -> Generator[MagicMock, None, None]:
     """Fixture to mock _show_warning_panel."""
-    with patch("odoo_data_flow.lib.preflight._show_warning_panel") as mock_panel:
+    with patch("fluvo.lib.preflight._show_warning_panel") as mock_panel:
         yield mock_panel
 
 
 class TestSelfReferencingCheck:
     """Tests for the self_referencing_check."""
 
-    @patch("odoo_data_flow.lib.preflight.sort.sort_for_self_referencing")
+    @patch("fluvo.lib.preflight.sort.sort_for_self_referencing")
     def test_check_plans_strategy_when_hierarchy_detected(
         self, mock_sort: MagicMock, tmp_path: "Path"
     ) -> None:
@@ -73,7 +73,7 @@ class TestSelfReferencingCheck:
             "file.csv", id_column="id", parent_column="parent_id", separator=";"
         )
 
-    @patch("odoo_data_flow.lib.preflight.sort.sort_for_self_referencing")
+    @patch("fluvo.lib.preflight.sort.sort_for_self_referencing")
     def test_check_does_nothing_when_no_hierarchy(self, mock_sort: MagicMock) -> None:
         """Verify the import plan is unchanged when no hierarchy is found."""
         mock_sort.return_value = None
@@ -86,7 +86,7 @@ class TestSelfReferencingCheck:
         assert result is True
         assert "strategy" not in import_plan
 
-    @patch("odoo_data_flow.lib.preflight.sort.sort_for_self_referencing")
+    @patch("fluvo.lib.preflight.sort.sort_for_self_referencing")
     def test_check_is_skipped_for_o2m(self, mock_sort: MagicMock) -> None:
         """Verify the check is skipped when o2m flag is True."""
         import_plan: dict[str, Any] = {}
@@ -104,7 +104,7 @@ class TestSelfReferencingCheck:
 class TestInternalHelpers:
     """Tests for internal helper functions in the preflight module."""
 
-    @patch("odoo_data_flow.lib.preflight._show_error_panel")
+    @patch("fluvo.lib.preflight._show_error_panel")
     def test_get_installed_languages_connection_fails(
         self, mock_show_error_panel: MagicMock, mock_conf_lib: MagicMock
     ) -> None:
@@ -203,10 +203,10 @@ class TestLanguageCheck:
         )
         assert result is True
 
-    @patch("odoo_data_flow.lib.preflight.language_installer.run_language_installation")
-    @patch("odoo_data_flow.lib.preflight.Confirm.ask", return_value=True)
+    @patch("fluvo.lib.preflight.language_installer.run_language_installation")
+    @patch("fluvo.lib.preflight.Confirm.ask", return_value=True)
     @patch(
-        "odoo_data_flow.lib.preflight._get_installed_languages",
+        "fluvo.lib.preflight._get_installed_languages",
         return_value={"en_US"},
     )
     def test_missing_languages_user_confirms_install_success(
@@ -233,9 +233,9 @@ class TestLanguageCheck:
         mock_confirm.assert_called_once()
         mock_installer.assert_called_once_with("", ["fr_FR"])
 
-    @patch("odoo_data_flow.lib.preflight.Confirm.ask", return_value=True)
+    @patch("fluvo.lib.preflight.Confirm.ask", return_value=True)
     @patch(
-        "odoo_data_flow.lib.actions.language_installer.run_language_installation",
+        "fluvo.lib.actions.language_installer.run_language_installation",
         return_value=False,
     )
     def test_missing_languages_user_confirms_install_fails(
@@ -263,10 +263,10 @@ class TestLanguageCheck:
         mock_confirm.assert_called_once()
         mock_install.assert_called_once_with("", ["fr_FR"])
 
-    @patch("odoo_data_flow.lib.preflight.language_installer.run_language_installation")
-    @patch("odoo_data_flow.lib.preflight.Confirm.ask", return_value=False)
+    @patch("fluvo.lib.preflight.language_installer.run_language_installation")
+    @patch("fluvo.lib.preflight.Confirm.ask", return_value=False)
     @patch(
-        "odoo_data_flow.lib.preflight._get_installed_languages",
+        "fluvo.lib.preflight._get_installed_languages",
         return_value={"en_US"},
     )
     def test_missing_languages_user_cancels(
@@ -292,10 +292,10 @@ class TestLanguageCheck:
         mock_confirm.assert_called_once()
         mock_installer.assert_not_called()
 
-    @patch("odoo_data_flow.lib.preflight.language_installer.run_language_installation")
-    @patch("odoo_data_flow.lib.preflight.Confirm.ask")
+    @patch("fluvo.lib.preflight.language_installer.run_language_installation")
+    @patch("fluvo.lib.preflight.Confirm.ask")
     @patch(
-        "odoo_data_flow.lib.preflight._get_installed_languages",
+        "fluvo.lib.preflight._get_installed_languages",
         return_value={"en_US"},
     )
     def test_missing_languages_headless_mode(
@@ -324,9 +324,9 @@ class TestLanguageCheck:
         # In tests/test_preflight.py
 
     # Replace the old test_language_check_fail_mode_skips_install with this one.
-    @patch("odoo_data_flow.lib.preflight.log.debug")  # Note: patching log.debug now
-    @patch("odoo_data_flow.lib.preflight.Confirm.ask")
-    @patch("odoo_data_flow.lib.actions.language_installer.run_language_installation")
+    @patch("fluvo.lib.preflight.log.debug")  # Note: patching log.debug now
+    @patch("fluvo.lib.preflight.Confirm.ask")
+    @patch("fluvo.lib.actions.language_installer.run_language_installation")
     def test_language_check_fail_mode_skips_entire_check(
         self,
         mock_install: MagicMock,

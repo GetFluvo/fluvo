@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from odoo_data_flow.lib import clean
+from fluvo.lib import clean
 
 
 class TestCompositionFunctions:

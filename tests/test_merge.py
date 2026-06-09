@@ -5,7 +5,7 @@ It merges two source CSV files based on a common key.
 
 import os
 
-from odoo_data_flow.lib import transform
+from fluvo.lib import transform
 
 # --- Configuration ---
 SOURCE_FILE_1 = os.path.join("tests", "origin", "test_merge1.csv")

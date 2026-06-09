@@ -16,7 +16,7 @@ from __future__ import annotations
 import csv
 from typing import Any, Optional
 
-from odoo_data_flow import import_threaded, importer
+from fluvo import import_threaded, importer
 
 
 def import_with_stats(

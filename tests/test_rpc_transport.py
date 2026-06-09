@@ -6,7 +6,7 @@ import odoolib.rpc
 import odoolib.tools
 import pytest
 
-from odoo_data_flow.lib import rpc_transport
+from fluvo.lib import rpc_transport
 
 
 def test_install_patches_both_namespaces() -> None:

@@ -18,7 +18,7 @@ from functools import lru_cache
 from pathlib import Path
 
 COMPOSE_FILE = str(Path(__file__).with_name("docker-compose.yml"))
-PROJECT = "odf_e2e"
+PROJECT = "fluvo_e2e"
 
 
 @lru_cache(maxsize=1)
@@ -44,7 +44,7 @@ def compose_base() -> list[str]:
             continue
     raise RuntimeError(
         "No usable container compose runtime found (tried 'docker compose' and "
-        "'podman compose'). Install one, or set ODF_E2E_ODOO_URL to use an "
+        "'podman compose'). Install one, or set FLUVO_E2E_ODOO_URL to use an "
         "external Odoo (e.g. a doodba stack)."
     )
 

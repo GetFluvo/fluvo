@@ -49,7 +49,7 @@ jobs:
 
       - name: Build package
         env:
-          ODF_COMPILE_MYPYC: "1"
+          FLUVO_COMPILE_MYPYC: "1"
         run: |
           uv build
 

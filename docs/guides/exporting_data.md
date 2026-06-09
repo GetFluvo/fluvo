@@ -1,6 +1,6 @@
 # Guide: Exporting Data from Odoo
 
-In addition to importing, `odoo-data-flow` provides a powerful command-line utility for exporting data directly from Odoo into a structured CSV file. This is ideal for creating backups, feeding data into other systems, or for analysis.
+In addition to importing, `fluvo` provides a powerful command-line utility for exporting data directly from Odoo into a structured CSV file. This is ideal for creating backups, feeding data into other systems, or for analysis.
 
 ```{mermaid}
 ---
@@ -8,7 +8,7 @@ config:
   theme: redux
 ---
 flowchart TD
-    ExportA["Odoo Instance"] L_ExportA_ExportB_0@--> ExportB{"odoo-data-flow export"}
+    ExportA["Odoo Instance"] L_ExportA_ExportB_0@--> ExportB{"fluvo export"}
     ExportC["Configuration<br>(CLI Options)"] --> ExportB
     ExportB L_ExportB_ExportD_0@--> ExportD["Output File<br>(e.g., exported_partners.csv)"]
     ExportA@{ shape: cyl}
@@ -21,10 +21,10 @@ flowchart TD
 ```
 
 
-## The `odoo-data-flow export` Command
+## The `fluvo export` Command
 
 ```text
-Odoo Instance ---> (odoo-data-flow export) ---> Output File
+Odoo Instance ---> (fluvo export) ---> Output File
       ^                      ^
       |                      |
 (Database)      (Configuration / CLI Options)
@@ -75,12 +75,12 @@ The `export` command is built for scalability. To handle massive datasets, it us
 
 ### Resuming Failed Exports
 
-When exporting extremely large datasets, network outages or server restarts can interrupt the process. Starting over from the beginning is inefficient. To solve this, `odoo-data-flow` includes a session-based resume feature.
+When exporting extremely large datasets, network outages or server restarts can interrupt the process. Starting over from the beginning is inefficient. To solve this, `fluvo` includes a session-based resume feature.
 
 **How It Works**
 
 1.  **Session ID Generation**: Every time a new export is started, a unique **Session ID** is generated based on the export parameters (model, domain, and fields). This ID is logged to the console.
-2.  **State Tracking**: The tool creates a session directory inside `.odf_cache/sessions/`. It stores two files:
+2.  **State Tracking**: The tool creates a session directory inside `.fluvo_cache/sessions/`. It stores two files:
     *   `all_ids.json`: A complete list of all record IDs that match the export domain.
     *   `completed_ids.txt`: A list of record IDs that have been successfully exported and written to the CSV file. This file is updated after each batch.
 3.  **Resuming**: If the export fails, you can restart it using the `--resume-session <session_id>` flag. The tool will:
@@ -94,7 +94,7 @@ When exporting extremely large datasets, network outages or server restarts can 
 First, start a large export:
 
 ```bash
-odoo-data-flow export \
+fluvo export \
     --config conf/connection.conf \
     --model "account.move.line" \
     --fields "id,name,move_id/.id,account_id/.id,debit,credit" \
@@ -107,7 +107,7 @@ The console will log the session ID:
 If the process fails midway, you can find the session ID in the logs or in the final error message. To resume, simply add the `--resume-session` flag:
 
 ```bash
-odoo-data-flow export \
+fluvo export \
     --config conf/connection.conf \
     --model "account.move.line" \
     --fields "id,name,move_id/.id,account_id/.id,debit,credit" \
@@ -159,7 +159,7 @@ Let's combine these concepts into a full example. We want to export the name, em
 Here is the full command you would run from your terminal:
 
 ```bash
-odoo-data-flow export \
+fluvo export \
     --config conf/connection.conf \
     --model "res.partner" \
     --domain "[('is_company', '=', False), ('country_id.code', '=', 'BE')]" \
@@ -185,17 +185,17 @@ You can force the high-performance raw export mode using the `--technical-names`
 
 ```bash
 # Standard export with human-readable Many2one fields
-odoo-data-flow export \
+fluvo export \
   --model "res.partner" \
   --fields "name,country_id"
 
 # Export with the raw database ID for the country
-odoo-data-flow export \
+fluvo export \
   --model "res.partner" \
   --fields "name,country_id/.id"
 
 # Force raw export mode for all fields
-odoo-data-flow export \
+fluvo export \
   --model "res.partner" \
   --fields "name,country_id" \
   --technical-names

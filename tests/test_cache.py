@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 from polars.testing import assert_frame_equal
 
-from odoo_data_flow.lib import cache
+from fluvo.lib import cache
 
 
 @patch("configparser.ConfigParser")
@@ -30,7 +30,7 @@ def test_get_cache_dir_creates_unique_directory(
             assert cache_dir.exists()
 
 
-@patch("odoo_data_flow.lib.cache.get_cache_dir")
+@patch("fluvo.lib.cache.get_cache_dir")
 def test_save_and_load_id_map(mock_get_cache_dir: "MagicMock", tmp_path: Path) -> None:
     """Verify that an id_map can be saved and loaded correctly."""
     # Arrange
@@ -52,7 +52,7 @@ def test_save_and_load_id_map(mock_get_cache_dir: "MagicMock", tmp_path: Path) -
 
 def test_load_id_map_returns_none_if_not_found(tmp_path: Path) -> None:
     """Verify that loading a non-existent map returns None."""
-    with patch("odoo_data_flow.lib.cache.get_cache_dir", return_value=tmp_path):
+    with patch("fluvo.lib.cache.get_cache_dir", return_value=tmp_path):
         loaded_df = cache.load_id_map("dummy.conf", "non.existent.model")
         assert loaded_df is None
 
@@ -69,7 +69,7 @@ def test_get_cache_dir_handles_exception(
     assert "Could not create or access cache directory" in caplog.text
 
 
-@patch("odoo_data_flow.lib.cache.get_cache_dir", return_value=None)
+@patch("fluvo.lib.cache.get_cache_dir", return_value=None)
 def test_save_id_map_handles_no_cache_dir(
     mock_get_cache_dir: MagicMock, caplog: "MagicMock"
 ) -> None:
@@ -80,12 +80,12 @@ def test_save_id_map_handles_no_cache_dir(
 
 def test_save_id_map_handles_empty_id_map(tmp_path: Path, caplog: "MagicMock") -> None:
     """Verify save_id_map handles an empty id_map."""
-    with patch("odoo_data_flow.lib.cache.get_cache_dir", return_value=tmp_path):
+    with patch("fluvo.lib.cache.get_cache_dir", return_value=tmp_path):
         cache.save_id_map("dummy.conf", "res.partner", {})
         assert "Saved id_map for model" not in caplog.text
 
 
-@patch("odoo_data_flow.lib.cache.get_cache_dir")
+@patch("fluvo.lib.cache.get_cache_dir")
 @patch("polars.DataFrame.write_parquet")
 def test_save_id_map_handles_write_error(
     mock_write_parquet: MagicMock,
@@ -100,14 +100,14 @@ def test_save_id_map_handles_write_error(
     assert "Failed to save id_map for model 'res.partner'" in caplog.text
 
 
-@patch("odoo_data_flow.lib.cache.get_cache_dir", return_value=None)
+@patch("fluvo.lib.cache.get_cache_dir", return_value=None)
 def test_load_id_map_handles_no_cache_dir(mock_get_cache_dir: MagicMock) -> None:
     """Verify load_id_map handles no cache directory."""
     result = cache.load_id_map("dummy.conf", "res.partner")
     assert result is None
 
 
-@patch("odoo_data_flow.lib.cache.get_cache_dir")
+@patch("fluvo.lib.cache.get_cache_dir")
 @patch("polars.read_parquet")
 def test_load_id_map_handles_read_error(
     mock_read_parquet: MagicMock,
@@ -124,7 +124,7 @@ def test_load_id_map_handles_read_error(
     assert "Failed to load id_map for model 'res.partner'" in caplog.text
 
 
-@patch("odoo_data_flow.lib.cache.get_cache_dir")
+@patch("fluvo.lib.cache.get_cache_dir")
 def test_save_and_load_fields_get_cache(
     mock_get_cache_dir: MagicMock, tmp_path: Path
 ) -> None:
@@ -147,12 +147,12 @@ def test_save_and_load_fields_get_cache(
 
 def test_load_fields_get_cache_returns_none_if_not_found(tmp_path: Path) -> None:
     """Verify that loading a non-existent fields_get cache returns None."""
-    with patch("odoo_data_flow.lib.cache.get_cache_dir", return_value=tmp_path):
+    with patch("fluvo.lib.cache.get_cache_dir", return_value=tmp_path):
         loaded_data = cache.load_fields_get_cache("dummy.conf", "non.existent.model")
         assert loaded_data is None
 
 
-@patch("odoo_data_flow.lib.cache.get_cache_dir", return_value=None)
+@patch("fluvo.lib.cache.get_cache_dir", return_value=None)
 def test_save_fields_get_cache_handles_no_cache_dir(
     mock_get_cache_dir: MagicMock, caplog: "MagicMock"
 ) -> None:
@@ -165,12 +165,12 @@ def test_save_fields_get_cache_handles_empty_data(
     tmp_path: Path, caplog: "MagicMock"
 ) -> None:
     """Verify save_fields_get_cache handles empty data."""
-    with patch("odoo_data_flow.lib.cache.get_cache_dir", return_value=tmp_path):
+    with patch("fluvo.lib.cache.get_cache_dir", return_value=tmp_path):
         cache.save_fields_get_cache("dummy.conf", "res.partner", {})
         assert "Saved fields_get cache for model" not in caplog.text
 
 
-@patch("odoo_data_flow.lib.cache.get_cache_dir")
+@patch("fluvo.lib.cache.get_cache_dir")
 @patch("json.dump")
 def test_save_fields_get_cache_handles_write_error(
     mock_json_dump: MagicMock,
@@ -185,7 +185,7 @@ def test_save_fields_get_cache_handles_write_error(
     assert "Failed to save fields_get cache for model 'res.partner'" in caplog.text
 
 
-@patch("odoo_data_flow.lib.cache.get_cache_dir")
+@patch("fluvo.lib.cache.get_cache_dir")
 @patch("json.load")
 def test_load_fields_get_cache_handles_read_error(
     mock_json_load: MagicMock,

@@ -1,4 +1,4 @@
-"""Centralized logging configuration for the odoo-data-flow application."""
+"""Centralized logging configuration for the fluvo application."""
 
 import logging
 from collections.abc import Generator
@@ -8,7 +8,7 @@ from typing import Optional
 from rich.logging import RichHandler
 
 # Get the root logger for the application package
-log = logging.getLogger("odoo_data_flow")
+log = logging.getLogger("fluvo")
 
 # Store reference to console handler for suppression during progress display
 _console_handler: Optional[RichHandler] = None

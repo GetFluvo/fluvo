@@ -8,8 +8,8 @@ and generates a clean CSV file ready for import.
 import os
 import pprint
 
-from odoo_data_flow.lib import checker, mapper
-from odoo_data_flow.lib.transform import Processor
+from fluvo.lib import checker, mapper
+from fluvo.lib.transform import Processor
 
 # --- Configuration ---
 # Define translation maps and prefixes

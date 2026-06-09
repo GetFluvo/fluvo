@@ -1,11 +1,14 @@
 [project]
-name = "odoo-data-flow"
+name = "fluvo"
 version = "0.0.1"
-description = "Odoo Data Flow"
+description = "Fast data into Odoo — high-performance Polars-backed ETL."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 authors = [
+    { name = "Strategic Efficiency B.V." },
+]
+maintainers = [
     { name = "bosd", email = "c5e2fd43-d292-4c90-9d1f-74ff3436329a@anonaddy.me" },
 ]
 classifiers = ["Development Status :: 3 - Alpha"]
@@ -22,10 +25,10 @@ dependencies = [
 
 
 [project.urls]
-Homepage = "https://github.com/OdooDataFlow/odoo-data-flow"
-Repository = "https://github.com/OdooDataFlow/odoo-data-flow"
-Documentation = "https://odoo-data-flow.readthedocs.io"
-Changelog = "https://github.com/OdooDataFlow/odoo-data-flow/releases"
+Homepage = "https://github.com/getfluvo/fluvo"
+Repository = "https://github.com/getfluvo/fluvo"
+Documentation = "https://fluvo.readthedocs.io"
+Changelog = "https://github.com/getfluvo/fluvo/releases"
 
 # --- Added for mypyc integration ---
 [build-system]
@@ -100,7 +103,7 @@ where = ["src"]
 package = true
 
 [project.scripts]
-odoo-data-flow = "odoo_data_flow.__main__:cli"
+fluvo = "fluvo.__main__:cli"
 
 [tool.coverage.paths]
 source = ["src", "*/site-packages"]
@@ -108,10 +111,10 @@ tests = ["tests", "*/tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["odoo_data_flow", "tests"]
+source = ["fluvo", "tests"]
 omit = [
     # Exclude the legacy v9 workflow from coverage reports
-    "src/odoo_data_flow/lib/workflow/invoice_v9.py",
+    "src/fluvo/lib/workflow/invoice_v9.py",
 ]
 
 [tool.coverage.report]
