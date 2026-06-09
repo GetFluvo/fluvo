@@ -171,3 +171,18 @@ def test_import_data_failures_written_to_fail_file(tmp_path: Path) -> None:
     assert "rec_a" in content
     # the original record was not persisted
     assert not store.records.get("res.partner")
+
+
+def test_import_data_skip_unchanged_all_new(tmp_path: Path) -> None:
+    """skip_unchanged with no existing records imports everything (all new)."""
+    result, store = _run(tmp_path, "id,name\nrec_a,Alice\n", skip_unchanged=True)
+    assert result is not None
+    assert len(store.records.get("res.partner", {})) == 1
+
+
+def test_import_data_multiple_batches(tmp_path: Path) -> None:
+    """A small batch_size splits the data into several load() batches."""
+    csv = "id,name\na,A\nb,B\nc,C\n"
+    result, store = _run(tmp_path, csv, batch_size=1)
+    assert result is not None
+    assert len(store.records.get("res.partner", {})) == 3
