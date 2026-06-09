@@ -285,6 +285,19 @@ def run_import(  # noqa: C901
                 f"Deferrable fields detected but not applied (use --auto-defer "
                 f"or --deferred-fields to enable): {detected}"
             )
+    # Safeguard: never defer a required relational field. Deferring it would run
+    # the Pass-1 create without the value and fail with 'Missing required value'.
+    required_relational = import_plan.get("required_relational_fields", [])
+    if final_deferred and required_relational:
+        blocked = [f for f in final_deferred if f in required_relational]
+        if blocked:
+            log.warning(
+                f"Ignoring deferral of required relational field(s) {blocked}: "
+                f"required fields must be set in Pass 1. They will be imported "
+                f"normally to avoid 'Missing required value' errors."
+            )
+            final_deferred = [f for f in final_deferred if f not in blocked]
+
     final_uid_field = unique_id_field or import_plan.get("unique_id_field") or "id"
     # Create environment-specific directory if it doesn't exist
     if env_name and not env_output_dir.exists():

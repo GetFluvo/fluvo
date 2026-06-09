@@ -510,6 +510,42 @@ class TestDeferralAndStrategyCheck:
         assert result is True
         assert "parent_id" in import_plan["deferred_fields"]
 
+    def test_required_relational_field_is_recorded(
+        self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """A required relational field is reported in required_relational_fields.
+
+        The importer relies on this to refuse deferring required relations.
+        """
+        mock_df_header = MagicMock()
+        mock_df_header.columns = ["id", "name", "country_id/id"]
+        mock_df_data = MagicMock()
+        mock_polars_read_csv.side_effect = [mock_df_header, mock_df_data]
+
+        mock_model = mock_conf_lib.return_value.get_model.return_value
+        mock_model.fields_get.return_value = {
+            "id": {"type": "integer"},
+            "name": {"type": "char"},
+            "country_id": {
+                "type": "many2one",
+                "relation": "res.country",
+                "required": True,
+            },
+        }
+        import_plan: dict[str, Any] = {}
+        result = preflight.deferral_and_strategy_check(
+            preflight_mode=PreflightMode.NORMAL,
+            model="res.country.state",
+            filename="file.csv",
+            config="",
+            import_plan=import_plan,
+            auto_defer=True,
+        )
+        assert result is True
+        assert import_plan["required_relational_fields"] == ["country_id"]
+        # A required m2o must not be auto-deferred.
+        assert "country_id" not in import_plan.get("deferred_fields", [])
+
     def test_auto_detects_unique_id_field(
         self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
     ) -> None:

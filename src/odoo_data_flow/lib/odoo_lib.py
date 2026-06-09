@@ -19,8 +19,8 @@ ODOO_TO_POLARS_MAP: dict[str, type[DataType]] = {
     "html": pl.String,
     "selection": pl.String,
     "monetary": pl.Float64,
-    "date": pl.Date,
-    "datetime": pl.Datetime,
+    "date": pl.String,      # Keep as string - Polars cast fails on Odoo date format
+    "datetime": pl.String,  # Keep as string - Polars cast fails on Odoo datetime format
     "many2one": pl.String,
     "many2many": pl.String,
     "one2many": pl.String,

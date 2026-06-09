@@ -464,6 +464,7 @@ def _plan_deferrals_and_strategies(  # noqa: C901
     """
     auto_defer = kwargs.get("auto_defer", False)
     deferrable_fields = []
+    required_relational_fields = []
     strategies = {}
     df = pl.read_csv(
         filename,
@@ -488,6 +489,12 @@ def _plan_deferrals_and_strategies(  # noqa: C901
             is_m2m = field_type == "many2many"
             is_o2m = field_type == "one2many"
 
+            # Record required relational fields so the importer can refuse to
+            # defer them: deferring a required relation makes the Pass-1 create
+            # fail with 'Missing required value'.
+            if is_required and (is_m2o_self or is_m2o_other or is_m2m or is_o2m):
+                required_relational_fields.append(clean_field_name)
+
             # Auto-defer: defer all non-required m2o fields
             if auto_defer and is_m2o_other and not is_required:
                 deferrable_fields.append(clean_field_name)
@@ -507,6 +514,10 @@ def _plan_deferrals_and_strategies(  # noqa: C901
             elif is_o2m:
                 deferrable_fields.append(clean_field_name)
                 strategies[clean_field_name] = {"strategy": "write_o2m_tuple"}
+
+    # Always expose required relational fields so the importer can guard against
+    # an explicit --deferred-fields that would otherwise break Pass 1.
+    import_plan["required_relational_fields"] = required_relational_fields
 
     if deferrable_fields:
         if auto_defer:

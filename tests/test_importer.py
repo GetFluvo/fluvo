@@ -230,6 +230,60 @@ class TestRunImport:
         mock_preflight.assert_called_once()
         mock_import_data.assert_called_once()
 
+    @patch("odoo_data_flow.importer.import_threaded.import_data")
+    @patch("odoo_data_flow.importer._run_preflight_checks")
+    def test_run_import_refuses_to_defer_required_relational_field(
+        self,
+        mock_preflight: MagicMock,
+        mock_import_data: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Required relational fields are stripped from explicit deferral.
+
+        Deferring a required relation would make the Pass-1 create fail with
+        'Missing required value', so run_import must drop it (and keep the rest).
+        """
+        source_file = tmp_path / "states.csv"
+        source_file.write_text("id,name,country_id/id,user_id/id\n")
+
+        def _populate_plan(*_args: object, **kwargs: object) -> bool:
+            # Preflight reports country_id as a required relational field.
+            plan = kwargs["import_plan"]
+            plan["required_relational_fields"] = ["country_id"]  # type: ignore[index]
+            return True
+
+        mock_preflight.side_effect = _populate_plan
+        mock_import_data.return_value = (True, {"total_records": 0})
+
+        run_import(
+            config="dummy.conf",
+            filename=str(source_file),
+            model="res.country.state",
+            deferred_fields=["country_id", "user_id"],
+            auto_defer=False,
+            unique_id_field="id",
+            no_preflight_checks=False,
+            headless=True,
+            worker=1,
+            batch_size=100,
+            skip=0,
+            fail=False,
+            separator=",",
+            ignore=None,
+            context={},
+            encoding="utf-8",
+            o2m=False,
+            groupby=None,
+        )
+
+        passed_deferred = mock_import_data.call_args.kwargs["deferred_fields"]
+        assert "country_id" not in passed_deferred, (
+            "Required relational field was not stripped from deferral."
+        )
+        assert "user_id" in passed_deferred, (
+            "Non-required deferred field was wrongly dropped."
+        )
+
     @patch("odoo_data_flow.importer._infer_model_from_filename")
     @patch("odoo_data_flow.importer._show_error_panel")
     def test_run_import_fails_if_model_not_found(
