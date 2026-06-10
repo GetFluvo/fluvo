@@ -331,22 +331,14 @@ def docs_linkcheck(session: nox.Session) -> None:
         "--group",
         "docs",
     )
-    session.install(
-        "sphinx",
-        "sphinx-mermaid",
-        "sphinx-click",
-        "myst_parser",
-        "shibuya",
-        "sphinx-copybutton",
-        "pygments<2.20",  # shibuya passes int linespans; pygments 2.20 escapes it
-    )
-    session.install("-e", ".")
 
     build_dir = Path("docs", "_build", "linkcheck")
-    if build_dir.exists():
-        shutil.rmtree(build_dir)
+    shutil.rmtree(build_dir, ignore_errors=True)
 
-    session.run("sphinx-build", "-b", "linkcheck", "docs", str(build_dir))
+    args = ["-b", "linkcheck", "docs", str(build_dir)]
+    if "FORCE_COLOR" in os.environ:
+        args.insert(0, "--color")
+    session.run("sphinx-build", *args, *session.posargs)
 
 
 @nox.session(python=python_versions[0])
