@@ -578,6 +578,10 @@ def run_import_for_migration(
             model=model,
             unique_id_field="id",  # Migration import assumes 'id'
             file_csv=tmp_path,
+            # The temp file is written with csv.writer (comma-delimited); import_data
+            # defaults to ';', so the separator must be set explicitly or the header
+            # parses as a single column (#192).
+            separator=",",
             context={
                 "tracking_disable": True,
                 "mail_create_nolog": True,
