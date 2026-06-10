@@ -43,9 +43,41 @@ from ..logging_config import log
 # default. Override with FLUVO_RPC_TIMEOUT (seconds).
 _DEFAULT_TIMEOUT = float(os.environ.get("FLUVO_RPC_TIMEOUT", "600"))
 
+# Cloudflare (and similar WAF bot protection) challenges httpx's default
+# ``python-httpx/x.y`` User-Agent, which breaks the json2 endpoint against
+# hosted / Cloudflare-fronted Odoo even with a valid API key (#193). Default to a
+# browser-like UA so json2 works out of the box; override with FLUVO_USER_AGENT
+# or the ``user_agent`` key in the connection file's ``[Connection]`` section.
+_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+_user_agent: str = os.environ.get("FLUVO_USER_AGENT") or _DEFAULT_USER_AGENT
+
 _client: httpx.Client | None = None
 _client_lock = threading.Lock()
 _installed = False
+
+
+def set_user_agent(user_agent: str) -> None:
+    """Override the User-Agent sent on pooled RPC requests.
+
+    Resets the pooled client so the new header takes effect on the next call.
+    Used by ``conf_lib`` when a connection file sets ``user_agent`` (e.g. to get
+    past a WAF such as Cloudflare that challenges the default UA on json2).
+
+    Args:
+        user_agent: The User-Agent header value to send on pooled requests.
+    """
+    global _user_agent, _client
+    if not user_agent or user_agent == _user_agent:
+        return
+    with _client_lock:
+        _user_agent = user_agent
+        # Drop the existing client so the next request rebuilds it with the new UA.
+        if _client is not None:
+            _client.close()
+            _client = None
 
 
 def _get_client() -> httpx.Client:
@@ -59,6 +91,7 @@ def _get_client() -> httpx.Client:
                     limits=httpx.Limits(
                         max_keepalive_connections=32, max_connections=64
                     ),
+                    headers={"User-Agent": _user_agent},
                 )
     return _client
 

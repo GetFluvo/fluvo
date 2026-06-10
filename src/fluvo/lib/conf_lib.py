@@ -10,6 +10,7 @@ Supported protocols (via odoolib):
 """
 
 import configparser
+import inspect
 from typing import Any
 
 import odoolib
@@ -22,6 +23,16 @@ from . import rpc_transport
 rpc_transport.install()
 
 _connection_cache: dict[str, Any] = {}
+
+# Parameters odoolib.get_connection() accepts, captured once from the real function
+# at import time (before tests can patch it). Used to drop unknown [Connection]
+# keys instead of crashing on them (#194).
+try:
+    _ODOOLIB_PARAMS = frozenset(inspect.signature(odoolib.get_connection).parameters)
+except (TypeError, ValueError):  # pragma: no cover - non-introspectable signature
+    _ODOOLIB_PARAMS = frozenset(
+        {"hostname", "protocol", "port", "database", "login", "password", "user_id"}
+    )
 
 
 def get_connection_from_dict(config_dict: dict[str, Any]) -> Any:
@@ -58,6 +69,13 @@ def get_connection_from_dict(config_dict: dict[str, Any]) -> Any:
             # The OdooClient expects the user ID as 'user_id'
             config_dict["user_id"] = int(config_dict.pop("uid"))
 
+        # Per-connection User-Agent override (#193): WAFs such as Cloudflare
+        # challenge the default client UA on the json2 endpoint. This is applied
+        # to the pooled transport, not passed to odoolib.
+        user_agent = config_dict.pop("user_agent", None)
+        if user_agent:
+            rpc_transport.set_user_agent(str(user_agent))
+
         # Log protocol being used
         protocol = config_dict.get("protocol", "xmlrpc")
         log.info(
@@ -65,8 +83,17 @@ def get_connection_from_dict(config_dict: dict[str, Any]) -> Any:
             f"using {protocol} protocol..."
         )
 
+        # odoolib.get_connection() raises TypeError on any unknown kwarg (#194).
+        # Connection files naturally accumulate extra keys (inline notes, old
+        # credentials kept for reference, settings for other tooling); keep only
+        # the parameters odoolib accepts and ignore the rest.
+        ignored = sorted(k for k in config_dict if k not in _ODOOLIB_PARAMS)
+        if ignored:
+            log.debug(f"Ignoring non-connection config keys: {ignored}")
+        clean = {k: v for k, v in config_dict.items() if k in _ODOOLIB_PARAMS}
+
         # Use odoo-client-lib to establish the connection
-        connection = odoolib.get_connection(**config_dict)
+        connection = odoolib.get_connection(**clean)
         return connection
 
     except (KeyError, ValueError) as e:

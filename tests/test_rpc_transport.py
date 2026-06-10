@@ -101,3 +101,60 @@ def test_get_client_is_singleton() -> None:
         if client is not None:
             client.close()
             rpc_transport._client = None
+
+
+def test_pooled_client_uses_browser_user_agent() -> None:
+    """The pooled client sends a browser-like UA so WAFs don't challenge it (#193)."""
+    orig_client = rpc_transport._client
+    rpc_transport._client = None
+    try:
+        client = rpc_transport._get_client()
+        ua = client.headers.get("User-Agent")
+        assert "Mozilla/5.0" in ua
+        assert "python-httpx" not in ua
+    finally:
+        if (
+            rpc_transport._client is not None
+            and rpc_transport._client is not orig_client
+        ):
+            rpc_transport._client.close()
+        rpc_transport._client = orig_client
+
+
+def test_set_user_agent_overrides_and_resets_client() -> None:
+    """set_user_agent updates the UA and resets the client so it rebuilds (#193)."""
+    orig_ua = rpc_transport._user_agent
+    orig_client = rpc_transport._client
+    rpc_transport._client = None
+    try:
+        first = rpc_transport._get_client()
+        assert first.headers.get("User-Agent") == orig_ua  # default applied
+        rpc_transport.set_user_agent("Custom-Agent/1.0")
+        assert rpc_transport._client is None  # client dropped so UA takes effect
+        assert rpc_transport._user_agent == "Custom-Agent/1.0"
+        rebuilt = rpc_transport._get_client()
+        assert rebuilt.headers.get("User-Agent") == "Custom-Agent/1.0"
+    finally:
+        if rpc_transport._client is not None:
+            rpc_transport._client.close()
+        rpc_transport._user_agent = orig_ua
+        rpc_transport._client = orig_client
+
+
+def test_set_user_agent_noop_for_same_or_empty() -> None:
+    """set_user_agent ignores an empty value or a no-op change."""
+    orig_client = rpc_transport._client
+    rpc_transport._client = None
+    try:
+        client = rpc_transport._get_client()
+        rpc_transport.set_user_agent("")  # empty -> ignored
+        assert rpc_transport._client is client  # not reset
+        rpc_transport.set_user_agent(rpc_transport._user_agent)  # same -> ignored
+        assert rpc_transport._client is client
+    finally:
+        if (
+            rpc_transport._client is not None
+            and rpc_transport._client is not orig_client
+        ):
+            rpc_transport._client.close()
+        rpc_transport._client = orig_client
