@@ -94,7 +94,7 @@ fluvo import --protocol json2 --connection-file conf/connection.conf ...
 * **Required**: No
 * **Description**: The `User-Agent` header sent on RPC requests. Mainly needed when your Odoo server sits behind a **Web Application Firewall** (e.g. Cloudflare) that challenges non-browser clients — see the caveat below.
 * **Default**: a browser-like User-Agent (so the `json2` connector works out of the box behind Cloudflare).
-* **Example**: `user_agent = Mozilla/5.0 (X11; Linux x86_64) ... Chrome/124 Safari/537.36`
+* **Example**: `user_agent = Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36`
 * You can also set it without editing the config via the `FLUVO_USER_AGENT` environment variable. Precedence: config key → env var → built-in browser-like default.
 
 ```{admonition} Cloudflare / WAF caveat for json2
