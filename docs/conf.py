@@ -30,6 +30,20 @@ html_static_path = ["_static"]
 # Fluvo brand palette / logo sizing.
 html_css_files = ["branding.css"]
 
+# Link the docs back to the GitHub repository: a GitHub icon in the header
+# (github_url) plus the shibuya "Edit this page" / repo-stats sidebars, which
+# read the source location from html_context.
+html_theme_options = {
+    "github_url": "https://github.com/GetFluvo/fluvo",
+}
+html_context = {
+    "source_type": "github",
+    "source_user": "GetFluvo",
+    "source_repo": "fluvo",
+    "source_version": "master",
+    "source_docs_path": "/docs/",
+}
+
 
 def on_builder_inited(app: Sphinx) -> None:
     """This function is connected to the 'builder-inited' event.
