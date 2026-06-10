@@ -14,7 +14,7 @@ curl -LsSf [https://astral.sh/uv/install.sh](https://astral.sh/uv/install.sh) | 
 irm [https://astral.sh/uv/install.ps1](https://astral.sh/uv/install.ps1) | iex
 ```
 
-For other installation options, please refer to the [official `uv` documentation](https://astral.sh/uv#installation).
+For other installation options, please refer to the [official `uv` documentation](https://docs.astral.sh/uv/getting-started/installation/).
 
 ## 2. Prerequisites
 

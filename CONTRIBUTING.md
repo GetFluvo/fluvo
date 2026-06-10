@@ -12,9 +12,9 @@ Here is a list of important resources for contributors:
 - [Code of Conduct]
 
 [lgpl 3.0 license]: https://www.gnu.org/licenses/lgpl-3.0
-[source code]: https://github.com/bosd/fluvo
-[documentation]: https://fluvo.readthedocs.io/
-[issue tracker]: https://github.com/bosd/fluvo/issues
+[source code]: https://github.com/getfluvo/fluvo
+[documentation]: https://fluvo.readthedocs.io/en/latest/
+[issue tracker]: https://github.com/getfluvo/fluvo/issues
 
 ## How to report a bug
 
@@ -57,7 +57,7 @@ $ uv run fluvo
 ```
 
 [uv]: https://docs.astral.sh/uv/
-[nox]: https://nox.thea.codes/
+[nox]: https://nox.thea.codes/en/stable/
 
 ## How to test the project
 
@@ -83,7 +83,7 @@ $ nox --session=tests
 Unit tests are located in the _tests_ directory,
 and are written using the [pytest] testing framework.
 
-[pytest]: https://pytest.readthedocs.io/
+[pytest]: https://docs.pytest.org/en/stable/
 
 ## How to submit changes
 
@@ -106,7 +106,7 @@ $ nox --session=pre-commit -- install
 It is recommended to open an issue before starting work on anything.
 This will allow a chance to talk it over with the owners and validate your approach.
 
-[pull request]: https://github.com/bosd/fluvo/pulls
+[pull request]: https://github.com/getfluvo/fluvo/pulls
 
 <!-- github-only -->
 
