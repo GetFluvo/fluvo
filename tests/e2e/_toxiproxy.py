@@ -17,7 +17,6 @@ class Toxiproxy:
     """Talks to a Toxiproxy server's HTTP control API (default ``:8474``)."""
 
     def __init__(self, api_url: str) -> None:
-        """Create a client for the control API at ``api_url`` (e.g. http://h:8474)."""
         self._api = api_url.rstrip("/")
         self._client = httpx.Client(timeout=10.0)
 
