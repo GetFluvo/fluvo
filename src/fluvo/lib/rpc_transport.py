@@ -107,8 +107,10 @@ def _apply_user_agent(url: str, kwargs: dict[str, Any]) -> None:
     override = _user_agent_for(url)
     if override:
         headers = dict(kwargs.get("headers") or {})
-        # An explicit per-host UA is set to pass a WAF, so it must win over any
-        # pre-existing User-Agent header (matches pooled_json_rpc's behaviour).
+        # Drop any pre-existing user-agent (any casing) so we never send a duplicate,
+        # then set the override: an explicit per-host UA must win over an existing
+        # header (matches pooled_json_rpc's behaviour).
+        headers = {k: v for k, v in headers.items() if k.lower() != "user-agent"}
         headers["User-Agent"] = override
         kwargs["headers"] = headers
 

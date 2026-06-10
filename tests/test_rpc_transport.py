@@ -219,3 +219,18 @@ def test_set_user_agent_handles_ipv6_host() -> None:
         assert rpc_transport._user_agent_for("http://[::1]/x") == "UA/v6"
     finally:
         rpc_transport._user_agents.pop("::1", None)
+
+
+def test_apply_user_agent_dedupes_case_insensitive_header() -> None:
+    """A pre-existing lowercase user-agent is replaced, not duplicated (#193 review)."""
+    rpc_transport.set_user_agent("h2.example.com", "Override/2")
+    try:
+        kwargs: dict[str, object] = {"headers": {"user-agent": "old", "X": "y"}}
+        rpc_transport._apply_user_agent("https://h2.example.com/x", kwargs)
+        h = kwargs["headers"]
+        assert h["User-Agent"] == "Override/2"
+        # exactly one user-agent header remains (no lowercase leftover)
+        assert [k for k in h if k.lower() == "user-agent"] == ["User-Agent"]
+        assert h["X"] == "y"
+    finally:
+        rpc_transport._user_agents.pop("h2.example.com", None)
