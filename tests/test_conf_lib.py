@@ -230,3 +230,20 @@ def test_get_connection_applies_user_agent(
     get_connection_from_dict(config_dict)
     mock_set_ua.assert_called_once_with("h", "Mozilla/5.0 custom")
     assert "user_agent" not in mock_get_connection.call_args.kwargs
+
+
+@patch("fluvo.lib.conf_lib.odoolib.get_connection")
+def test_get_connection_does_not_mutate_input(mock_get_connection: MagicMock) -> None:
+    """get_connection_from_dict must not mutate the caller's dict (#194 review)."""
+    config_dict = {
+        "hostname": "h",
+        "database": "d",
+        "login": "l",
+        "password": "p",
+        "uid": "2",
+        "user_agent": "UA",
+        "note": "keep",
+    }
+    snapshot = dict(config_dict)
+    get_connection_from_dict(config_dict)
+    assert config_dict == snapshot  # original dict untouched

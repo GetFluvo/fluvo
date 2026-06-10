@@ -28,7 +28,13 @@ _connection_cache: dict[str, Any] = {}
 # at import time (before tests can patch it). Used to drop unknown [Connection]
 # keys instead of crashing on them (#194).
 try:
-    _ODOOLIB_PARAMS = frozenset(inspect.signature(odoolib.get_connection).parameters)
+    _ODOOLIB_PARAMS = frozenset(
+        name
+        for name, param in inspect.signature(odoolib.get_connection).parameters.items()
+        # Skip *args / **kwargs: they aren't real named params to match against.
+        if param.kind
+        not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+    )
 except (TypeError, ValueError):  # pragma: no cover - non-introspectable signature
     _ODOOLIB_PARAMS = frozenset(
         {"hostname", "protocol", "port", "database", "login", "password", "user_id"}
@@ -47,6 +53,9 @@ def get_connection_from_dict(config_dict: dict[str, Any]) -> Any:
         An initialized and connected Odoo client object.
     """
     try:
+        # Work on a copy so we never mutate the caller's dict (we pop/convert keys).
+        config_dict = dict(config_dict)
+
         # Handle special _config_file key for protocol override
         config_file = config_dict.pop("_config_file", None)
         if config_file:

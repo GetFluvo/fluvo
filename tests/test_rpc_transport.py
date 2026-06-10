@@ -198,3 +198,15 @@ def test_apply_user_agent_overrides_existing_header() -> None:
         assert kwargs["headers"] == {"User-Agent": "Override/1", "X": "y"}
     finally:
         rpc_transport._user_agents.pop("h.example.com", None)
+
+
+def test_set_user_agent_strips_scheme_and_port() -> None:
+    """A scheme or port in the hostname is reduced to the bare host (#193 review)."""
+    rpc_transport.set_user_agent("https://Waf.Example.com:443", "UA/scheme")
+    rpc_transport.set_user_agent("db.example.com:8069", "UA/port")
+    try:
+        assert rpc_transport._user_agent_for("https://waf.example.com/x") == "UA/scheme"
+        assert rpc_transport._user_agent_for("http://db.example.com/y") == "UA/port"
+    finally:
+        rpc_transport._user_agents.pop("waf.example.com", None)
+        rpc_transport._user_agents.pop("db.example.com", None)
