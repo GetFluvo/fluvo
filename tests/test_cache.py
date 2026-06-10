@@ -355,8 +355,8 @@ def test_export_id_map_exports_caches_and_reuses(
     mock_resolve.return_value = tmp_path
     conn = MagicMock()
     main_model, imd_model = MagicMock(), MagicMock()
-    conn.get_model.side_effect = (
-        lambda m: imd_model if m == "ir.model.data" else main_model
+    conn.get_model.side_effect = lambda m: (
+        imd_model if m == "ir.model.data" else main_model
     )
     # country_id comes back as [id, name] -> exercises the list-value key path.
     main_model.search_read.return_value = [
