@@ -1,5 +1,8 @@
 """Tests for auto-groupby detection (deadlock-avoidance column selection)."""
 
+from pathlib import Path
+from typing import Any
+
 import polars as pl
 
 from fluvo.lib.preflight import _detect_groupby_column
@@ -45,7 +48,7 @@ def test_no_relational_column_returns_none() -> None:
     assert _detect_groupby_column(df, list(df.columns), _FIELDS, "res.partner") is None
 
 
-def test_auto_groupby_wiring_sets_import_plan(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_auto_groupby_wiring_sets_import_plan(tmp_path: Path) -> None:
     """auto_groupby=True flows through preflight and sets import_plan['groupby']."""
     from fluvo.lib.preflight import _plan_deferrals_and_strategies
 
@@ -56,7 +59,7 @@ def test_auto_groupby_wiring_sets_import_plan(tmp_path) -> None:  # type: ignore
         "name": {"type": "char"},
         "country_id": {"type": "many2one", "relation": "res.country"},
     }
-    import_plan: dict = {}  # type: ignore[type-arg]
+    import_plan: dict[str, Any] = {}
     _plan_deferrals_and_strategies(
         ["id", "name", "country_id/id"],
         odoo_fields,
@@ -70,7 +73,7 @@ def test_auto_groupby_wiring_sets_import_plan(tmp_path) -> None:  # type: ignore
     assert import_plan.get("groupby") == ["country_id/id"]
 
 
-def test_auto_groupby_respects_explicit_groupby(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_auto_groupby_respects_explicit_groupby(tmp_path: Path) -> None:
     """auto_groupby does nothing when the user already passed --groupby."""
     from fluvo.lib.preflight import _plan_deferrals_and_strategies
 
@@ -81,7 +84,7 @@ def test_auto_groupby_respects_explicit_groupby(tmp_path) -> None:  # type: igno
         "name": {"type": "char"},
         "country_id": {"type": "many2one", "relation": "res.country"},
     }
-    import_plan: dict = {}  # type: ignore[type-arg]
+    import_plan: dict[str, Any] = {}
     _plan_deferrals_and_strategies(
         ["id", "name", "country_id/id"],
         odoo_fields,
@@ -128,14 +131,14 @@ def test_skips_sparse_column() -> None:
     assert _detect_groupby_column(df, list(df.columns), _FIELDS, "res.partner") is None
 
 
-def test_auto_groupby_wiring_no_detectable_column(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_auto_groupby_wiring_no_detectable_column(tmp_path: Path) -> None:
     """auto_groupby with no groupable column leaves the plan unset (no-op + log)."""
     from fluvo.lib.preflight import _plan_deferrals_and_strategies
 
     csv = tmp_path / "p.csv"
     csv.write_text("id,name\na,A\nb,B\n")  # no many2one column at all
     odoo_fields = {"id": {"type": "char"}, "name": {"type": "char"}}
-    import_plan: dict = {}  # type: ignore[type-arg]
+    import_plan: dict[str, Any] = {}
     _plan_deferrals_and_strategies(
         ["id", "name"],
         odoo_fields,
@@ -175,6 +178,25 @@ def test_prefers_higher_cardinality_among_candidates() -> None:
 def test_handles_non_string_column_without_error() -> None:
     """A non-string relational column is analyzed without a Polars error (#191)."""
     df = pl.DataFrame({"id": ["a", "b", "c", "d"], "country_id/id": [1, 1, 2, 1]})
+    assert (
+        _detect_groupby_column(df, list(df.columns), _FIELDS, "res.partner")
+        == "country_id/id"
+    )
+
+
+def test_selects_modestly_duplicated_high_cardinality() -> None:
+    """A high-cardinality column with modest duplication (dup<2) is still chosen.
+
+    The old dup>=2 gate disqualified exactly the high-cardinality columns the
+    cardinality-preference selection is meant to favour (#191 review).
+    """
+    # 6 rows, 4 unique -> dup 1.5: real but modest duplication, lots of partitions.
+    df = pl.DataFrame(
+        {
+            "id": [str(i) for i in range(6)],
+            "country_id/id": ["a", "a", "b", "c", "d", "d"],
+        }
+    )
     assert (
         _detect_groupby_column(df, list(df.columns), _FIELDS, "res.partner")
         == "country_id/id"

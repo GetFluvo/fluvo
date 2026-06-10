@@ -500,14 +500,16 @@ def _detect_groupby_column(
         if n_unique < 2 or n_unique >= non_null.len():
             continue
         dup = non_null.len() / n_unique
-        # Among columns with meaningful duplication (>=2 rows per target), pick the
-        # one with the HIGHEST cardinality. Selecting the highest *duplication*
-        # instead would favour low-cardinality columns (e.g. a 2-value country),
-        # which collapse the import into a couple of huge serial partitions, killing
-        # parallelism and prolonging lock contention (see performance_tuning.md).
-        # Highest cardinality maximizes parallel partitions while still grouping
-        # contended writes.
-        if dup >= 2.0 and n_unique > best_n_unique:
+        # Among columns with at least *some* real duplication, pick the one with the
+        # HIGHEST cardinality. Selecting the highest *duplication* instead would
+        # favour low-cardinality columns (e.g. a 2-value country), which collapse the
+        # import into a couple of huge serial partitions, killing parallelism and
+        # prolonging lock contention (see performance_tuning.md). Highest cardinality
+        # maximizes parallel partitions while still grouping contended writes.
+        # The threshold is deliberately low (~10% duplicates): a high-cardinality
+        # column with modest duplication still groups the few contended writes while
+        # keeping most records parallel, so it shouldn't be disqualified.
+        if dup >= 1.1 and n_unique > best_n_unique:
             best_n_unique, best = n_unique, field_name
     return best
 
