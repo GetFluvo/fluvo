@@ -177,3 +177,24 @@ def test_pooled_json_rpc_injects_per_host_user_agent() -> None:
         )
     finally:
         rpc_transport._user_agents.pop("rpc.example.com", None)
+
+
+def test_set_user_agent_normalizes_hostname() -> None:
+    """Hostnames are stored case-insensitively and stripped (#193 review)."""
+    rpc_transport.set_user_agent("  Odoo.Example.COM  ", "UA/1")
+    try:
+        # httpx.URL(...).host is lowercased; the registry key must match it.
+        assert rpc_transport._user_agent_for("https://odoo.example.com/x") == "UA/1"
+    finally:
+        rpc_transport._user_agents.pop("odoo.example.com", None)
+
+
+def test_apply_user_agent_overrides_existing_header() -> None:
+    """An explicit per-host UA overrides a pre-set User-Agent header (#193 review)."""
+    rpc_transport.set_user_agent("h.example.com", "Override/1")
+    try:
+        kwargs: dict[str, object] = {"headers": {"User-Agent": "old", "X": "y"}}
+        rpc_transport._apply_user_agent("https://h.example.com/x", kwargs)
+        assert kwargs["headers"] == {"User-Agent": "Override/1", "X": "y"}
+    finally:
+        rpc_transport._user_agents.pop("h.example.com", None)

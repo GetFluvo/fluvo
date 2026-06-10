@@ -77,8 +77,11 @@ def set_user_agent(hostname: str, user_agent: str) -> None:
         hostname: The Odoo host the override applies to (from ``[Connection]``).
         user_agent: The User-Agent header value to send to that host.
     """
-    if hostname and user_agent:
-        _user_agents[hostname] = user_agent
+    # Normalize: the lookup key (httpx.URL(...).host) is lowercased, so store the
+    # registration key the same way and trim accidental whitespace.
+    host = (hostname or "").strip().lower()
+    if host and user_agent:
+        _user_agents[host] = user_agent
 
 
 def _user_agent_for(url: str) -> str | None:
@@ -97,7 +100,9 @@ def _apply_user_agent(url: str, kwargs: dict[str, Any]) -> None:
     override = _user_agent_for(url)
     if override:
         headers = dict(kwargs.get("headers") or {})
-        headers.setdefault("User-Agent", override)
+        # An explicit per-host UA is set to pass a WAF, so it must win over any
+        # pre-existing User-Agent header (matches pooled_json_rpc's behaviour).
+        headers["User-Agent"] = override
         kwargs["headers"] = headers
 
 
