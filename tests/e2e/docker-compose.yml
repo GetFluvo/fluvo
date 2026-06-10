@@ -29,3 +29,15 @@ services:
     # Long-running server; the harness execs `odoo -d <db> -i base --stop-after-init`
     # into this container to create the source/target databases on demand.
     command: ["odoo", "--db_host=db", "--db_user=odoo", "--db_password=odoo"]
+
+  # Fault-injection TCP proxy in front of Odoo, for the opt-in chaos/resilience
+  # tests (-m chaos). A test creates a proxy (localhost:18070 -> odoo:8069) via the
+  # control API on :8474 and adds toxics (reset_peer, latency, ...) to it.
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    depends_on:
+      - odoo
+    ports:
+      - "${FLUVO_E2E_TOXIPROXY_API_PORT:-8474}:8474" # control API
+      - "${FLUVO_E2E_TOXIPROXY_PORT:-18070}:18070" # proxied Odoo
+    command: ["-host=0.0.0.0"]
