@@ -7,6 +7,7 @@ to deterministically reproduce the kind of transport failures real imports hit.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from typing import Any
 
@@ -24,11 +25,11 @@ class Toxiproxy:
         """Block until the control API responds, or raise after ``timeout`` s."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            try:
+            # The control API may not be up yet during startup; retry until the
+            # deadline, ignoring connection/HTTP errors in the meantime.
+            with contextlib.suppress(httpx.HTTPError):
                 if self._client.get(f"{self._api}/version").status_code == 200:
                     return
-            except httpx.HTTPError:
-                pass
             time.sleep(1.0)
         raise RuntimeError("Toxiproxy control API did not become ready")
 
@@ -71,11 +72,13 @@ class Toxiproxy:
 
     def remove_toxic(self, proxy: str, name: str) -> None:
         """Remove a single toxic from ``proxy``."""
-        self._client.delete(f"{self._api}/proxies/{proxy}/toxics/{name}")
+        resp = self._client.delete(f"{self._api}/proxies/{proxy}/toxics/{name}")
+        resp.raise_for_status()
 
     def reset(self) -> None:
         """Remove all toxics from, and re-enable, every proxy."""
-        self._client.post(f"{self._api}/reset")
+        resp = self._client.post(f"{self._api}/reset")
+        resp.raise_for_status()
 
     def delete_proxy(self, name: str) -> None:
         """Delete a proxy entirely."""

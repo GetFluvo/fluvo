@@ -15,6 +15,7 @@ Environment knobs:
 
 from __future__ import annotations
 
+import contextlib
 import os
 from collections.abc import Iterator
 from urllib.parse import urlparse
@@ -160,8 +161,11 @@ def toxiproxy(odoo_endpoint: dict[str, object]) -> Iterator[object]:
 
     Skipped unless the stack is managed (the external-Odoo path has no proxy).
 
+    Args:
+        odoo_endpoint: Managed Odoo endpoint details.
+
     Yields:
-        A Toxiproxy control client; tests add toxics to the 'odoo' proxy.
+        object: A Toxiproxy control client; tests add toxics to the 'odoo' proxy.
     """
     if not odoo_endpoint["managed"]:
         pytest.skip("chaos tests require the managed Odoo stack (toxiproxy)")
@@ -169,13 +173,18 @@ def toxiproxy(odoo_endpoint: dict[str, object]) -> Iterator[object]:
 
     host = str(odoo_endpoint["host"])
     tp = Toxiproxy(f"http://{host}:{TOXI_API_PORT}")
-    tp.wait_ready()
-    tp.create_proxy("odoo", listen=f"0.0.0.0:{TOXI_PROXY_PORT}", upstream="odoo:8069")
     try:
+        tp.wait_ready()
+        tp.create_proxy(
+            "odoo", listen=f"0.0.0.0:{TOXI_PROXY_PORT}", upstream="odoo:8069"
+        )
         yield tp
     finally:
-        tp.reset()
-        tp.delete_proxy("odoo")
+        # Best-effort teardown: never let a flaky proxy mask the test result.
+        with contextlib.suppress(Exception):
+            tp.reset()
+        with contextlib.suppress(Exception):
+            tp.delete_proxy("odoo")
         tp.close()
 
 

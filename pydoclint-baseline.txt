@@ -378,9 +378,6 @@ tests/e2e/conftest.py
     DOC101: Function `odoo_endpoint`: Docstring contains fewer arguments than in function signature.
     DOC103: Function `odoo_endpoint`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [request: pytest.FixtureRequest].
     DOC404: Function `odoo_endpoint` yield type(s) in docstring not consistent with the return annotation. The yield type (the 0th arg in Generator[...]/Iterator[...]): (str, object); docstring "yields" section types:
-    DOC101: Function `toxiproxy`: Docstring contains fewer arguments than in function signature.
-    DOC103: Function `toxiproxy`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [odoo_endpoint: dict[str, object]].
-    DOC404: Function `toxiproxy` yield type(s) in docstring not consistent with the return annotation. The yield type (the 0th arg in Generator[...]/Iterator[...]): object; docstring "yields" section types:
 --------------------
 tests/e2e/generators.py
     DOC101: Function `write_csv`: Docstring contains fewer arguments than in function signature.
