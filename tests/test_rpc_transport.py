@@ -193,7 +193,7 @@ def test_apply_user_agent_overrides_existing_header() -> None:
     """An explicit per-host UA overrides a pre-set User-Agent header (#193 review)."""
     rpc_transport.set_user_agent("h.example.com", "Override/1")
     try:
-        kwargs: dict[str, object] = {"headers": {"User-Agent": "old", "X": "y"}}
+        kwargs: dict[str, Any] = {"headers": {"User-Agent": "old", "X": "y"}}
         rpc_transport._apply_user_agent("https://h.example.com/x", kwargs)
         assert kwargs["headers"] == {"User-Agent": "Override/1", "X": "y"}
     finally:
@@ -225,7 +225,7 @@ def test_apply_user_agent_dedupes_case_insensitive_header() -> None:
     """A pre-existing lowercase user-agent is replaced, not duplicated (#193 review)."""
     rpc_transport.set_user_agent("h2.example.com", "Override/2")
     try:
-        kwargs: dict[str, object] = {"headers": {"user-agent": "old", "X": "y"}}
+        kwargs: dict[str, Any] = {"headers": {"user-agent": "old", "X": "y"}}
         rpc_transport._apply_user_agent("https://h2.example.com/x", kwargs)
         h = kwargs["headers"]
         assert h["User-Agent"] == "Override/2"
