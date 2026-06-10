@@ -228,5 +228,5 @@ def test_get_connection_applies_user_agent(
         "user_agent": "Mozilla/5.0 custom",
     }
     get_connection_from_dict(config_dict)
-    mock_set_ua.assert_called_once_with("Mozilla/5.0 custom")
+    mock_set_ua.assert_called_once_with("h", "Mozilla/5.0 custom")
     assert "user_agent" not in mock_get_connection.call_args.kwargs

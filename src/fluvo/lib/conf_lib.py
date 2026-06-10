@@ -69,12 +69,13 @@ def get_connection_from_dict(config_dict: dict[str, Any]) -> Any:
             # The OdooClient expects the user ID as 'user_id'
             config_dict["user_id"] = int(config_dict.pop("uid"))
 
-        # Per-connection User-Agent override (#193): WAFs such as Cloudflare
-        # challenge the default client UA on the json2 endpoint. This is applied
-        # to the pooled transport, not passed to odoolib.
+        # Per-host User-Agent override (#193): WAFs such as Cloudflare challenge
+        # the default client UA on the json2 endpoint. Registered per-host on the
+        # pooled transport, not passed to odoolib.
         user_agent = config_dict.pop("user_agent", None)
-        if user_agent:
-            rpc_transport.set_user_agent(str(user_agent))
+        hostname = config_dict.get("hostname")
+        if user_agent and hostname:
+            rpc_transport.set_user_agent(str(hostname), str(user_agent))
 
         # Log protocol being used
         protocol = config_dict.get("protocol", "xmlrpc")

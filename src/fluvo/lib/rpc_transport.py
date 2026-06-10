@@ -52,32 +52,53 @@ _DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
-_user_agent: str = os.environ.get("FLUVO_USER_AGENT") or _DEFAULT_USER_AGENT
+# Default UA, sent on every pooled request as the client's default header.
+_default_user_agent: str = os.environ.get("FLUVO_USER_AGENT") or _DEFAULT_USER_AGENT
+# Per-host UA overrides (hostname -> User-Agent), injected per-request. Keeping
+# these per-request rather than mutating the shared client means a connection's
+# custom UA never closes/rebuilds the pool or races with in-flight requests from
+# other threads or connections.
+_user_agents: dict[str, str] = {}
 
 _client: httpx.Client | None = None
 _client_lock = threading.Lock()
 _installed = False
 
 
-def set_user_agent(user_agent: str) -> None:
-    """Override the User-Agent sent on pooled RPC requests.
+def set_user_agent(hostname: str, user_agent: str) -> None:
+    """Register a per-host User-Agent override for pooled requests.
 
-    Resets the pooled client so the new header takes effect on the next call.
-    Used by ``conf_lib`` when a connection file sets ``user_agent`` (e.g. to get
-    past a WAF such as Cloudflare that challenges the default UA on json2).
+    The override is injected per-request based on the request URL's host, so it
+    never closes or rebuilds the shared pooled client. Used by ``conf_lib`` when a
+    connection file sets ``user_agent`` (e.g. to pass a WAF such as Cloudflare that
+    challenges the default UA on the json2 endpoint).
 
     Args:
-        user_agent: The User-Agent header value to send on pooled requests.
+        hostname: The Odoo host the override applies to (from ``[Connection]``).
+        user_agent: The User-Agent header value to send to that host.
     """
-    global _user_agent, _client
-    if not user_agent or user_agent == _user_agent:
-        return
-    with _client_lock:
-        _user_agent = user_agent
-        # Drop the existing client so the next request rebuilds it with the new UA.
-        if _client is not None:
-            _client.close()
-            _client = None
+    if hostname and user_agent:
+        _user_agents[hostname] = user_agent
+
+
+def _user_agent_for(url: str) -> str | None:
+    """Return the registered per-host User-Agent override for ``url``, if any."""
+    if not _user_agents:
+        return None
+    try:
+        host = httpx.URL(url).host
+    except Exception:  # pragma: no cover - malformed url
+        return None
+    return _user_agents.get(host)
+
+
+def _apply_user_agent(url: str, kwargs: dict[str, Any]) -> None:
+    """Inject the per-host User-Agent override into a request's headers, if set."""
+    override = _user_agent_for(url)
+    if override:
+        headers = dict(kwargs.get("headers") or {})
+        headers.setdefault("User-Agent", override)
+        kwargs["headers"] = headers
 
 
 def _get_client() -> httpx.Client:
@@ -91,7 +112,7 @@ def _get_client() -> httpx.Client:
                     limits=httpx.Limits(
                         max_keepalive_connections=32, max_connections=64
                     ),
-                    headers={"User-Agent": _user_agent},
+                    headers={"User-Agent": _default_user_agent},
                 )
     return _client
 
@@ -110,11 +131,13 @@ class _PooledHttpx:
     def post(self, url: str, **kwargs: Any) -> Any:
         """POST via the pooled client."""
         kwargs.pop("timeout", None)
+        _apply_user_agent(url, kwargs)
         return _get_client().post(url, **kwargs)
 
     def get(self, url: str, **kwargs: Any) -> Any:
         """GET via the pooled client."""
         kwargs.pop("timeout", None)
+        _apply_user_agent(url, kwargs)
         return _get_client().get(url, **kwargs)
 
     def __getattr__(self, name: str) -> Any:
@@ -142,9 +165,11 @@ def pooled_json_rpc(url: str, fct_name: str, params: dict[str, Any]) -> Any:
         "params": params,
         "id": random.randint(0, 1000000000),  # noqa: S311 (id, not crypto)
     }
-    response = _get_client().post(
-        url, json=data, headers={"Content-Type": "application/json"}
-    )
+    headers = {"Content-Type": "application/json"}
+    override = _user_agent_for(url)
+    if override:
+        headers["User-Agent"] = override
+    response = _get_client().post(url, json=data, headers=headers)
     result = response.json()
     if result.get("error", None):
         raise JsonRPCException(result["error"])
