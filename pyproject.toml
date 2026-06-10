@@ -130,6 +130,9 @@ source = ["fluvo", "tests"]
 omit = [
     # Exclude the legacy v9 workflow from coverage reports
     "src/fluvo/lib/workflow/invoice_v9.py",
+    # The e2e harness runs only under the Docker stack (nox -s e2e), never in the
+    # unit-coverage job, so it would otherwise report as 0% noise.
+    "tests/e2e/*",
 ]
 
 [tool.coverage.report]

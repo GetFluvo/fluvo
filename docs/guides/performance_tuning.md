@@ -196,6 +196,36 @@ import_params = {
 
 This will add `--groupby=parent_id/id` to your generated `load.sh` script.
 
+### When to use `--groupby` (and when *not* to)
+
+`--groupby` only matters for **parallel** imports — it trades a little parallelism for safety. Reach for it when **all** of these hold:
+
+- You run with **`--worker` greater than 1**. With a single worker there is no concurrency, so `--groupby` does nothing useful.
+- Your records **share a written/locked related record** — e.g. many `res.partner` contacts under the same company, or order lines on the same order. That sharing is what triggers the "concurrent update" errors.
+- The grouping column has **many distinct values, each with several rows**, so partitioning still leaves real parallelism.
+
+**Avoid `--groupby` when:**
+
+- You import single-threaded (`--worker 1`) — it is pure overhead.
+- Records are independent (no shared parent/relation) — there is nothing to serialize.
+- The column has **few distinct values** (e.g. a two-value status). Grouping then creates a couple of huge serial partitions, which kills parallelism *and* holds locks on each shared row longer — making contention worse, not better. Group by the column that is actually contended (usually the shared `*_id/id`), not just any column.
+
+```{important}
+`--groupby` is **not** for import *ordering*. Getting a child imported after its parent is handled by the **two-pass deferral** (`--auto-defer` / `--deferred-fields`), not `--groupby`. Use `--groupby` for *lock contention* in parallel mode and `--auto-defer` for *relational correctness* — they compose.
+```
+
+### Letting Fluvo choose the column: `--auto-groupby`
+
+If you would rather not pick the column yourself, add **`--auto-groupby`** (and leave `--groupby` unset). During pre-flight, Fluvo inspects the data and picks a non-self `many2one` column to partition by. Among columns with real duplication (at least two rows per target), it chooses the one with the **highest cardinality** — i.e. the most distinct targets. That deliberately avoids the low-cardinality trap described above: it groups contended writes together while keeping the **largest number of partitions**, so parallelism is preserved. It is **conservative** (a column needs real duplication *and* more than one group, otherwise it groups by nothing), **off by default**, and never overrides an explicit `--groupby`.
+
+```python
+import_params = {
+    'model': 'res.partner',
+    'worker': 4,
+    'auto_groupby': True,  # Fluvo picks the deadlock-avoidance column for you
+}
+```
+
 ## Understanding Batch Size (`--size`)
 
 The `--size` option is one of the most critical parameters for controlling the performance and reliability of your imports. In simple terms, it controls **how many records are processed in a single database transaction**.

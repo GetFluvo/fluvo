@@ -447,6 +447,73 @@ def _validate_header(  # noqa: C901
     return True
 
 
+def _detect_groupby_column(
+    df: "pl.DataFrame",
+    header: list[str],
+    odoo_fields: dict[str, Any],
+    model: str,
+) -> Optional[str]:
+    """Pick a many2one column to group by, to reduce concurrent-write contention.
+
+    Records that write to the same related record (e.g. a shared company/category)
+    can deadlock when imported in parallel. Grouping such records into the same
+    partition serializes those writes without losing cross-group parallelism.
+
+    Returns the header column name of the non-self many2one with the highest
+    duplication (most shared targets) that still yields more than one group, or
+    None when no column would meaningfully help.
+
+    Args:
+        df: The source data (string columns).
+        header: The source header.
+        odoo_fields: fields_get metadata for the model.
+        model: The target model (self-references are skipped; handled by deferral).
+
+    Returns:
+        The chosen header column name, or None.
+    """
+    n_rows = df.height
+    if n_rows < 2:
+        return None
+    best: Optional[str] = None
+    best_n_unique = 0
+    for field_name in header:
+        # Strip any relational suffix: handles 'x_id/id', 'x_id/.id' and 'x_id'.
+        clean = field_name.split("/", 1)[0]
+        info = odoo_fields.get(clean)
+        if not info or info.get("type") != "many2one":
+            continue
+        if info.get("relation") == model:
+            continue  # self-references handled by two-pass deferral / sort
+        if field_name not in df.columns:
+            continue
+        col = df.get_column(field_name)
+        non_null = col.drop_nulls()
+        # Only string columns carry empty-string "blanks"; guard the filter so a
+        # non-string column can't raise a Polars ComputeError.
+        if non_null.dtype == pl.Utf8:
+            non_null = non_null.filter(non_null != "")
+        if non_null.len() < 2:
+            continue
+        n_unique = non_null.n_unique()
+        # Need >1 group (else no parallelism) and not all-unique (else no contention).
+        if n_unique < 2 or n_unique >= non_null.len():
+            continue
+        dup = non_null.len() / n_unique
+        # Among columns with at least *some* real duplication, pick the one with the
+        # HIGHEST cardinality. Selecting the highest *duplication* instead would
+        # favour low-cardinality columns (e.g. a 2-value country), which collapse the
+        # import into a couple of huge serial partitions, killing parallelism and
+        # prolonging lock contention (see performance_tuning.md). Highest cardinality
+        # maximizes parallel partitions while still grouping contended writes.
+        # The threshold is deliberately low (~10% duplicates): a high-cardinality
+        # column with modest duplication still groups the few contended writes while
+        # keeping most records parallel, so it shouldn't be disqualified.
+        if dup >= 1.1 and n_unique > best_n_unique:
+            best_n_unique, best = n_unique, field_name
+    return best
+
+
 def _plan_deferrals_and_strategies(  # noqa: C901
     header: list[str],
     odoo_fields: dict[str, Any],
@@ -518,6 +585,20 @@ def _plan_deferrals_and_strategies(  # noqa: C901
     # Always expose required relational fields so the importer can guard against
     # an explicit --deferred-fields that would otherwise break Pass 1.
     import_plan["required_relational_fields"] = required_relational_fields
+
+    # Auto-groupby: pick a many2one column to partition by, reducing concurrent
+    # writes to shared related records (deadlock avoidance). Only when enabled and
+    # the user did not pass an explicit --groupby.
+    if kwargs.get("auto_groupby") and not kwargs.get("groupby"):
+        groupby_col = _detect_groupby_column(df, header, odoo_fields, model)
+        if groupby_col:
+            import_plan["groupby"] = [groupby_col]
+            log.info(
+                f"Auto-groupby: partitioning by '{groupby_col}' to reduce "
+                f"concurrent-write contention."
+            )
+        else:
+            log.info("Auto-groupby: no column with enough duplication to help.")
 
     if deferrable_fields:
         if auto_defer:

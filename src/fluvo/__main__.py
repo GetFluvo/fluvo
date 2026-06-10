@@ -970,6 +970,14 @@ def vat_validate_cmd(
     "by that column. This process repeats for subsequent columns.",
 )
 @click.option(
+    "--auto-groupby",
+    is_flag=True,
+    default=False,
+    help="Automatically pick a many2one column to group by (deadlock avoidance) "
+    "when --groupby is not given. Chooses the relation with the most shared "
+    "targets. Off by default.",
+)
+@click.option(
     "--ignore", default=None, help="Comma-separated list of columns to ignore."
 )
 @click.option(

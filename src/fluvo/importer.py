@@ -141,6 +141,7 @@ def run_import(  # noqa: C901
     o2m: bool,
     groupby: Optional[list[str]],
     auto_create_refs: bool = False,
+    auto_groupby: bool = False,
     set_empty_on_missing: bool = False,
     batch_delay: float = 0.0,
     stream: bool = False,
@@ -245,10 +246,19 @@ def run_import(  # noqa: C901
             ignore=ignore or [],
             o2m=o2m,
             auto_defer=auto_defer,
+            auto_groupby=auto_groupby,
+            groupby=groupby,
             check_refs=check_refs,
             encoding=encoding,
         ):
             return None
+
+    # Apply an auto-detected groupby column when the user enabled --auto-groupby
+    # and did not pass an explicit --groupby (deadlock avoidance).
+    if auto_groupby and not groupby:
+        groupby = import_plan.get("groupby") or None
+        if groupby:
+            log.info(f"Auto-groupby active: grouping by {', '.join(groupby)}.")
 
     # --- Strategy Execution ---
     sorted_temp_file = None

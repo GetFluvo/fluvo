@@ -238,3 +238,26 @@ def test_import_data_skip_existing(tmp_path: Path) -> None:
     result, store = _run(tmp_path, "id,name\nrec_a,A\n", skip_existing=True)
     assert result is not None
     assert len(store.records.get("res.partner", {})) == 1
+
+
+def test_import_data_groupby_imports_all_records(tmp_path: Path) -> None:
+    """Grouping by a column (split_by_cols / --groupby) loses no records."""
+    csv = "id,name,country_id/id\na,A,be\nb,B,be\nc,C,fr\nd,D,be\n"
+    _result, store = _run(tmp_path, csv, split_by_cols=["country_id/id"])
+    recs = store.records.get("res.partner", {})
+    assert len(recs) == 4  # every record imported despite partitioning
+    assert {v["name"] for v in recs.values()} == {"A", "B", "C", "D"}
+
+
+def test_import_data_groupby_with_deferred_no_loss(tmp_path: Path) -> None:
+    """Grouping + a deferred self-ref still imports everything and resolves Pass 2."""
+    csv = "id,name,country_id/id,parent_id/id\nco,Co,be,\na,A,be,co\nb,B,fr,co\n"
+    _result, store = _run(
+        tmp_path, csv, split_by_cols=["country_id/id"], deferred_fields=["parent_id/id"]
+    )
+    recs = store.records.get("res.partner", {})
+    assert len(recs) == 3
+    co_id = next(db for db, v in recs.items() if v["name"] == "Co")
+    for nm in ("A", "B"):
+        child = next(v for v in recs.values() if v["name"] == nm)
+        assert child.get("parent_id") == co_id
