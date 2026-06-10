@@ -39,5 +39,5 @@ services:
       - odoo
     ports:
       - "${FLUVO_E2E_TOXIPROXY_API_PORT:-8474}:8474" # control API
-      - "${FLUVO_E2E_TOXIPROXY_PORT:-18070}:18070" # proxied Odoo
+      - "${FLUVO_E2E_TOXIPROXY_PORT:-18070}:${FLUVO_E2E_TOXIPROXY_PORT:-18070}" # proxied Odoo
     command: ["-host=0.0.0.0"]
