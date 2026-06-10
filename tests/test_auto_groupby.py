@@ -147,3 +147,35 @@ def test_auto_groupby_wiring_no_detectable_column(tmp_path) -> None:  # type: ig
         groupby=None,
     )
     assert "groupby" not in import_plan
+
+
+def test_prefers_higher_cardinality_among_candidates() -> None:
+    """Among duplicated columns, the higher-cardinality one wins (#191 review).
+
+    A low-cardinality column has a higher duplication ratio but yields fewer
+    partitions, serializing the import and worsening lock contention
+    (performance_tuning.md). The detector must pick the higher-cardinality column to
+    preserve parallelism.
+    """
+    df = pl.DataFrame(
+        {
+            "id": [str(i) for i in range(8)],
+            # 2 unique -> dup 4.0, but only 2 partitions
+            "country_id/id": ["be", "be", "be", "be", "fr", "fr", "fr", "fr"],
+            # 4 unique -> dup 2.0, 4 partitions -> preferred
+            "user_id/id": ["u1", "u1", "u2", "u2", "u3", "u3", "u4", "u4"],
+        }
+    )
+    assert (
+        _detect_groupby_column(df, list(df.columns), _FIELDS, "res.partner")
+        == "user_id/id"
+    )
+
+
+def test_handles_non_string_column_without_error() -> None:
+    """A non-string relational column is analyzed without a Polars error (#191)."""
+    df = pl.DataFrame({"id": ["a", "b", "c", "d"], "country_id/id": [1, 1, 2, 1]})
+    assert (
+        _detect_groupby_column(df, list(df.columns), _FIELDS, "res.partner")
+        == "country_id/id"
+    )

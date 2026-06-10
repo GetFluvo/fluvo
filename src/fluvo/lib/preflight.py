@@ -476,7 +476,7 @@ def _detect_groupby_column(
     if n_rows < 2:
         return None
     best: Optional[str] = None
-    best_dup = 0.0
+    best_n_unique = 0
     for field_name in header:
         # Strip any relational suffix: handles 'x_id/id', 'x_id/.id' and 'x_id'.
         clean = field_name.split("/", 1)[0]
@@ -487,10 +487,12 @@ def _detect_groupby_column(
             continue  # self-references handled by two-pass deferral / sort
         if field_name not in df.columns:
             continue
-        # Drop nulls first, then empties, to avoid Polars null-propagation in the mask.
         col = df.get_column(field_name)
         non_null = col.drop_nulls()
-        non_null = non_null.filter(non_null != "")
+        # Only string columns carry empty-string "blanks"; guard the filter so a
+        # non-string column can't raise a Polars ComputeError.
+        if non_null.dtype == pl.Utf8:
+            non_null = non_null.filter(non_null != "")
         if non_null.len() < 2:
             continue
         n_unique = non_null.n_unique()
@@ -498,10 +500,16 @@ def _detect_groupby_column(
         if n_unique < 2 or n_unique >= non_null.len():
             continue
         dup = non_null.len() / n_unique
-        if dup > best_dup:
-            best_dup, best = dup, field_name
-    # Only worth grouping when there is meaningful duplication (>=2 rows/target).
-    return best if best_dup >= 2.0 else None
+        # Among columns with meaningful duplication (>=2 rows per target), pick the
+        # one with the HIGHEST cardinality. Selecting the highest *duplication*
+        # instead would favour low-cardinality columns (e.g. a 2-value country),
+        # which collapse the import into a couple of huge serial partitions, killing
+        # parallelism and prolonging lock contention (see performance_tuning.md).
+        # Highest cardinality maximizes parallel partitions while still grouping
+        # contended writes.
+        if dup >= 2.0 and n_unique > best_n_unique:
+            best_n_unique, best = n_unique, field_name
+    return best
 
 
 def _plan_deferrals_and_strategies(  # noqa: C901

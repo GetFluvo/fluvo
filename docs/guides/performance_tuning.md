@@ -216,7 +216,7 @@ This will add `--groupby=parent_id/id` to your generated `load.sh` script.
 
 ### Letting Fluvo choose the column: `--auto-groupby`
 
-If you would rather not pick the column yourself, add **`--auto-groupby`** (and leave `--groupby` unset). During pre-flight, Fluvo inspects the data and automatically selects the non-self `many2one` column with the most shared targets — the most likely source of contention. It is **conservative**: it only picks a column with real duplication (at least two rows per target) and more than one group, otherwise it groups by nothing. It is **off by default** and never overrides an explicit `--groupby`.
+If you would rather not pick the column yourself, add **`--auto-groupby`** (and leave `--groupby` unset). During pre-flight, Fluvo inspects the data and picks a non-self `many2one` column to partition by. Among columns with real duplication (at least two rows per target), it chooses the one with the **highest cardinality** — i.e. the most distinct targets. That deliberately avoids the low-cardinality trap described above: it groups contended writes together while keeping the **largest number of partitions**, so parallelism is preserved. It is **conservative** (a column needs real duplication *and* more than one group, otherwise it groups by nothing), **off by default**, and never overrides an explicit `--groupby`.
 
 ```python
 import_params = {
