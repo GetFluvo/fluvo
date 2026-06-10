@@ -465,7 +465,13 @@ def fallback(*cleaners: Cleaner) -> Cleaner:
 
 
 def strip() -> Cleaner:
-    """Remove leading and trailing whitespace."""
+    """Remove leading and trailing whitespace.
+
+    >>> strip()('  hi  ')
+    'hi'
+    >>> strip()(42)
+    42
+    """
 
     def clean(value: Any) -> Any:
         if isinstance(value, str):
@@ -476,7 +482,13 @@ def strip() -> Cleaner:
 
 
 def normalize_space() -> Cleaner:
-    """Collapse multiple whitespace characters to single space."""
+    """Collapse multiple whitespace characters to single space.
+
+    >>> normalize_space()('a   b   c')
+    'a b c'
+    >>> normalize_space()(None) is None
+    True
+    """
 
     def clean(value: Any) -> Any:
         if isinstance(value, str):
@@ -487,7 +499,13 @@ def normalize_space() -> Cleaner:
 
 
 def lower() -> Cleaner:
-    """Convert to lowercase."""
+    """Convert to lowercase.
+
+    >>> lower()('ABC')
+    'abc'
+    >>> lower()(7)
+    7
+    """
 
     def clean(value: Any) -> Any:
         if isinstance(value, str):
@@ -498,7 +516,13 @@ def lower() -> Cleaner:
 
 
 def upper() -> Cleaner:
-    """Convert to uppercase."""
+    """Convert to uppercase.
+
+    >>> upper()('abc')
+    'ABC'
+    >>> upper()(7)
+    7
+    """
 
     def clean(value: Any) -> Any:
         if isinstance(value, str):
@@ -509,7 +533,13 @@ def upper() -> Cleaner:
 
 
 def title() -> Cleaner:
-    """Convert to title case."""
+    """Convert to title case.
+
+    >>> title()('hello world')
+    'Hello World'
+    >>> title()(7)
+    7
+    """
 
     def clean(value: Any) -> Any:
         if isinstance(value, str):
@@ -520,7 +550,13 @@ def title() -> Cleaner:
 
 
 def capitalize() -> Cleaner:
-    """Capitalize first letter only."""
+    """Capitalize first letter only.
+
+    >>> capitalize()('hELLO')
+    'Hello'
+    >>> capitalize()('')
+    ''
+    """
 
     def clean(value: Any) -> Any:
         if isinstance(value, str) and value:
@@ -535,6 +571,11 @@ def remove(chars: str) -> Cleaner:
 
     Args:
         chars: Characters to remove (as string).
+
+    >>> remove('-')('1-2-3')
+    '123'
+    >>> remove('x')(123)
+    123
     """
     # Pre-compile pattern for efficiency
     escaped = "".join(f"\\{c}" if c in r"\.^$*+?{}[]|()" else c for c in chars)
@@ -553,6 +594,11 @@ def keep(char_pattern: str) -> Cleaner:
 
     Args:
         char_pattern: Regex character class (e.g., "0-9A-Za-z").
+
+    >>> keep('0-9')('a1b2')
+    '12'
+    >>> keep('0-9')(123)
+    123
     """
     pattern = re.compile(f"[^{char_pattern}]")
 
@@ -570,6 +616,11 @@ def replace(old: str, new: str) -> Cleaner:
     Args:
         old: String to replace.
         new: Replacement string.
+
+    >>> replace('a', 'b')('banana')
+    'bbnbnb'
+    >>> replace('a', 'b')(7)
+    7
     """
 
     def clean(value: Any) -> Any:
@@ -586,6 +637,11 @@ def regex_sub(pattern: str, replacement: str) -> Cleaner:
     Args:
         pattern: Regex pattern.
         replacement: Replacement string.
+
+    >>> regex_sub('o', '0')('foo')
+    'f00'
+    >>> regex_sub('x', 'y')(7)
+    7
     """
     compiled = re.compile(pattern)
 
@@ -602,6 +658,11 @@ def truncate(max_length: int) -> Cleaner:
 
     Args:
         max_length: Maximum number of characters.
+
+    >>> truncate(3)('abcdef')
+    'abc'
+    >>> truncate(3)(123)
+    123
     """
 
     def clean(value: Any) -> Any:
@@ -617,6 +678,11 @@ def default(default_value: Any) -> Cleaner:
 
     Args:
         default_value: Value to return if input is None or empty string.
+
+    >>> default('n/a')('')
+    'n/a'
+    >>> default('n/a')('hi')
+    'hi'
     """
 
     def clean(value: Any) -> Any:
@@ -633,7 +699,13 @@ def default(default_value: Any) -> Cleaner:
 
 
 def phone() -> Cleaner:
-    """Clean phone number, keeping digits and leading +."""
+    """Clean phone number, keeping digits and leading +.
+
+    >>> phone()('+1 (555) 123')
+    '+1555123'
+    >>> phone()(None) is None
+    True
+    """
 
     def clean(value: Any) -> Any:
         if value is None:
@@ -653,7 +725,13 @@ def phone() -> Cleaner:
 
 
 def phone_digits() -> Cleaner:
-    """Extract only digits from phone number."""
+    """Extract only digits from phone number.
+
+    >>> phone_digits()('+1-555')
+    '1555'
+    >>> phone_digits()(7)
+    7
+    """
 
     def clean(value: Any) -> Any:
         if not value or not isinstance(value, str):
@@ -794,7 +872,11 @@ def email() -> Callable[..., Any]:
 
 
 def email_domain() -> Cleaner:
-    """Extract domain from email address."""
+    """Extract domain from email address.
+
+    >>> email_domain()(7) is None
+    True
+    """
 
     def clean(value: Any) -> Any:
         if not value or not isinstance(value, str):
@@ -846,7 +928,11 @@ def website_from_email(
 
 
 def url() -> Cleaner:
-    """All-in-one URL cleaner: strip, fix www, ensure https."""
+    """All-in-one URL cleaner: strip, fix www, ensure https.
+
+    >>> url()(7)
+    7
+    """
 
     def clean(value: Any) -> Any:
         if value is None:
@@ -873,7 +959,11 @@ def url() -> Cleaner:
 
 
 def url_https() -> Cleaner:
-    """Convert http:// to https://."""
+    """Convert http:// to https://.
+
+    >>> url_https()(7)
+    7
+    """
 
     def clean(value: Any) -> Any:
         if isinstance(value, str) and value.startswith("http://"):
@@ -884,7 +974,11 @@ def url_https() -> Cleaner:
 
 
 def url_fix_www() -> Cleaner:
-    """Fix missing dot after www (wwwexample.com → www.example.com)."""
+    """Fix missing dot after www (wwwexample.com → www.example.com).
+
+    >>> url_fix_www()(7)
+    7
+    """
 
     def clean(value: Any) -> Any:
         if isinstance(value, str):
@@ -899,6 +993,9 @@ def url_ensure_scheme(scheme: str = "https://") -> Cleaner:
 
     Args:
         scheme: Scheme to add (default: "https://").
+
+    >>> url_ensure_scheme()(7)
+    7
     """
 
     def clean(value: Any) -> Any:
@@ -920,7 +1017,11 @@ def url_ensure_scheme(scheme: str = "https://") -> Cleaner:
 
 
 def vat() -> Cleaner:
-    """Clean VAT number: keep only letters, digits, and hyphen, uppercase."""
+    """Clean VAT number: keep only letters, digits, and hyphen, uppercase.
+
+    >>> vat()(7)
+    7
+    """
 
     def clean(value: Any) -> Any:
         if value is None:
@@ -968,7 +1069,11 @@ def vat_or_exempt(
 
 
 def vat_clean() -> Cleaner:
-    """All-in-one VAT cleaner: strip, remove special chars, uppercase."""
+    """All-in-one VAT cleaner: strip, remove special chars, uppercase.
+
+    >>> vat_clean()(7)
+    7
+    """
     return pipe(strip(), vat())
 
 
@@ -981,6 +1086,9 @@ def zip_code() -> Cleaner:
     """Clean zip code: strip, remove spaces and commas.
 
     Also filters out invalid values starting with "e-" (e.g., email artifacts).
+
+    >>> zip_code()(7)
+    7
     """
 
     def clean(value: Any) -> Any:
@@ -997,7 +1105,11 @@ def zip_code() -> Cleaner:
 
 
 def zip_strip_prefix() -> Cleaner:
-    """Remove country prefix from zip code (e.g., "NL-1234AB" → "1234AB")."""
+    """Remove country prefix from zip code (e.g., "NL-1234AB" → "1234AB").
+
+    >>> zip_strip_prefix()(7)
+    7
+    """
 
     def clean(value: Any) -> Any:
         if not value or not isinstance(value, str):
@@ -1023,6 +1135,9 @@ def city() -> Cleaner:
     - Normalize to title case
     - Collapse multiple spaces
     - Filter out invalid values (e.g., starting with "e-")
+
+    >>> city()(7)
+    7
     """
 
     def clean(value: Any) -> Any:
@@ -1062,6 +1177,9 @@ def street() -> Cleaner:
 
     Note: Does NOT change case, as street addresses often have specific
     formatting (house numbers, abbreviations like "Ave.", "St.", etc.).
+
+    >>> street()(7)
+    7
     """
 
     def clean(value: Any) -> Any:
@@ -1304,6 +1422,9 @@ def name_strip_title(titles: set[str] | None = None) -> Cleaner:
 
     Args:
         titles: Set of titles to remove.
+
+    >>> name_strip_title()(7)
+    7
     """
     titles_set = titles or TITLES
     pattern = re.compile(
@@ -1323,6 +1444,9 @@ def name_strip_suffix(suffixes: set[str] | None = None) -> Cleaner:
 
     Args:
         suffixes: Set of suffixes to remove.
+
+    >>> name_strip_suffix()(7)
+    7
     """
     suffixes_set = suffixes or SUFFIXES
     pattern = re.compile(
@@ -1338,7 +1462,11 @@ def name_strip_suffix(suffixes: set[str] | None = None) -> Cleaner:
 
 
 def name_split_first() -> Cleaner:
-    """Extract first name (first word)."""
+    """Extract first name (first word).
+
+    >>> name_split_first()(7)
+    7
+    """
 
     def clean(value: Any) -> Any:
         if not value or not isinstance(value, str):
@@ -1350,7 +1478,11 @@ def name_split_first() -> Cleaner:
 
 
 def name_split_last() -> Cleaner:
-    """Extract last name (last word)."""
+    """Extract last name (last word).
+
+    >>> name_split_last()(7)
+    7
+    """
 
     def clean(value: Any) -> Any:
         if not value or not isinstance(value, str):
@@ -1366,6 +1498,9 @@ def name_filter_common(filter_names: set[str] | None = None) -> Cleaner:
 
     Args:
         filter_names: Names to filter out.
+
+    >>> name_filter_common()(7)
+    7
     """
     names_set = filter_names or COMMON_FILTER_NAMES
 
@@ -1568,7 +1703,11 @@ def date_normalize(
 
 
 def digits() -> Cleaner:
-    """Keep only digits."""
+    """Keep only digits.
+
+    >>> digits()(7)
+    '7'
+    """
 
     def clean(value: Any) -> Any:
         if not value:
@@ -1614,7 +1753,11 @@ def numeric(
 
 
 def integer() -> Cleaner:
-    """Parse as integer string (remove decimals)."""
+    """Parse as integer string (remove decimals).
+
+    >>> integer()(7)
+    '7'
+    """
 
     def clean(value: Any) -> Any:
         if value is None:

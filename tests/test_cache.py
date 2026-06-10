@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import polars as pl
+from _pytest.monkeypatch import MonkeyPatch
 from polars.testing import assert_frame_equal
 
 from fluvo.lib import cache
@@ -316,3 +317,91 @@ def test_get_session_dir_handles_exception(
     session_dir = cache.get_session_dir("test_session")
     assert session_dir is None
     assert "Could not create or access session directory" in caplog.text
+
+
+def test_resolve_cache_dir_from_dict(
+    tmp_path: Path, monkeypatch: "MonkeyPatch"
+) -> None:
+    """resolve_cache_dir builds a unique cache dir from a connection dict."""
+    monkeypatch.chdir(tmp_path)
+    d = cache.resolve_cache_dir({"hostname": "h", "port": 8069, "database": "db"})
+    assert d is not None
+    assert d.exists()
+    assert d.parent.name == ".fluvo_cache"
+
+
+def test_resolve_cache_dir_from_conf_file(
+    tmp_path: Path, monkeypatch: "MonkeyPatch"
+) -> None:
+    """resolve_cache_dir also accepts a .conf file path (fingerprint via parser)."""
+    monkeypatch.chdir(tmp_path)
+    conf = tmp_path / "c.conf"
+    conf.write_text("[Connection]\nhostname = h\nport = 8069\ndatabase = db\n")
+    d = cache.resolve_cache_dir(str(conf))
+    assert d is not None and d.exists()
+
+
+def test_resolve_cache_dir_unfingerprintable_returns_none() -> None:
+    """A config that can't be fingerprinted yields no cache dir."""
+    assert cache.resolve_cache_dir("/no/such/file.conf") is None
+
+
+@patch("fluvo.lib.cache.resolve_cache_dir")
+@patch("fluvo.lib.conf_lib.get_connection_from_dict")
+def test_export_id_map_exports_caches_and_reuses(
+    mock_conn: MagicMock, mock_resolve: MagicMock, tmp_path: Path
+) -> None:
+    """export_id_map builds the id-map, writes parquet, and reuses the cache."""
+    mock_resolve.return_value = tmp_path
+    conn = MagicMock()
+    main_model, imd_model = MagicMock(), MagicMock()
+    conn.get_model.side_effect = lambda m: (
+        imd_model if m == "ir.model.data" else main_model
+    )
+    # country_id comes back as [id, name] -> exercises the list-value key path.
+    main_model.search_read.return_value = [
+        {"id": 5, "country_id": [1, "Belgium"]},
+        {"id": 6, "country_id": [2, "France"]},
+    ]
+    imd_model.search_read.return_value = [
+        {"res_id": 5, "module": "base", "name": "rec5"},
+    ]
+    mock_conn.return_value = conn
+
+    cfg = {"hostname": "h", "port": 1, "database": "d"}
+    df = cache.export_id_map(cfg, "res.partner", "country_id")
+    assert df is not None and df.height == 2
+    assert set(df.columns) == {"key", "xmlid", "db_id"}
+    assert (tmp_path / "res.partner.idmap__country_id.parquet").exists()
+
+    # Second call is served from the parquet cache (no new connection).
+    mock_conn.reset_mock()
+    df2 = cache.export_id_map(cfg, "res.partner", "country_id")
+    assert df2 is not None and df2.height == 2
+    mock_conn.assert_not_called()
+
+
+@patch("fluvo.lib.cache.resolve_cache_dir")
+@patch("fluvo.lib.conf_lib.get_connection_from_dict")
+def test_export_id_map_no_records(
+    mock_conn: MagicMock, mock_resolve: MagicMock, tmp_path: Path
+) -> None:
+    """No source records yields an empty (typed) DataFrame, not an error."""
+    mock_resolve.return_value = tmp_path
+    conn = MagicMock()
+    conn.get_model.return_value.search_read.return_value = []
+    mock_conn.return_value = conn
+    df = cache.export_id_map({"hostname": "h"}, "res.partner", "name")
+    assert df is not None and df.height == 0
+
+
+@patch("fluvo.lib.cache.resolve_cache_dir", return_value=None)
+@patch(
+    "fluvo.lib.conf_lib.get_connection_from_dict",
+    side_effect=Exception("boom"),
+)
+def test_export_id_map_handles_connection_error(
+    mock_conn: MagicMock, mock_resolve: MagicMock
+) -> None:
+    """A connection failure is swallowed and returns None."""
+    assert cache.export_id_map({"hostname": "h"}, "res.partner", "name") is None
