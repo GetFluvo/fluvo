@@ -68,3 +68,54 @@ def test_groupby_keeps_contended_parallel_import_clean(
         text = fp.read_text().lower()
         assert "concurrent update" not in text, "groupby did not prevent contention"
         assert "could not serialize" not in text, "groupby did not prevent contention"
+
+
+def test_auto_groupby_parallel_import_is_clean(
+    conn_config: dict[str, Any], rpc: Any, tmp_path: Any, scale: int
+) -> None:
+    """End-to-end: --auto-groupby detects a column and imports cleanly in parallel.
+
+    Drives the real ``run_import`` -> preflight auto-detection -> grouped parallel
+    load against a live Odoo. ``country_id/id`` is a non-self many2one with
+    duplication (and >1 distinct value), so the detector should partition Pass-1
+    batches by it; every record must land with no concurrent-update failures.
+    """
+    from fluvo import importer
+
+    prefix = "e2eautogrp"
+    countries = ["base.be", "base.fr", "base.de", "base.nl"]
+    rows = G.partners(scale, prefix)
+    for i, row in enumerate(rows):
+        row["country_id/id"] = countries[i % len(countries)]
+    csv_path = str(tmp_path / "autogrp.csv")
+    G.write_csv(csv_path, ["id", "name", "email", "is_company", "country_id/id"], rows)
+
+    result = importer.run_import(
+        config=conn_config,
+        filename=csv_path,
+        model="res.partner",
+        deferred_fields=None,
+        auto_defer=False,
+        unique_id_field="id",
+        no_preflight_checks=False,
+        headless=True,
+        worker=4,
+        batch_size=50,
+        skip=0,
+        fail=False,
+        separator=",",
+        ignore=None,
+        context={},
+        encoding="utf-8",
+        o2m=False,
+        groupby=None,
+        auto_groupby=True,
+    )
+
+    assert result is not None, "auto-groupby import returned no id-map (failed)"
+    A.assert_db_count(rpc, "res.partner", G.name_domain(prefix), scale)
+    fail_path = Path(tmp_path) / "res_partner_fail.csv"
+    if fail_path.exists():
+        text = fail_path.read_text().lower()
+        assert "concurrent update" not in text, "auto-groupby didn't prevent contention"
+        assert "could not serialize" not in text
