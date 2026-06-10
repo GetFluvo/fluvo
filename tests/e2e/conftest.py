@@ -175,16 +175,19 @@ def toxiproxy(odoo_endpoint: dict[str, object]) -> Iterator[object]:
     tp = Toxiproxy(f"http://{host}:{TOXI_API_PORT}")
     try:
         tp.wait_ready()
-        tp.create_proxy(
-            "odoo", listen=f"0.0.0.0:{TOXI_PROXY_PORT}", upstream="odoo:8069"
-        )
-        yield tp
+        try:
+            tp.create_proxy(
+                "odoo", listen=f"0.0.0.0:{TOXI_PROXY_PORT}", upstream="odoo:8069"
+            )
+            yield tp
+        finally:
+            # Best-effort proxy cleanup, only after the server was reachable, so a
+            # failed setup doesn't hang on unreachable-server timeouts.
+            with contextlib.suppress(Exception):
+                tp.reset()
+            with contextlib.suppress(Exception):
+                tp.delete_proxy("odoo")
     finally:
-        # Best-effort teardown: never let a flaky proxy mask the test result.
-        with contextlib.suppress(Exception):
-            tp.reset()
-        with contextlib.suppress(Exception):
-            tp.delete_proxy("odoo")
         tp.close()
 
 
