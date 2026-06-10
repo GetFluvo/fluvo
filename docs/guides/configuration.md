@@ -90,6 +90,31 @@ fluvo import --protocol jsonrpc --connection-file conf/connection.conf ...
 fluvo import --protocol json2 --connection-file conf/connection.conf ...
 ```
 
+#### `user_agent`
+* **Required**: No
+* **Description**: The `User-Agent` header sent on RPC requests. Mainly needed when your Odoo server sits behind a **Web Application Firewall** (e.g. Cloudflare) that challenges non-browser clients — see the caveat below.
+* **Default**: a browser-like User-Agent (so the `json2` connector works out of the box behind Cloudflare).
+* **Example**: `user_agent = Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36`
+* You can also set it without editing the config via the `FLUVO_USER_AGENT` environment variable. Precedence: config key → env var → built-in browser-like default.
+
+```{admonition} Cloudflare / WAF caveat for json2
+:class: warning
+
+If your Odoo is fronted by Cloudflare (or similar bot protection), the `json2`
+endpoint can return an opaque **HTTP 403** ("Just a moment…") even with a valid
+API key, because the firewall challenges the HTTP client's User-Agent. Fluvo
+defaults to a browser-like User-Agent to avoid this; if your edge still blocks it,
+set a `user_agent` your WAF allows (XML-RPC and JSON-RPC are unaffected).
+```
+
+```{admonition} Unknown keys are ignored
+:class: note
+
+Any key in `[Connection]` that isn't a recognised connection parameter (e.g. an
+inline note, or an old credential kept for reference) is **ignored** rather than
+causing an error, so your config file can safely hold extra fields.
+```
+
 ---
 
 

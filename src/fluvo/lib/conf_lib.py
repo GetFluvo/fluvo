@@ -23,6 +23,15 @@ rpc_transport.install()
 
 _connection_cache: dict[str, Any] = {}
 
+# Parameters odoolib.get_connection() accepts. odoolib's parameter set is stable
+# and well-defined, so we keep it explicit rather than inspecting the signature:
+# some odoolib versions capture database/login/password via **kwargs, where dynamic
+# inspection would *drop* those core keys and silently break the connection (#194).
+# Used to ignore unknown [Connection] keys instead of crashing on them.
+_ODOOLIB_PARAMS = frozenset(
+    {"hostname", "protocol", "port", "database", "login", "password", "user_id"}
+)
+
 
 def get_connection_from_dict(config_dict: dict[str, Any]) -> Any:
     """Establishes a connection to Odoo from a dictionary.
@@ -36,6 +45,9 @@ def get_connection_from_dict(config_dict: dict[str, Any]) -> Any:
         An initialized and connected Odoo client object.
     """
     try:
+        # Work on a copy so we never mutate the caller's dict (we pop/convert keys).
+        config_dict = dict(config_dict)
+
         # Handle special _config_file key for protocol override
         config_file = config_dict.pop("_config_file", None)
         if config_file:
@@ -58,6 +70,14 @@ def get_connection_from_dict(config_dict: dict[str, Any]) -> Any:
             # The OdooClient expects the user ID as 'user_id'
             config_dict["user_id"] = int(config_dict.pop("uid"))
 
+        # Per-host User-Agent override (#193): WAFs such as Cloudflare challenge
+        # the default client UA on the json2 endpoint. Registered per-host on the
+        # pooled transport, not passed to odoolib.
+        user_agent = config_dict.pop("user_agent", None)
+        hostname = config_dict.get("hostname")
+        if user_agent and hostname:
+            rpc_transport.set_user_agent(str(hostname), str(user_agent))
+
         # Log protocol being used
         protocol = config_dict.get("protocol", "xmlrpc")
         log.info(
@@ -65,8 +85,17 @@ def get_connection_from_dict(config_dict: dict[str, Any]) -> Any:
             f"using {protocol} protocol..."
         )
 
+        # odoolib.get_connection() raises TypeError on any unknown kwarg (#194).
+        # Connection files naturally accumulate extra keys (inline notes, old
+        # credentials kept for reference, settings for other tooling); keep only
+        # the parameters odoolib accepts and ignore the rest.
+        ignored = sorted(k for k in config_dict if k not in _ODOOLIB_PARAMS)
+        if ignored:
+            log.debug(f"Ignoring non-connection config keys: {ignored}")
+        clean = {k: v for k, v in config_dict.items() if k in _ODOOLIB_PARAMS}
+
         # Use odoo-client-lib to establish the connection
-        connection = odoolib.get_connection(**config_dict)
+        connection = odoolib.get_connection(**clean)
         return connection
 
     except (KeyError, ValueError) as e:

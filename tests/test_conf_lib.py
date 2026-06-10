@@ -194,3 +194,56 @@ def test_read_config_file_not_found() -> None:
     """
     with pytest.raises(FileNotFoundError, match="Configuration file not found"):
         _read_config_file("nonexistent_config_file.conf")
+
+
+@patch("fluvo.lib.conf_lib.odoolib.get_connection")
+def test_get_connection_ignores_unknown_keys(mock_get_connection: MagicMock) -> None:
+    """Unknown [Connection] keys are dropped instead of crashing odoolib (#194)."""
+    config_dict = {
+        "hostname": "h",
+        "database": "d",
+        "login": "l",
+        "password": "p",
+        "old_password": "kept-for-reference",  # not an odoolib parameter
+        "note": "some metadata",
+    }
+    get_connection_from_dict(config_dict)
+    call_kwargs = mock_get_connection.call_args.kwargs
+    assert "old_password" not in call_kwargs
+    assert "note" not in call_kwargs
+    assert call_kwargs["hostname"] == "h"
+
+
+@patch("fluvo.lib.conf_lib.rpc_transport.set_user_agent")
+@patch("fluvo.lib.conf_lib.odoolib.get_connection")
+def test_get_connection_applies_user_agent(
+    mock_get_connection: MagicMock, mock_set_ua: MagicMock
+) -> None:
+    """A user_agent key configures the transport and is not passed to odoolib (#193)."""
+    config_dict = {
+        "hostname": "h",
+        "database": "d",
+        "login": "l",
+        "password": "p",
+        "user_agent": "Mozilla/5.0 custom",
+    }
+    get_connection_from_dict(config_dict)
+    mock_set_ua.assert_called_once_with("h", "Mozilla/5.0 custom")
+    assert "user_agent" not in mock_get_connection.call_args.kwargs
+
+
+@patch("fluvo.lib.conf_lib.odoolib.get_connection")
+def test_get_connection_does_not_mutate_input(mock_get_connection: MagicMock) -> None:
+    """get_connection_from_dict must not mutate the caller's dict (#194 review)."""
+    config_dict = {
+        "hostname": "h",
+        "database": "d",
+        "login": "l",
+        "password": "p",
+        "uid": "2",
+        "user_agent": "UA",
+        "note": "keep",
+    }
+    snapshot = dict(config_dict)
+    get_connection_from_dict(config_dict)
+    assert config_dict == snapshot  # original dict untouched
