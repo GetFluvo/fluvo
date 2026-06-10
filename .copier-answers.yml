@@ -1,0 +1,16 @@
+# This file is managed by Copier; do not edit by hand.
+# It records the answers used to generate this project so `copier update` works.
+_commit: a6c4684
+_src_path: git@github.com:bosd/uv-forge.git
+author: bosd
+development_status: 'Development Status :: 3 - Alpha'
+docs_host: readthedocs
+email: ebo@stefcy.com
+extension: mypyc
+friendly_name: Fluvo
+github_user: GetFluvo
+license: LGPL-3.0
+package_name: fluvo
+project_name: fluvo
+publish_to_testpypi: false
+version: 0.0.2
