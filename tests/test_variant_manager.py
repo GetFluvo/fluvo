@@ -1,5 +1,7 @@
 """Tests for the create-missing-variants workflow (#188)."""
 
+from pathlib import Path
+from typing import Optional
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
@@ -11,7 +13,9 @@ CFG = "fluvo.lib.actions.variant_manager.conf_lib.get_connection_from_config"
 CFG_DICT = "fluvo.lib.actions.variant_manager.conf_lib.get_connection_from_dict"
 
 
-def _mock_conn(orphan_ids, create_side_effect=None):
+def _mock_conn(
+    orphan_ids: list[int], create_side_effect: Optional[Exception] = None
+) -> tuple[MagicMock, MagicMock, MagicMock]:
     """Build a mock connection whose product.template.search returns orphan_ids."""
     conn = MagicMock()
     template = MagicMock()
@@ -26,7 +30,7 @@ def _mock_conn(orphan_ids, create_side_effect=None):
 
 
 @patch(CFG)
-def test_no_orphans_returns_true_and_creates_nothing(mock_get):
+def test_no_orphans_returns_true_and_creates_nothing(mock_get: MagicMock) -> None:
     """No orphan templates -> returns True and creates nothing."""
     conn, _template, product = _mock_conn([])
     mock_get.return_value = conn
@@ -35,7 +39,7 @@ def test_no_orphans_returns_true_and_creates_nothing(mock_get):
 
 
 @patch(CFG)
-def test_creates_a_variant_per_orphan_template(mock_get):
+def test_creates_a_variant_per_orphan_template(mock_get: MagicMock) -> None:
     """Creates one product.product per orphan template, in one batch."""
     conn, _template, product = _mock_conn([1, 2, 3])
     mock_get.return_value = conn
@@ -46,7 +50,9 @@ def test_creates_a_variant_per_orphan_template(mock_get):
 
 
 @patch(CFG)
-def test_extra_domain_is_combined_with_the_no_variant_filter(mock_get):
+def test_extra_domain_is_combined_with_the_no_variant_filter(
+    mock_get: MagicMock,
+) -> None:
     """The extra domain is ANDed with the no-variant filter."""
     conn, template, _product = _mock_conn([1])
     mock_get.return_value = conn
@@ -57,7 +63,7 @@ def test_extra_domain_is_combined_with_the_no_variant_filter(mock_get):
 
 
 @patch(CFG)
-def test_dry_run_reports_without_creating(mock_get):
+def test_dry_run_reports_without_creating(mock_get: MagicMock) -> None:
     """Dry run reports the count without creating any variant."""
     conn, _template, product = _mock_conn([1, 2])
     mock_get.return_value = conn
@@ -66,7 +72,7 @@ def test_dry_run_reports_without_creating(mock_get):
 
 
 @patch(CFG)
-def test_creates_are_batched(mock_get):
+def test_creates_are_batched(mock_get: MagicMock) -> None:
     """Creates are split into batches of batch_size."""
     conn, _template, product = _mock_conn([1, 2, 3, 4, 5])
     mock_get.return_value = conn
@@ -75,14 +81,14 @@ def test_creates_are_batched(mock_get):
 
 
 @patch(CFG)
-def test_connection_error_returns_false(mock_get):
+def test_connection_error_returns_false(mock_get: MagicMock) -> None:
     """A connection failure returns False."""
     mock_get.side_effect = Exception("boom")
     assert run_create_missing_variants("conn.conf") is False
 
 
 @patch(CFG)
-def test_create_failure_returns_false(mock_get):
+def test_create_failure_returns_false(mock_get: MagicMock) -> None:
     """A failing create batch returns False."""
     conn, _template, _product = _mock_conn([1, 2], create_side_effect=Exception("nope"))
     mock_get.return_value = conn
@@ -90,7 +96,7 @@ def test_create_failure_returns_false(mock_get):
 
 
 @patch(CFG_DICT)
-def test_accepts_a_dict_config(mock_get):
+def test_accepts_a_dict_config(mock_get: MagicMock) -> None:
     """A dict config routes through get_connection_from_dict."""
     conn, _template, _product = _mock_conn([1])
     mock_get.return_value = conn
@@ -99,13 +105,13 @@ def test_accepts_a_dict_config(mock_get):
 
 
 # --- CLI ---
-def _conf(tmp_path):
+def _conf(tmp_path: Path) -> str:
     p = tmp_path / "c.conf"
     p.write_text("[Connection]\nhostname=h\n")
     return str(p)
 
 
-def test_cli_invokes_action_and_passes_options(tmp_path):
+def test_cli_invokes_action_and_passes_options(tmp_path: Path) -> None:
     """The CLI invokes the action with the parsed options."""
     runner = CliRunner()
     with patch(
@@ -134,7 +140,7 @@ def test_cli_invokes_action_and_passes_options(tmp_path):
     )
 
 
-def test_cli_exits_nonzero_when_action_fails(tmp_path):
+def test_cli_exits_nonzero_when_action_fails(tmp_path: Path) -> None:
     """The CLI exits non-zero when the action returns False."""
     runner = CliRunner()
     with patch("fluvo.__main__.run_create_missing_variants", return_value=False):
@@ -150,7 +156,7 @@ def test_cli_exits_nonzero_when_action_fails(tmp_path):
     assert result.exit_code == 1
 
 
-def test_cli_rejects_an_invalid_domain(tmp_path):
+def test_cli_rejects_an_invalid_domain(tmp_path: Path) -> None:
     """The CLI rejects a --domain that is not a valid literal."""
     runner = CliRunner()
     result = runner.invoke(
