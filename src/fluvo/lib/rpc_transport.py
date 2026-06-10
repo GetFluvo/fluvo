@@ -77,12 +77,16 @@ def set_user_agent(hostname: str, user_agent: str) -> None:
         hostname: The Odoo host the override applies to (from ``[Connection]``).
         user_agent: The User-Agent header value to send to that host.
     """
-    # Normalize so the stored key matches httpx.URL(url).host at lookup time:
-    # lowercase, trim whitespace, and reduce a scheme/port to the bare host in case
-    # a URL-ish value lands in ``hostname`` (e.g. "https://odoo.com" or "host:8069").
-    host = (hostname or "").strip().lower()
-    host = host.split("://", 1)[-1]  # drop any scheme
-    host = host.split("/", 1)[0].split(":", 1)[0]  # drop any path and port
+    # Normalize via httpx.URL (the same parser the lookup uses) so the stored key
+    # matches httpx.URL(url).host: lowercase, drop any scheme/port/path, and handle
+    # IPv6 literals correctly. Give it a scheme if a bare host/host:port was passed.
+    raw = (hostname or "").strip().lower()
+    if raw and "://" not in raw:
+        raw = f"http://{raw}"
+    try:
+        host = httpx.URL(raw).host or ""
+    except Exception:  # pragma: no cover - malformed value
+        host = ""
     if host and user_agent:
         _user_agents[host] = user_agent
 

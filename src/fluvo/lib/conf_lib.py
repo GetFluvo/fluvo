@@ -10,7 +10,6 @@ Supported protocols (via odoolib):
 """
 
 import configparser
-import inspect
 from typing import Any
 
 import odoolib
@@ -24,21 +23,14 @@ rpc_transport.install()
 
 _connection_cache: dict[str, Any] = {}
 
-# Parameters odoolib.get_connection() accepts, captured once from the real function
-# at import time (before tests can patch it). Used to drop unknown [Connection]
-# keys instead of crashing on them (#194).
-try:
-    _ODOOLIB_PARAMS = frozenset(
-        name
-        for name, param in inspect.signature(odoolib.get_connection).parameters.items()
-        # Skip *args / **kwargs: they aren't real named params to match against.
-        if param.kind
-        not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
-    )
-except (TypeError, ValueError):  # pragma: no cover - non-introspectable signature
-    _ODOOLIB_PARAMS = frozenset(
-        {"hostname", "protocol", "port", "database", "login", "password", "user_id"}
-    )
+# Parameters odoolib.get_connection() accepts. odoolib's parameter set is stable
+# and well-defined, so we keep it explicit rather than inspecting the signature:
+# some odoolib versions capture database/login/password via **kwargs, where dynamic
+# inspection would *drop* those core keys and silently break the connection (#194).
+# Used to ignore unknown [Connection] keys instead of crashing on them.
+_ODOOLIB_PARAMS = frozenset(
+    {"hostname", "protocol", "port", "database", "login", "password", "user_id"}
+)
 
 
 def get_connection_from_dict(config_dict: dict[str, Any]) -> Any:

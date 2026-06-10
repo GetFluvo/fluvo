@@ -210,3 +210,12 @@ def test_set_user_agent_strips_scheme_and_port() -> None:
     finally:
         rpc_transport._user_agents.pop("waf.example.com", None)
         rpc_transport._user_agents.pop("db.example.com", None)
+
+
+def test_set_user_agent_handles_ipv6_host() -> None:
+    """IPv6 hostnames are parsed correctly, not split on their colons (#193 review)."""
+    rpc_transport.set_user_agent("[::1]:8069", "UA/v6")
+    try:
+        assert rpc_transport._user_agent_for("http://[::1]/x") == "UA/v6"
+    finally:
+        rpc_transport._user_agents.pop("::1", None)
