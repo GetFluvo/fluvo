@@ -26,6 +26,7 @@ from fluvo.lib import conf_lib
 from . import _runtime
 
 DEFAULT_DB = os.environ.get("FLUVO_E2E_DB", "fluvo_e2e_target")
+SOURCE_DB = os.environ.get("FLUVO_E2E_SOURCE_DB", "fluvo_e2e_source")
 ADMIN_PWD = os.environ.get("FLUVO_E2E_ADMIN_PWD", "admin")
 PROTOCOL = os.environ.get("FLUVO_E2E_PROTOCOL", "jsonrpc")
 
@@ -101,6 +102,43 @@ def conn_config(odoo_endpoint: dict[str, object], target_db: str) -> dict[str, o
 def rpc(conn_config: dict[str, object]) -> object:
     """An odoo-client-lib connection for ground-truth verification queries."""
     return conf_lib.get_connection_from_dict(conn_config)
+
+
+# --- Source database (for server-to-server migration tests) ---
+# A second freshly-initialised database on the same managed Odoo. Migrating
+# source_db -> target_db (both real Odoo databases, real RPC round-trips)
+# exercises the identical migrate code path as two separate Odoo hosts, at a
+# fraction of the cost. Point FLUVO_E2E_SOURCE_DB at an existing DB to reuse one.
+@pytest.fixture(scope="session")
+def source_db(odoo_endpoint: dict[str, object]) -> str:
+    """Ensure a freshly-initialised *source* database exists; return its name."""
+    if not odoo_endpoint["managed"]:
+        return SOURCE_DB
+    if not _runtime.database_exists(SOURCE_DB):
+        _runtime.create_database(SOURCE_DB)
+    return SOURCE_DB
+
+
+@pytest.fixture(scope="session")
+def conn_config_source(
+    odoo_endpoint: dict[str, object], source_db: str
+) -> dict[str, object]:
+    """Connection config dict for the migration *source* database."""
+    return {
+        "hostname": odoo_endpoint["host"],
+        "port": odoo_endpoint["port"],
+        "database": source_db,
+        "login": "admin",
+        "password": ADMIN_PWD,
+        "protocol": PROTOCOL,
+        "uid": 2,
+    }
+
+
+@pytest.fixture(scope="session")
+def rpc_source(conn_config_source: dict[str, object]) -> object:
+    """An odoo-client-lib connection to the source DB for verification queries."""
+    return conf_lib.get_connection_from_dict(conn_config_source)
 
 
 @pytest.fixture(scope="session")
