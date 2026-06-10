@@ -15,6 +15,7 @@ Environment knobs:
 
 from __future__ import annotations
 
+import contextlib
 import os
 from collections.abc import Iterator
 from urllib.parse import urlparse
@@ -29,6 +30,8 @@ DEFAULT_DB = os.environ.get("FLUVO_E2E_DB", "fluvo_e2e_target")
 SOURCE_DB = os.environ.get("FLUVO_E2E_SOURCE_DB", "fluvo_e2e_source")
 ADMIN_PWD = os.environ.get("FLUVO_E2E_ADMIN_PWD", "admin")
 PROTOCOL = os.environ.get("FLUVO_E2E_PROTOCOL", "jsonrpc")
+TOXI_API_PORT = int(os.environ.get("FLUVO_E2E_TOXIPROXY_API_PORT", "8474"))
+TOXI_PROXY_PORT = int(os.environ.get("FLUVO_E2E_TOXIPROXY_PORT", "18070"))
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -149,3 +152,56 @@ def scale() -> int:
     ~100000+ via ``FLUVO_E2E_SCALE`` for stress runs.
     """
     return int(os.environ.get("FLUVO_E2E_SCALE", "200"))
+
+
+# --- Chaos / resilience (Toxiproxy) ---
+@pytest.fixture
+def toxiproxy(odoo_endpoint: dict[str, object]) -> Iterator[object]:
+    """A Toxiproxy client with an 'odoo' proxy in front of the managed Odoo.
+
+    Skipped unless the stack is managed (the external-Odoo path has no proxy).
+
+    Args:
+        odoo_endpoint: Managed Odoo endpoint details.
+
+    Yields:
+        object: A Toxiproxy control client; tests add toxics to the 'odoo' proxy.
+    """
+    if not odoo_endpoint["managed"]:
+        pytest.skip("chaos tests require the managed Odoo stack (toxiproxy)")
+    from ._toxiproxy import Toxiproxy
+
+    host = str(odoo_endpoint["host"])
+    tp = Toxiproxy(f"http://{host}:{TOXI_API_PORT}")
+    try:
+        tp.wait_ready()
+        try:
+            tp.create_proxy(
+                "odoo", listen=f"0.0.0.0:{TOXI_PROXY_PORT}", upstream="odoo:8069"
+            )
+            yield tp
+        finally:
+            # Best-effort proxy cleanup, only after the server was reachable, so a
+            # failed setup doesn't hang on unreachable-server timeouts.
+            with contextlib.suppress(Exception):
+                tp.reset()
+            with contextlib.suppress(Exception):
+                tp.delete_proxy("odoo")
+    finally:
+        tp.close()
+
+
+@pytest.fixture
+def conn_config_flaky(
+    odoo_endpoint: dict[str, object], target_db: str, toxiproxy: object
+) -> dict[str, object]:
+    """Connection config routed through Toxiproxy, so injected toxics affect it."""
+    return {
+        "hostname": odoo_endpoint["host"],
+        "port": TOXI_PROXY_PORT,
+        "database": target_db,
+        "login": "admin",
+        "password": ADMIN_PWD,
+        "protocol": PROTOCOL,
+        "uid": 2,
+    }
