@@ -17,12 +17,12 @@
 [![Ruff codestyle][ruff badge]][ruff project]
 
 [pypi status]: https://pypi.org/project/fluvo/
-[read the docs]: https://fluvo.readthedocs.io/
+[read the docs]: https://fluvo.readthedocs.io/en/latest/
 [tests]: https://github.com/getfluvo/fluvo/actions?workflow=Tests
 [codecov]: https://app.codecov.io/gh/getfluvo/fluvo
 [pre-commit]: https://github.com/pre-commit/pre-commit
 [ruff badge]: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json
-[ruff project]: https://github.com/charliermarsh/ruff
+[ruff project]: https://github.com/astral-sh/ruff
 
 **Fluvo gets data into Odoo, fast.** A high-performance, Polars-backed ETL toolkit that replaces fragile, manual data prep with declarative, repeatable, configuration-as-code workflows.
 

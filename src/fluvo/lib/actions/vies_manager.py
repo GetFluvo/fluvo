@@ -59,7 +59,6 @@ Service Unavailable, connection timeouts, etc.
 For high-performance VAT validation, consider using a Rust-based validator:
 - The `vat_validator` crate provides fast EU VAT validation
 - Can be integrated via PyO3 bindings for Python interop
-- See: https://crates.io/crates/vat
 """
 
 import json
