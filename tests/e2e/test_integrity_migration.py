@@ -65,6 +65,7 @@ def test_server_to_server_migration_parity(
     # 3. Verify parity on the TARGET database (ground truth via RPC).
     A.assert_db_count(rpc, "res.partner", G.name_domain(prefix), scale)
     be_id = A.xmlid_to_res_id(rpc, "base.be")
+    assert be_id is not None, "Failed to resolve XML ID 'base.be' on target"
     linked = A.count(
         rpc,
         "res.partner",
