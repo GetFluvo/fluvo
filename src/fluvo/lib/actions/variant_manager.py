@@ -152,7 +152,12 @@ def check_missing_variants_after_import(
             f"{len(orphan_ids)} imported product template(s) have no variants; "
             "creating the missing default variants (--fix-missing-variants)."
         )
-        run_create_missing_variants(config, domain=[("id", "in", orphan_ids)])
+        # Chunk the fix calls too, so the no-oversized-payload safeguard that the
+        # search above applies isn't undone by an unbatched create domain.
+        for i in range(0, len(orphan_ids), 2000):
+            run_create_missing_variants(
+                config, domain=[("id", "in", orphan_ids[i : i + 2000])]
+            )
     else:
         log.warning(
             f"{len(orphan_ids)} imported product template(s) have NO variants and "
