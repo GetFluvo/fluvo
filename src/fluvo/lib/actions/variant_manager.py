@@ -128,9 +128,18 @@ def check_missing_variants_after_import(
         else:
             connection = conf_lib.get_connection_from_config(config_file=config)
         template_obj = connection.get_model("product.template")
-        orphan_ids = template_obj.search(
-            [("id", "in", db_ids), ("product_variant_count", "=", 0)]
-        )
+        # Batch the search: a large import can yield tens of thousands of ids,
+        # and a single "in" query risks oversized RPC payloads / slow SQL.
+        orphan_ids: list[int] = []
+        for i in range(0, len(db_ids), 2000):
+            orphan_ids.extend(
+                template_obj.search(
+                    [
+                        ("id", "in", db_ids[i : i + 2000]),
+                        ("product_variant_count", "=", 0),
+                    ]
+                )
+            )
     except Exception as e:
         log.warning(f"Could not check imported templates for missing variants: {e}")
         return 0

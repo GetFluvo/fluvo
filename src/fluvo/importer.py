@@ -540,8 +540,9 @@ def run_import(  # noqa: C901
 
     # Guardrail (#188): Odoo's load() does not auto-create default variants, so a
     # product.template import can silently leave templates unusable. Warn (or fix
-    # with --fix-missing-variants) for the just-imported templates.
-    if is_truly_successful:
+    # with --fix-missing-variants) for the just-imported templates. Runs whenever
+    # any records were imported (id_map), including partially-successful imports.
+    if id_map:
         from .lib.actions.variant_manager import check_missing_variants_after_import
 
         check_missing_variants_after_import(

@@ -257,3 +257,21 @@ def test_guardrail_swallows_connection_errors(mock_get: MagicMock) -> None:
     assert (
         check_missing_variants_after_import("c.conf", "product.template", {"a": 1}) == 0
     )
+
+
+@patch(CFG)
+def test_guardrail_batches_the_search_for_large_imports(
+    mock_get: MagicMock,
+) -> None:
+    """The orphan search is chunked (2000/call) to avoid huge RPC payloads."""
+    conn = MagicMock()
+    template = MagicMock()
+    product = MagicMock()
+    template.search.return_value = []
+    conn.get_model.side_effect = lambda m: (
+        template if m == "product.template" else product
+    )
+    mock_get.return_value = conn
+    id_map = {f"x{i}": i for i in range(4500)}  # -> 3 batches (2000 + 2000 + 500)
+    check_missing_variants_after_import("c.conf", "product.template", id_map)
+    assert template.search.call_count == 3
