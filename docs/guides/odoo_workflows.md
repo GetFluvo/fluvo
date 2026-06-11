@@ -271,6 +271,29 @@ fluvo workflow create-missing-variants --connection-file conf/connection.conf \
 | `--batch-size` | Number of variants to create per RPC call (default: 200). |
 | `--dry-run` | Only report how many templates lack a variant; create nothing. |
 
+### Automatic guardrail during import
+
+You don't have to remember to run the command. After **every `product.template`
+import**, fluvo automatically checks the just-imported templates and **warns** if
+any ended up without a variant — so you find out at import time, not in production:
+
+```text
+WARNING  3 imported product template(s) have NO variants and are unusable in
+         sales/purchase orders and BoMs ... Fix with 'fluvo workflow
+         create-missing-variants', or re-run with --fix-missing-variants.
+```
+
+Pass `--fix-missing-variants` to the `import` command to create them inline instead
+of only warning:
+
+```bash
+fluvo import --connection-file conf/connection.conf --file product_template.csv \
+    --model product.template --fix-missing-variants
+```
+
+The check is scoped to the records from that import and is skipped for every other
+model, so it adds no overhead to non-product imports.
+
 ---
 
 ## Data Processing Workflows

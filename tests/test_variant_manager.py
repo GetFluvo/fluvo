@@ -7,7 +7,10 @@ from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 
 from fluvo.__main__ import cli
-from fluvo.lib.actions.variant_manager import run_create_missing_variants
+from fluvo.lib.actions.variant_manager import (
+    check_missing_variants_after_import,
+    run_create_missing_variants,
+)
 
 CFG = "fluvo.lib.actions.variant_manager.conf_lib.get_connection_from_config"
 CFG_DICT = "fluvo.lib.actions.variant_manager.conf_lib.get_connection_from_dict"
@@ -198,3 +201,77 @@ def test_cli_rejects_an_invalid_domain(tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "Invalid --domain" in result.output
+
+
+# --- post-import guardrail (#188) ---
+@patch(CFG)
+def test_guardrail_skips_non_product_template(mock_get: MagicMock) -> None:
+    """The guardrail is a no-op (no connection) for other models."""
+    assert check_missing_variants_after_import("c.conf", "res.partner", {"x": 1}) == 0
+    mock_get.assert_not_called()
+
+
+def test_guardrail_skips_empty_id_map() -> None:
+    """The guardrail is a no-op when nothing was imported."""
+    assert check_missing_variants_after_import("c.conf", "product.template", {}) == 0
+
+
+@patch(CFG)
+def test_guardrail_returns_zero_when_no_orphans(mock_get: MagicMock) -> None:
+    """No imported template lacks a variant -> returns 0, creates nothing."""
+    conn, _t, product = _mock_conn([])
+    mock_get.return_value = conn
+    n = check_missing_variants_after_import("c.conf", "product.template", {"a": 1})
+    assert n == 0
+    product.create.assert_not_called()
+
+
+@patch(CFG)
+def test_guardrail_warns_only_by_default(mock_get: MagicMock) -> None:
+    """With fix=False, orphans are reported but NOT created."""
+    conn, _t, product = _mock_conn([10, 11])
+    mock_get.return_value = conn
+    n = check_missing_variants_after_import(
+        "c.conf", "product.template", {"a": 10, "b": 11}
+    )
+    assert n == 2
+    product.create.assert_not_called()
+
+
+@patch(CFG)
+def test_guardrail_fixes_when_requested(mock_get: MagicMock) -> None:
+    """With fix=True, the missing variants are created."""
+    conn, _t, product = _mock_conn([10, 11])
+    mock_get.return_value = conn
+    n = check_missing_variants_after_import(
+        "c.conf", "product.template", {"a": 10, "b": 11}, fix=True
+    )
+    assert n == 2
+    product.create.assert_called()
+
+
+@patch(CFG)
+def test_guardrail_swallows_connection_errors(mock_get: MagicMock) -> None:
+    """A connection failure during the check returns 0 (never breaks the import)."""
+    mock_get.side_effect = Exception("boom")
+    assert (
+        check_missing_variants_after_import("c.conf", "product.template", {"a": 1}) == 0
+    )
+
+
+@patch(CFG)
+def test_guardrail_batches_the_search_for_large_imports(
+    mock_get: MagicMock,
+) -> None:
+    """The orphan search is chunked (2000/call) to avoid huge RPC payloads."""
+    conn = MagicMock()
+    template = MagicMock()
+    product = MagicMock()
+    template.search.return_value = []
+    conn.get_model.side_effect = lambda m: (
+        template if m == "product.template" else product
+    )
+    mock_get.return_value = conn
+    id_map = {f"x{i}": i for i in range(4500)}  # -> 3 batches (2000 + 2000 + 500)
+    check_missing_variants_after_import("c.conf", "product.template", id_map)
+    assert template.search.call_count == 3
