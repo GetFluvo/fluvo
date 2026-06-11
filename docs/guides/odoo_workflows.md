@@ -242,6 +242,37 @@ is_valid, error = validate_vat_local("BE0123456789")
 
 ---
 
+## Product Variant Management
+
+When Odoo creates a `product.template` through the ORM, it automatically creates a
+default variant (`product.product`). The `load()` API used for imports does **not**
+do this, so templates imported (or migrated) without attribute lines can end up
+with **no variants** — making them unusable in sales/purchase orders, BoMs, etc.
+
+The `workflow create-missing-variants` command finds every `product.template` with
+`product_variant_count == 0` and creates the missing default variant for it.
+
+```bash
+# Dry run first: just report how many templates lack a variant.
+fluvo workflow create-missing-variants --connection-file conf/connection.conf --dry-run
+
+# Create the missing variants.
+fluvo workflow create-missing-variants --connection-file conf/connection.conf
+
+# Scope to a subset with an Odoo domain (Python list literal).
+fluvo workflow create-missing-variants --connection-file conf/connection.conf \
+    --domain "[('categ_id', '=', 5)]"
+```
+
+| Argument | Description |
+|---|---|
+| `--connection-file` | **(Required)** Path to the Odoo connection file. |
+| `--domain` | Optional Odoo domain (Python list literal) to scope which templates are checked. Combined with the no-variant filter. |
+| `--batch-size` | Number of variants to create per RPC call (default: 200). |
+| `--dry-run` | Only report how many templates lack a variant; create nothing. |
+
+---
+
 ## Data Processing Workflows
 
 This command group is for running multi-step processes on records that are already in the database.

@@ -16,6 +16,7 @@ from .lib.actions.module_manager import (
     run_module_uninstallation,
     run_update_module_list,
 )
+from .lib.actions.variant_manager import run_create_missing_variants
 from .lib.actions.vies_manager import (
     disable_vat_validation,
     get_vat_validation_settings,
@@ -496,6 +497,65 @@ def install_languages_cmd(connection_file: str, languages_str: str) -> None:
 def workflow_group() -> None:
     """Run legacy or complex post-import processing workflows."""
     pass
+
+
+# --- Create Missing Variants Sub-command (#188) ---
+@workflow_group.command(name="create-missing-variants")
+@click.option(
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
+)
+@click.option(
+    "--domain",
+    default=None,
+    help="Optional Odoo domain (Python list literal) to scope which product "
+    "templates are checked, e.g. \"[('categ_id', '=', 5)]\".",
+)
+@click.option(
+    "--batch-size",
+    default=200,
+    show_default=True,
+    type=int,
+    help="Number of variants to create per RPC call.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Only report how many templates lack variants; create nothing.",
+)
+def create_missing_variants_cmd(
+    connection_file: str,
+    domain: Optional[str],
+    batch_size: int,
+    dry_run: bool,
+) -> None:
+    """Create default variants for product.template records that have none.
+
+    Odoo auto-creates a default variant on ORM create, but the ``load()`` import
+    API does not, so templates can import with no variants (#188). This finds
+    them and creates the missing default variant.
+    """
+    parsed_domain: Optional[list[Any]] = None
+    if domain:
+        try:
+            parsed_domain = ast.literal_eval(domain)
+        except (ValueError, SyntaxError) as exc:
+            raise click.BadParameter(f"Invalid --domain: {exc}") from exc
+        if not isinstance(parsed_domain, list):
+            raise click.BadParameter(
+                "--domain must be a list, e.g. \"[('categ_id', '=', 5)]\"."
+            )
+    success = run_create_missing_variants(
+        config=connection_file,
+        domain=parsed_domain,
+        batch_size=batch_size,
+        dry_run=dry_run,
+    )
+    if not success:
+        raise SystemExit(1)
 
 
 # --- Invoice v9 Workflow Sub-command ---
