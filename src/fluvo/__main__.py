@@ -30,6 +30,46 @@ from .workflow_runner import run_invoice_v9_workflow
 from .writer import run_write
 
 
+def _parse_resolve_relation_specs(specs: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Parse --resolve-relation strings into resolve_relations specs.
+
+    Each string is ``source_column:model:key_field:relation_field[:to]`` where
+    ``to`` is ``xmlid`` (default) or ``dbid``.
+
+    Args:
+        specs: Raw --resolve-relation option values.
+
+    Returns:
+        list[dict[str, Any]]: Spec dicts for run_import's resolve_relations.
+
+    Raises:
+        click.BadParameter: If a spec string is malformed.
+    """
+    parsed: list[dict[str, Any]] = []
+    for raw in specs:
+        parts = [p.strip() for p in raw.split(":")]
+        if len(parts) not in (4, 5) or not all(parts[:4]):
+            raise click.BadParameter(
+                f"--resolve-relation {raw!r}: expected "
+                "'source_column:model:key_field:relation_field[:xmlid|dbid]' "
+                "with non-empty fields."
+            )
+        spec: dict[str, Any] = {
+            "source_column": parts[0],
+            "model": parts[1],
+            "key_field": parts[2],
+            "relation_field": parts[3],
+        }
+        if len(parts) == 5:
+            if parts[4] not in ("xmlid", "dbid"):
+                raise click.BadParameter(
+                    f"--resolve-relation {raw!r}: 'to' must be 'xmlid' or 'dbid'."
+                )
+            spec["to"] = parts[4]
+        parsed.append(spec)
+    return parsed
+
+
 def _run_dry_run_validation(connection_file: str, **kwargs: Any) -> None:
     """Run dry-run validation mode without importing."""
     from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
@@ -1108,6 +1148,15 @@ def vat_validate_cmd(
     "normalize null tokens, canonicalize booleans). Off by default.",
 )
 @click.option(
+    "--resolve-relation",
+    "resolve_relation_specs",
+    multiple=True,
+    help="Pre-resolve a relation column in Polars before load, so Odoo performs "
+    "no name_search for it. Format "
+    "'source_column:model:key_field:relation_field[:xmlid|dbid]'. Repeatable. "
+    "Example: --resolve-relation country:res.country:code:country_id",
+)
+@click.option(
     "--fix-missing-variants",
     is_flag=True,
     default=False,
@@ -1401,6 +1450,11 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
         context["fallback_values"] = fallback_values
 
     kwargs["context"] = context
+    resolve_relation_specs = kwargs.pop("resolve_relation_specs", ())
+    if resolve_relation_specs:
+        kwargs["resolve_relations"] = _parse_resolve_relation_specs(
+            resolve_relation_specs
+        )
 
     # Handle groupby option
     groupby = kwargs.get("groupby")
