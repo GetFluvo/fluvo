@@ -46,6 +46,12 @@ def test_parse_rejects_wrong_part_count() -> None:
         _parse_resolve_relation_specs(("country:res.country:code",))
 
 
+def test_parse_rejects_empty_fields() -> None:
+    """A spec with an empty required field is rejected."""
+    with pytest.raises(click.BadParameter):
+        _parse_resolve_relation_specs(("country::code:country_id",))
+
+
 def test_parse_rejects_invalid_to() -> None:
     """An invalid 'to' value is rejected."""
     with pytest.raises(click.BadParameter):

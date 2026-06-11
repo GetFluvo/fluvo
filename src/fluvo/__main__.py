@@ -48,10 +48,11 @@ def _parse_resolve_relation_specs(specs: tuple[str, ...]) -> list[dict[str, Any]
     parsed: list[dict[str, Any]] = []
     for raw in specs:
         parts = [p.strip() for p in raw.split(":")]
-        if len(parts) not in (4, 5):
+        if len(parts) not in (4, 5) or not all(parts[:4]):
             raise click.BadParameter(
                 f"--resolve-relation {raw!r}: expected "
-                "'source_column:model:key_field:relation_field[:xmlid|dbid]'."
+                "'source_column:model:key_field:relation_field[:xmlid|dbid]' "
+                "with non-empty fields."
             )
         spec: dict[str, Any] = {
             "source_column": parts[0],
