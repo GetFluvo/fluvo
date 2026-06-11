@@ -424,6 +424,13 @@ Format: `source_column:model:key_field:relation_field[:xmlid|dbid]` (repeatable)
 database-specific. The id-map is cached to parquet and reused across runs. From a
 transform script, the same is available as `Processor.resolve_relation(...)`.
 
+> **Measured:** importing **2,000 `res.partner`** records with `country_id` ran in
+> **6.96s** the naive way (Odoo `name_search` per row) versus **4.27s** pre-resolved —
+> a **1.6× speedup** *even though the data has only 5 distinct countries* (which Odoo
+> caches). The win grows with relation cardinality: a column where most values are
+> distinct (suppliers, categories, partner refs) gets no server-side `name_search`
+> caching, so pre-resolving it saves far more.
+
 ### Skip unchanged records (`--skip-unchanged`)
 
 On a re-import, fluvo can fetch the current field values, compare them to the incoming

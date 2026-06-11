@@ -1157,6 +1157,14 @@ def vat_validate_cmd(
     "Example: --resolve-relation country:res.country:code:country_id",
 )
 @click.option(
+    "--fix-missing-variants",
+    is_flag=True,
+    default=False,
+    help="For product.template imports: create default variants for any imported "
+    "templates that end up with none (Odoo's load() does not auto-create them). "
+    "Without this flag, fluvo only warns about them.",
+)
+@click.option(
     "--defer-parent-store",
     is_flag=True,
     default=False,
