@@ -21,7 +21,7 @@ list, see the [CLI reference](../usage.md).
 |---|---|
 | (automatic two-pass) | Relational fields are deferred to a second pass to avoid inverse-relation rewrites ([Performance Tuning](performance_tuning.md)) |
 | `--deferred-fields` / `--auto-defer` | Manually or automatically defer specific relational fields |
-| `--check-refs fail\|warn\|skip` | Pre-import validation that referenced XML IDs exist |
+| `--check-refs fail&#124;warn&#124;skip` | Pre-import validation that referenced XML IDs exist |
 | `--auto-create-refs` | Auto-create missing related records for many2one fields |
 | `--on-missing-ref field:action` | Per-field handling of a missing reference (create/skip/...) |
 | `--set-empty-on-missing` | Set a relation to empty rather than failing when its target is missing |
