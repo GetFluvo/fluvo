@@ -212,8 +212,12 @@ def conn_config_flaky(
 def product_module(odoo_endpoint: dict[str, object], target_db: str) -> str:
     """Ensure the 'product' module is installed in the target DB.
 
+    Args:
+        odoo_endpoint: Managed Odoo endpoint details.
+        target_db: The target database name.
+
     Returns:
-        The module name ('product').
+        str: The module name ('product').
     """
     if not odoo_endpoint["managed"]:
         pytest.skip("variant workflow test requires the managed Odoo stack")
