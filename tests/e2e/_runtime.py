@@ -105,6 +105,33 @@ def create_database(db_name: str, timeout: int = 600) -> None:
     )
 
 
+def install_module(db_name: str, module: str, timeout: int = 600) -> None:
+    """Install an Odoo module into an existing database.
+
+    Args:
+        db_name: Database to install into.
+        module: Technical module name (e.g. ``product``).
+        timeout: Seconds to allow for the install.
+    """
+    exec_in(
+        "odoo",
+        [
+            "odoo",
+            "-d",
+            db_name,
+            "-i",
+            module,
+            "--without-demo=True",
+            "--db_host=db",
+            "--db_user=odoo",
+            "--db_password=odoo",
+            "--stop-after-init",
+            "--log-level=warn",
+        ],
+        timeout=timeout,
+    )
+
+
 def database_exists(db_name: str) -> bool:
     """Return True if the Postgres database already exists."""
     result = exec_in(

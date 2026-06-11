@@ -71,11 +71,24 @@ def run_create_missing_variants(
     for start in range(0, len(orphan_ids), batch_size):
         batch = orphan_ids[start : start + batch_size]
         try:
+            # Batch create works on Odoo >= 14. Older Odoo rejects a list of
+            # dicts, so fall back to one-by-one creation if the batch call fails.
             product_obj.create([{"product_tmpl_id": tid} for tid in batch])
             created += len(batch)
-        except Exception as e:
-            failed += len(batch)
-            log.error(f"Failed to create variants for {len(batch)} template(s): {e}")
+        except Exception as batch_err:
+            log.warning(
+                f"Batch variant creation failed ({batch_err}); "
+                "falling back to individual creation."
+            )
+            for tid in batch:
+                try:
+                    product_obj.create({"product_tmpl_id": tid})
+                    created += 1
+                except Exception as item_err:
+                    failed += 1
+                    log.error(
+                        f"Failed to create variant for template {tid}: {item_err}"
+                    )
 
     log.info(
         f"--- Create Missing Variants Finished: {created} created, {failed} failed ---"

@@ -95,6 +95,32 @@ def test_create_failure_returns_false(mock_get: MagicMock) -> None:
     assert run_create_missing_variants("conn.conf") is False
 
 
+@patch(CFG)
+def test_falls_back_to_individual_create_on_batch_failure(
+    mock_get: MagicMock,
+) -> None:
+    """If batch create fails (Odoo < 14), fall back to one create() per template."""
+    conn = MagicMock()
+    template = MagicMock()
+    product = MagicMock()
+    template.search.return_value = [1, 2]
+
+    def _create(vals: object) -> int:
+        if isinstance(vals, list):
+            raise Exception("Odoo < 14 does not support batch create")
+        return 1
+
+    product.create.side_effect = _create
+    conn.get_model.side_effect = lambda m: (
+        template if m == "product.template" else product
+    )
+    mock_get.return_value = conn
+
+    assert run_create_missing_variants("conn.conf") is True
+    # 1 failed batch attempt + 2 successful individual creates
+    assert product.create.call_count == 3
+
+
 @patch(CFG_DICT)
 def test_accepts_a_dict_config(mock_get: MagicMock) -> None:
     """A dict config routes through get_connection_from_dict."""
