@@ -154,6 +154,7 @@ def run_import(  # noqa: C901
     max_batch_bytes: int = 5 * 1024 * 1024,
     resolve_relations: Optional[list[dict[str, Any]]] = None,
     auto_clean: bool = False,
+    fix_missing_variants: bool = False,
 ) -> Optional[dict[str, int]]:
     """Main entry point for the import command, handling all orchestration.
 
@@ -535,6 +536,16 @@ def run_import(  # noqa: C901
                 f"See {fail_output_file} for failed records.",
                 title="[bold yellow]Import Partially Complete[/bold yellow]",
             )
+        )
+
+    # Guardrail (#188): Odoo's load() does not auto-create default variants, so a
+    # product.template import can silently leave templates unusable. Warn (or fix
+    # with --fix-missing-variants) for the just-imported templates.
+    if is_truly_successful:
+        from .lib.actions.variant_manager import check_missing_variants_after_import
+
+        check_missing_variants_after_import(
+            config, model, id_map, fix=fix_missing_variants
         )
 
     return id_map

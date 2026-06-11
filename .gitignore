@@ -72,3 +72,6 @@ htmlcov/
 
 # agent tooling state
 .crush/
+
+# stray test artifact (import fail file written to cwd)
+/fail.csv

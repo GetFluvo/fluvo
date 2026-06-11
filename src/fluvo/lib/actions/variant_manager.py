@@ -94,3 +94,61 @@ def run_create_missing_variants(
         f"--- Create Missing Variants Finished: {created} created, {failed} failed ---"
     )
     return failed == 0
+
+
+def check_missing_variants_after_import(
+    config: Union[str, dict[str, Any]],
+    model: Optional[str],
+    id_map: dict[str, int],
+    fix: bool = False,
+) -> int:
+    """Post-import guardrail: warn (or fix) when imported templates lack variants.
+
+    Odoo's ``load()`` does not auto-create default variants, so a
+    ``product.template`` import can silently leave templates with no variants
+    (#188). This checks the *just-imported* templates and warns; with ``fix=True``
+    it creates the missing default variants inline. A no-op for other models.
+
+    Args:
+        config: Connection config — a ``.conf`` file path or a connection dict.
+        model: The model that was just imported.
+        id_map: Mapping of external IDs to database IDs from the import.
+        fix: If True, create the missing variants; otherwise only warn.
+
+    Returns:
+        int: The number of imported templates found without a variant.
+    """
+    if model != "product.template" or not id_map:
+        return 0
+
+    db_ids = list(id_map.values())
+    try:
+        if isinstance(config, dict):
+            connection: Any = conf_lib.get_connection_from_dict(config)
+        else:
+            connection = conf_lib.get_connection_from_config(config_file=config)
+        template_obj = connection.get_model("product.template")
+        orphan_ids = template_obj.search(
+            [("id", "in", db_ids), ("product_variant_count", "=", 0)]
+        )
+    except Exception as e:
+        log.warning(f"Could not check imported templates for missing variants: {e}")
+        return 0
+
+    if not orphan_ids:
+        return 0
+
+    if fix:
+        log.warning(
+            f"{len(orphan_ids)} imported product template(s) have no variants; "
+            "creating the missing default variants (--fix-missing-variants)."
+        )
+        run_create_missing_variants(config, domain=[("id", "in", orphan_ids)])
+    else:
+        log.warning(
+            f"{len(orphan_ids)} imported product template(s) have NO variants and "
+            "are unusable in sales/purchase orders and BoMs (Odoo's load() does not "
+            "auto-create them). Fix with 'fluvo workflow create-missing-variants', "
+            "or re-run the import with --fix-missing-variants."
+        )
+    return len(orphan_ids)
