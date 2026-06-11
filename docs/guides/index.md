@@ -7,6 +7,7 @@ This section provides detailed, step-by-step guides for common tasks and advance
 :caption: "Guides"
 
 importing_data
+choosing_options
 exporting_data
 exporting_data_for_modules
 data_transformations
