@@ -17,6 +17,45 @@ from ...lib import conf_lib
 from ...logging_config import log
 
 
+def _create_default_variants(
+    product_obj: Any, template_ids: list[int], batch_size: int = 200
+) -> tuple[int, int]:
+    """Create one default product.product per template id, in batches.
+
+    Args:
+        product_obj: The ``product.product`` model proxy.
+        template_ids: Template ids to give a default variant.
+        batch_size: Variants to create per RPC call.
+
+    Returns:
+        tuple[int, int]: ``(created, failed)`` counts.
+    """
+    created = 0
+    failed = 0
+    for start in range(0, len(template_ids), batch_size):
+        batch = template_ids[start : start + batch_size]
+        try:
+            # Batch create works on Odoo >= 14. Older Odoo rejects a list of
+            # dicts, so fall back to one-by-one creation if the batch call fails.
+            product_obj.create([{"product_tmpl_id": tid} for tid in batch])
+            created += len(batch)
+        except Exception as batch_err:
+            log.warning(
+                f"Batch variant creation failed ({batch_err}); "
+                "falling back to individual creation."
+            )
+            for tid in batch:
+                try:
+                    product_obj.create({"product_tmpl_id": tid})
+                    created += 1
+                except Exception as item_err:
+                    failed += 1
+                    log.error(
+                        f"Failed to create variant for template {tid}: {item_err}"
+                    )
+    return created, failed
+
+
 def run_create_missing_variants(
     config: Union[str, dict[str, Any]],
     domain: Optional[list[Any]] = None,
@@ -66,30 +105,7 @@ def run_create_missing_variants(
         log.info("Dry run: no variants will be created.")
         return True
 
-    created = 0
-    failed = 0
-    for start in range(0, len(orphan_ids), batch_size):
-        batch = orphan_ids[start : start + batch_size]
-        try:
-            # Batch create works on Odoo >= 14. Older Odoo rejects a list of
-            # dicts, so fall back to one-by-one creation if the batch call fails.
-            product_obj.create([{"product_tmpl_id": tid} for tid in batch])
-            created += len(batch)
-        except Exception as batch_err:
-            log.warning(
-                f"Batch variant creation failed ({batch_err}); "
-                "falling back to individual creation."
-            )
-            for tid in batch:
-                try:
-                    product_obj.create({"product_tmpl_id": tid})
-                    created += 1
-                except Exception as item_err:
-                    failed += 1
-                    log.error(
-                        f"Failed to create variant for template {tid}: {item_err}"
-                    )
-
+    created, failed = _create_default_variants(product_obj, orphan_ids, batch_size)
     log.info(
         f"--- Create Missing Variants Finished: {created} created, {failed} failed ---"
     )
@@ -121,13 +137,14 @@ def check_missing_variants_after_import(
     if model != "product.template" or not id_map:
         return 0
 
-    db_ids = list(id_map.values())
+    db_ids = list(set(id_map.values()))
     try:
         if isinstance(config, dict):
             connection: Any = conf_lib.get_connection_from_dict(config)
         else:
             connection = conf_lib.get_connection_from_config(config_file=config)
         template_obj = connection.get_model("product.template")
+        product_obj = connection.get_model("product.product")
         # Batch the search: a large import can yield tens of thousands of ids,
         # and a single "in" query risks oversized RPC payloads / slow SQL.
         orphan_ids: list[int] = []
@@ -152,12 +169,9 @@ def check_missing_variants_after_import(
             f"{len(orphan_ids)} imported product template(s) have no variants; "
             "creating the missing default variants (--fix-missing-variants)."
         )
-        # Chunk the fix calls too, so the no-oversized-payload safeguard that the
-        # search above applies isn't undone by an unbatched create domain.
-        for i in range(0, len(orphan_ids), 2000):
-            run_create_missing_variants(
-                config, domain=[("id", "in", orphan_ids[i : i + 2000])]
-            )
+        # Create directly from the ids already found (no re-search), with the
+        # shared helper's internal batching.
+        _create_default_variants(product_obj, orphan_ids)
     else:
         log.warning(
             f"{len(orphan_ids)} imported product template(s) have NO variants and "
