@@ -7,4 +7,4 @@ sphinx-mermaid
 # Pygments 2.20 html-escapes the `linespans` option, but shibuya's
 # WrapLineFormatter passes it as the int 1 -> AttributeError on build.
 # Pin below 2.20 until shibuya passes a string. See GetFluvo/fluvo docs build.
-pygments<2.20
+pygments<2.21
