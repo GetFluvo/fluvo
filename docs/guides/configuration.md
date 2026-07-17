@@ -97,7 +97,7 @@ fluvo import --protocol json2 --connection-file conf/connection.conf ...
 * **Example**: `user_agent = Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36`
 * You can also set it without editing the config via the `FLUVO_USER_AGENT` environment variable. Precedence: config key → env var → built-in browser-like default.
 
-```{admonition} Cloudflare / WAF caveat for json2
+````{admonition} Cloudflare / WAF caveat for json2
 :class: warning
 
 If your Odoo is fronted by Cloudflare (or similar bot protection), the `json2`
@@ -105,7 +105,25 @@ endpoint can return an opaque **HTTP 403** ("Just a moment…") even with a vali
 API key, because the firewall challenges the HTTP client's User-Agent. Fluvo
 defaults to a browser-like User-Agent to avoid this; if your edge still blocks it,
 set a `user_agent` your WAF allows (XML-RPC and JSON-RPC are unaffected).
+
+**Positional-argument calls (`json2` model introspection).** The `json2`
+connector maps *positional* method arguments to parameter names by first fetching
+the model's schema over a separate `GET /doc-bearer/<model>.json` request. Some
+WAF configurations challenge that `GET` path even when the RPC `POST` itself is
+allowed, so a positional call such as
+`model.search_read([('x', '=', 1)], ['name'])` fails before it reaches Odoo while
+the equivalent **keyword** call goes straight through:
+
+```python
+# Behind a WAF that challenges the /doc-bearer/ GET, prefer keyword arguments:
+model.search_read(domain=[('x', '=', 1)], fields=['name'])   # POSTs directly, works
 ```
+
+Fluvo's own import/migration RPC uses keyword arguments, so imports over `json2s`
+work behind such a WAF; if you script against the connection directly, pass
+arguments by keyword too (or set a `user_agent` your edge allows on the
+`/doc-bearer/` path). See [#213](https://github.com/GetFluvo/fluvo/issues/213).
+````
 
 ```{admonition} Unknown keys are ignored
 :class: note
