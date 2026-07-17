@@ -48,8 +48,13 @@ def get_odoo_version(connection: Any) -> int:
     try:
         ir_module = connection.get_model("ir.module.module")
         # The 'base' module version accurately reflects the core Odoo version.
+        # Pass domain/fields as keywords, not positionally: the Odoo 19 ``json2``
+        # connector introspects positional calls via a ``GET /doc-bearer/`` request
+        # that a Cloudflare-fronted Odoo challenges (#213); keyword calls skip that
+        # path and POST straight to the RPC endpoint. Version detection runs on every
+        # connection, so keep it kwargs-only.
         base_module_data = ir_module.search_read(
-            [("name", "=", "base")], ["latest_version"], limit=1
+            domain=[("name", "=", "base")], fields=["latest_version"], limit=1
         )
         if not base_module_data:
             raise Exception("Could not find the 'base' module.")
