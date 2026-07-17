@@ -111,18 +111,24 @@ connector maps *positional* method arguments to parameter names by first fetchin
 the model's schema over a separate `GET /doc-bearer/<model>.json` request. Some
 WAF configurations challenge that `GET` path even when the RPC `POST` itself is
 allowed, so a positional call such as
-`model.search_read([('x', '=', 1)], ['name'])` fails before it reaches Odoo while
-the equivalent **keyword** call goes straight through:
+`model.search_read([('x', '=', 1)], ['name'])` would otherwise fail before ever
+reaching Odoo.
+
+Fluvo makes this transparent: when the `/doc-bearer/` GET is blocked, it falls
+back to the built-in Odoo 19 ORM signatures so positional calls to the standard
+methods (`search`, `search_read`, `read`, `write`, `create`, `fields_get`, …) keep
+working — no code change needed. It logs a one-line warning the first time it
+happens.
+
+If you script against the connection directly and call a **custom** model method
+positionally (one fluvo can't know the signature of), either pass its arguments by
+keyword or set a `user_agent` your edge allows on the `/doc-bearer/` path:
 
 ```python
-# Behind a WAF that challenges the /doc-bearer/ GET, prefer keyword arguments:
-model.search_read(domain=[('x', '=', 1)], fields=['name'])   # POSTs directly, works
+model.your_custom_method(arg_by_keyword=value)   # skips introspection entirely
 ```
 
-Fluvo's own import/migration RPC uses keyword arguments, so imports over `json2s`
-work behind such a WAF; if you script against the connection directly, pass
-arguments by keyword too (or set a `user_agent` your edge allows on the
-`/doc-bearer/` path). See [#213](https://github.com/GetFluvo/fluvo/issues/213).
+See [#213](https://github.com/GetFluvo/fluvo/issues/213).
 ````
 
 ```{admonition} Unknown keys are ignored

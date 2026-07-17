@@ -3,6 +3,7 @@
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import httpx
 import odoolib.rpc
 import odoolib.tools
 import pytest
@@ -54,6 +55,92 @@ def test_install_is_idempotent() -> None:
     """Calling install() twice is safe and stays installed."""
     assert rpc_transport.install() is True
     assert rpc_transport.install() is True
+
+
+# --- json2 introspection fallback behind a WAF (#213) ---
+def _json2_model(model_name: str = "res.partner") -> Any:
+    """A json2 JsonModel whose /doc-bearer/ GET always fails (simulated WAF)."""
+    import odoolib.json2
+
+    rpc_transport.install()  # ensures _introspect is the resilient wrapper
+    connection = MagicMock()
+    connection.connector.url = "https://waf.example.com/json/2/"
+    connection.bearer_header = {"Authorization": "Bearer k"}
+    connection.cookies = {}
+    model = odoolib.json2.JsonModel(connection, model_name)
+    return model
+
+
+def test_introspect_falls_back_when_doc_bearer_blocked() -> None:
+    """A blocked /doc-bearer/ GET falls back to built-in ORM signatures (#213)."""
+    model = _json2_model()
+    # Simulate the WAF: the module-level httpx.get raises for the schema fetch.
+    with patch("odoolib.json2.httpx.get", side_effect=httpx_error()):
+        model._introspect()
+    assert model.methods["search_read"] == (
+        "domain",
+        "fields",
+        "offset",
+        "limit",
+        "order",
+        "read_kwargs",
+    )
+    assert "search_read" in model.model_methods  # @api.model -> no leading ids
+    assert "write" not in model.model_methods  # record method -> leading ids
+
+
+def test_positional_call_maps_args_after_blocked_introspection() -> None:
+    """Positional args map to the right param names via the fallback (#213)."""
+    model = _json2_model()
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: Any) -> Any:
+        captured["json"] = kwargs.get("json")
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = []
+        return resp
+
+    with patch("odoolib.json2.httpx.get", side_effect=httpx_error()):
+        with patch("odoolib.json2.httpx.post", side_effect=fake_post):
+            # positional (domain, fields) — the path that triggers introspection
+            model.search_read([("id", "=", 1)], ["name"])
+
+    assert captured["json"] == {"domain": [("id", "=", 1)], "fields": ["name"]}
+
+
+def test_record_method_positional_prepends_ids_after_fallback() -> None:
+    """A record method maps its first positional arg to ids, rest by name (#213)."""
+    model = _json2_model()
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: Any) -> Any:
+        captured["json"] = kwargs.get("json")
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = [{}]
+        return resp
+
+    with patch("odoolib.json2.httpx.get", side_effect=httpx_error()):
+        with patch("odoolib.json2.httpx.post", side_effect=fake_post):
+            model.write([1, 2], {"name": "x"})
+
+    assert captured["json"] == {"ids": [1, 2], "vals": {"name": "x"}}
+
+
+def test_fallback_unknown_method_raises_guidance_error() -> None:
+    """A positional call to an unmapped method raises an actionable error (#213)."""
+    methods = rpc_transport._Json2FallbackMethods()
+    methods.update(rpc_transport._JSON2_FALLBACK_PARAMS)
+    with pytest.raises(KeyError, match="keyword arguments"):
+        _ = methods["some_custom_method"]
+
+
+def httpx_error() -> Exception:
+    """Build an httpx error mimicking a WAF 403 on the /doc-bearer/ GET."""
+    request = httpx.Request("GET", "https://waf.example.com/doc-bearer/x.json")
+    response = httpx.Response(403, request=request, text="Just a moment...")
+    return httpx.HTTPStatusError("403", request=request, response=response)
 
 
 def test_pooled_json_rpc_returns_result() -> None:

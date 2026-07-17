@@ -39,6 +39,78 @@ from odoolib.tools import JsonRPCException
 
 from ..logging_config import log
 
+# --- json2 introspection fallback (#213) -----------------------------------
+# The Odoo 19 ``json2`` connector maps *positional* method arguments to parameter
+# names by first fetching the model schema over ``GET /doc-bearer/<model>.json``.
+# A WAF (e.g. Cloudflare) frequently challenges that GET even when the RPC POST is
+# allowed, so every positional call fails before reaching Odoo. When the GET is
+# blocked we fall back to the standard ORM signatures below so positional calls
+# keep working without the schema fetch.
+#
+# These mirror exactly what ``/doc-bearer/`` reports (odoo/addons/api_doc): the
+# ordered parameter names with ``self`` stripped, in signature order, var-keyword
+# params included; and ``@api.model`` methods (which take no leading recordset).
+# ``json2``/``json2s`` exist only on Odoo 19+, so these Odoo 19 signatures are the
+# only ones the fallback ever needs. Verified against a live Odoo 19 server.
+_JSON2_FALLBACK_PARAMS: dict[str, tuple[str, ...]] = {
+    # @api.model methods (no implicit leading recordset)
+    "search": ("domain", "offset", "limit", "order"),
+    "search_read": ("domain", "fields", "offset", "limit", "order", "read_kwargs"),
+    "search_count": ("domain", "limit"),
+    "name_search": ("name", "domain", "operator", "limit"),
+    "name_create": ("name",),
+    "create": ("vals_list",),
+    "fields_get": ("allfields", "attributes"),
+    "default_get": ("fields",),
+    "read_group": (
+        "domain",
+        "fields",
+        "groupby",
+        "offset",
+        "limit",
+        "orderby",
+        "lazy",
+    ),
+    "load": ("fields", "data"),
+    # record methods (odoolib prepends the recordset ids as the first arg)
+    "read": ("fields", "load"),
+    "write": ("vals",),
+    "unlink": (),
+    "copy": ("default",),
+}
+_JSON2_FALLBACK_MODEL_METHODS: frozenset[str] = frozenset(
+    {
+        "search",
+        "search_read",
+        "search_count",
+        "name_search",
+        "name_create",
+        "create",
+        "fields_get",
+        "default_get",
+        "read_group",
+        "load",
+    }
+)
+
+
+class _Json2FallbackMethods(dict):  # type: ignore[type-arg]
+    """``methods`` map used when json2 introspection is WAF-blocked (#213).
+
+    Behaves like the dict odoolib builds from the ``/doc-bearer/`` schema, but a
+    positional call to a method with no built-in signature raises a clear,
+    actionable error instead of a bare ``KeyError``.
+    """
+
+    def __missing__(self, key: str) -> tuple[str, ...]:
+        """Raise an actionable error for a positional call to an unmapped method."""
+        raise KeyError(
+            f"json2 model introspection is blocked (a WAF is challenging the "
+            f"/doc-bearer/ GET) and '{key}' has no built-in signature. Call it "
+            f"with keyword arguments to skip introspection (#213)."
+        )
+
+
 # Generous default; a single large batch load can take well over httpx's 5s
 # default. Override with FLUVO_RPC_TIMEOUT (seconds).
 _DEFAULT_TIMEOUT = float(os.environ.get("FLUVO_RPC_TIMEOUT", "600"))
@@ -190,6 +262,32 @@ def pooled_json_rpc(url: str, fct_name: str, params: dict[str, Any]) -> Any:
     return result.get("result", False)
 
 
+def _make_resilient_introspect(original: Any) -> Any:
+    """Wrap json2's ``_introspect`` to fall back to ORM signatures on a WAF block."""
+
+    def _introspect(self: Any) -> None:
+        """Introspect via the real GET, falling back to built-in signatures."""
+        if self.methods:
+            return
+        try:
+            original(self)
+        except Exception as exc:
+            # Only the /doc-bearer/ GET should raise here; the RPC POST channel is
+            # unaffected. Fall back so positional calls keep working behind a WAF.
+            log.warning(
+                "json2 model introspection failed for "
+                f"'{getattr(self, 'model_name', '?')}' ({exc}); falling back to "
+                "built-in Odoo 19 ORM signatures. This is expected when a WAF "
+                "challenges the /doc-bearer/ GET (#213)."
+            )
+            methods = _Json2FallbackMethods()
+            methods.update(_JSON2_FALLBACK_PARAMS)
+            self.methods = methods
+            self.model_methods = list(_JSON2_FALLBACK_MODEL_METHODS)
+
+    return _introspect
+
+
 def install() -> bool:
     """Patch odoo-client-lib's ``json_rpc`` to use the pooled transport.
 
@@ -216,6 +314,14 @@ def install() -> bool:
             import odoolib.json2 as _json2
 
             _json2.httpx = _PooledHttpx(_json2.httpx)
+            # Make positional-arg introspection resilient to a WAF-blocked
+            # /doc-bearer/ GET (#213). Guard against double-wrapping on repeated
+            # install() calls via a sentinel attribute.
+            if not getattr(_json2.JsonModel._introspect, "_fluvo_resilient", False):
+                _json2.JsonModel._introspect = _make_resilient_introspect(
+                    _json2.JsonModel._introspect
+                )
+                _json2.JsonModel._introspect._fluvo_resilient = True
         except Exception as exc:  # pragma: no cover - older/newer layouts
             log.debug(f"odoolib.json2 httpx not patched: {exc}")
         _installed = True
