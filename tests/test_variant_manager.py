@@ -61,7 +61,7 @@ def test_extra_domain_is_combined_with_the_no_variant_filter(
     mock_get.return_value = conn
     run_create_missing_variants("conn.conf", domain=[("categ_id", "=", 5)])
     template.search.assert_called_once_with(
-        [("categ_id", "=", 5), ("product_variant_count", "=", 0)]
+        [("categ_id", "=", 5), ("product_variant_ids", "=", False)]
     )
 
 

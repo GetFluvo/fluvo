@@ -88,7 +88,11 @@ def run_create_missing_variants(
         return False
 
     search_domain: list[Any] = list(domain) if domain else []
-    search_domain.append(("product_variant_count", "=", 0))
+    # Filter on the ``product_variant_ids`` relation, not ``product_variant_count``:
+    # the count is a non-stored computed field and Odoo 19 rejects it in a search
+    # domain ("Cannot convert ... to SQL because it is not stored"). The one2many is
+    # a real relational field, so "no variants" is expressible across all versions.
+    search_domain.append(("product_variant_ids", "=", False))
 
     try:
         orphan_ids = template_obj.search(search_domain)
@@ -153,7 +157,9 @@ def check_missing_variants_after_import(
                 template_obj.search(
                     [
                         ("id", "in", db_ids[i : i + 2000]),
-                        ("product_variant_count", "=", 0),
+                        # See run_create_missing_variants: search the relation, not
+                        # the non-stored product_variant_count (unsearchable on 19).
+                        ("product_variant_ids", "=", False),
                     ]
                 )
             )
