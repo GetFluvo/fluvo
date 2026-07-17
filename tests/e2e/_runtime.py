@@ -76,6 +76,22 @@ def exec_in(
     return _compose("exec", "-T", service, *command, timeout=timeout)
 
 
+def restart_service(service: str, timeout: int = 120) -> None:
+    """Restart a running service container.
+
+    Used after a mid-session module install: the long-running Odoo server caches a
+    database's registry the first time it serves it, and installing a module from a
+    separate ``--stop-after-init`` process does not reliably make the running server
+    reload that cached registry (observed on Odoo 16/17). A restart clears the
+    in-memory registry cache so the next request rebuilds it with the new module.
+
+    Args:
+        service: The compose service to restart (e.g. ``odoo``).
+        timeout: Seconds to allow for the restart command.
+    """
+    _compose("restart", service, timeout=timeout)
+
+
 def create_database(db_name: str, timeout: int = 600) -> None:
     """Initialise a fresh Odoo database with the ``base`` module, no demo data.
 

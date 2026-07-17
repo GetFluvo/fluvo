@@ -222,4 +222,10 @@ def product_module(odoo_endpoint: dict[str, object], target_db: str) -> str:
     if not odoo_endpoint["managed"]:
         pytest.skip("variant workflow test requires the managed Odoo stack")
     _runtime.install_module(target_db, "product")
+    # The long-running server has already cached target_db's (base-only) registry
+    # from earlier tests; a mid-session install does not reliably make it reload
+    # (Object product.template doesn't exist on Odoo 16/17). Restart so the next
+    # request rebuilds the registry with 'product', then wait for it to come back.
+    _runtime.restart_service("odoo")
+    _runtime.wait_http_ready(str(odoo_endpoint["host"]), int(odoo_endpoint["port"]))
     return "product"
