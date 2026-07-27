@@ -41,11 +41,17 @@ repos:
         entry: ruff check
         args: [--fix]
         language: python
+        # Pin to the ruff in uv.lock so the hook is reproducible. Without a pin,
+        # pre-commit installs the latest ruff on each fresh CI run, and a new
+        # release can start flagging previously-clean code (e.g. RUF100 unused-noqa)
+        # — breaking pre-commit on unrelated PRs. Bump in lockstep with uv.lock.
+        additional_dependencies: ["ruff==0.12.3"]
         types_or: [python, pyi]
       - id: ruff-format
         name: ruff-format
         entry: ruff format
         language: python
+        additional_dependencies: ["ruff==0.12.3"]
         types_or: [python, pyi]
   # - repo: https://github.com/pre-commit/mirrors-prettier
   #   rev: v4.0.0-alpha.8
