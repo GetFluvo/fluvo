@@ -44,6 +44,15 @@ html_context = {
     "source_docs_path": "/docs/",
 }
 
+# -- Link checking (sphinx linkcheck builder) -------------------------------
+# The scheduled link check hits live external URLs that intermittently time out or
+# rate-limit (e.g. www.contributor-covenant.org). Retry transient failures and do
+# not treat a timeout as broken, so the run only fails on a genuinely dead link
+# (a hard 404/error), not a one-off network blip.
+linkcheck_retries = 3
+linkcheck_timeout = 30
+linkcheck_report_timeouts_as_broken = False
+
 
 def on_builder_inited(app: Sphinx) -> None:
     """This function is connected to the 'builder-inited' event.
