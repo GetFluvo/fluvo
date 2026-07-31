@@ -2064,7 +2064,11 @@ def migrate_cmd(**kwargs: Any) -> None:
                 f"Must be a valid Python dictionary string. Error: {e}"
             )
             return
-    run_migration(**kwargs)
+    migration_ok = run_migration(**kwargs)
+    # Exit non-zero when any record failed so the migration failure is visible to
+    # callers/CI instead of being masked by a success exit code.
+    if not migration_ok:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

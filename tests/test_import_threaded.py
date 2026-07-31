@@ -283,6 +283,94 @@ class TestExecuteLoadBatch:
         mock_model.load.assert_called_once()
         mock_binary_fallback.assert_called_once()
 
+    def test_short_row_does_not_shift_id_map_and_is_failed(self) -> None:
+        """A too-short row is fail-filed and never shifts the id_map (#1).
+
+        With a deferred/ignored column active, the column filter drops rows that
+        lack enough columns. The surviving rows must map to their *own* created
+        ids (not shifted onto a neighbour), and the dropped row must land in the
+        fail file instead of vanishing.
+        """
+        mock_model = MagicMock()
+        # Only the two valid rows are sent to load(); ids return in that order.
+        mock_model.load.return_value = {"ids": [101, 103]}
+        thread_state = {
+            "model": mock_model,
+            "progress": MagicMock(),
+            "unique_id_field_index": 0,
+            # A deferred/ignored column activates the filter (max needed index = 1).
+            "ignore_list": ["parent_id/id"],
+        }
+        batch_header = ["id", "name", "parent_id/id"]
+        batch_lines = [
+            ["rec1", "A", "p1"],  # valid
+            ["rec2"],  # too short -> dropped from load, must be failed
+            ["rec3", "C", "p3"],  # valid
+        ]
+
+        result = _execute_load_batch(thread_state, batch_lines, batch_header, 1)
+
+        # Surviving rows map to the correct ids (no off-by-one shift onto rec2).
+        assert result["id_map"] == {"rec1": 101, "rec3": 103}
+        # The short row is accounted for in the fail file, not silently dropped.
+        assert any(line[0] == "rec2" for line in result["failed_lines"])
+
+    @patch("fluvo.import_threaded.time.sleep")
+    @patch("fluvo.import_threaded._load_batch_with_binary_fallback")
+    def test_serialization_fallback_does_not_reprocess_rows(
+        self, mock_fallback: MagicMock, _mock_sleep: MagicMock
+    ) -> None:
+        """After serialization-retry exhaustion, each row is processed once (#6).
+
+        chunk_size is halved on every transient retry; the exhaustion fallback must
+        advance the queue by the rows it actually processed (the full
+        current_chunk), not the just-halved chunk_size — otherwise the tail of the
+        chunk is loaded a second time (duplicate creates).
+        """
+        loaded_ids: list[str] = []
+
+        def load_side_effect(
+            header: Any, lines: Any, context: Any = None
+        ) -> dict[str, Any]:
+            if len(lines) > 1:  # multi-row chunks keep hitting the conflict
+                raise Exception("could not serialize access due to concurrent update")
+            loaded_ids.append(lines[0][0])  # single-row chunks succeed
+            return {"ids": [900 + len(loaded_ids)]}
+
+        mock_model = MagicMock()
+        mock_model.load.side_effect = load_side_effect
+
+        fallback_rows: list[str] = []
+
+        def fallback_side_effect(
+            model: Any, connection: Any, batch_lines: Any, *a: Any, **k: Any
+        ) -> dict[str, Any]:
+            fallback_rows.extend(row[0] for row in batch_lines)
+            return {
+                "id_map": {row[0]: 500 for row in batch_lines},
+                "failed_lines": [],
+                "success": True,
+            }
+
+        mock_fallback.side_effect = fallback_side_effect
+
+        thread_state = {
+            "model": mock_model,
+            "progress": MagicMock(),
+            "unique_id_field_index": 0,
+            "ignore_list": [],
+        }
+        batch_header = ["id", "name"]
+        batch_lines = [[f"rec{i}", "x"] for i in range(8)]
+
+        _execute_load_batch(thread_state, batch_lines, batch_header, 1)
+
+        # No row is both loaded and sent to the fallback, and together they cover
+        # every row exactly once (the bug reprocessed the tail of the chunk).
+        assert set(loaded_ids).isdisjoint(fallback_rows)
+        assert set(loaded_ids) | set(fallback_rows) == {f"rec{i}" for i in range(8)}
+        assert len(loaded_ids) == len(set(loaded_ids))
+
 
 class TestBatchingHelpers:
     """Tests for the batch creation helper functions."""
