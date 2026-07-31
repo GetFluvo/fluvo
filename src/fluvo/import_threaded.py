@@ -1775,16 +1775,31 @@ def _execute_load_batch(  # noqa: C901
     while lines_to_process:
         current_chunk = lines_to_process[:chunk_size]
 
-        # Apply pre-calculated filter or use original data
+        # Apply pre-calculated filter or use original data. ``valid_chunk`` is the
+        # exact set of rows sent to load(), so the id_map and fail-file accounting
+        # below stay aligned with ``created_ids``. Iterating the *unfiltered*
+        # current_chunk after a too-short row was dropped shifted every subsequent
+        # id_map entry onto the wrong record (silent data corruption), and the
+        # dropped row itself never reached the fail file.
         if indices_to_keep is not None and filtered_header is not None:
             load_header = filtered_header
-            load_lines = [
-                [row[i] for i in indices_to_keep]
-                for row in current_chunk
-                if len(row) > max_index_needed
+            valid_chunk = [row for row in current_chunk if len(row) > max_index_needed]
+            dropped_rows = [
+                row for row in current_chunk if len(row) <= max_index_needed
             ]
+            load_lines = [[row[i] for i in indices_to_keep] for row in valid_chunk]
         else:
             load_header, load_lines = batch_header, current_chunk
+            valid_chunk = current_chunk
+            dropped_rows = []
+
+        # A row with too few columns can't be matched to a load() result id, so it
+        # can never be part of the aligned id_map; record it in the fail file
+        # instead of silently dropping it.
+        for row in dropped_rows:
+            aggregated_failed_lines.append(
+                [*list(row), "Load failed: row has too few columns for the fields"]
+            )
 
         if not load_lines:
             lines_to_process = lines_to_process[chunk_size:]
@@ -1996,7 +2011,7 @@ def _execute_load_batch(  # noqa: C901
                 # at the end
 
             id_map = {}
-            for i, line in enumerate(current_chunk):
+            for i, line in enumerate(valid_chunk):
                 # Ensure there's a corresponding created ID and that
                 # it's a valid integer.
                 # The 'incompatible type' error happens when the
@@ -2049,7 +2064,7 @@ def _execute_load_batch(  # noqa: C901
                     # Get only the failed lines
                     failed_lines_to_retry = [
                         line
-                        for i, line in enumerate(current_chunk)
+                        for i, line in enumerate(valid_chunk)
                         if i >= len(created_ids) or created_ids[i] is None
                     ]
                     if failed_lines_to_retry:
@@ -2072,7 +2087,7 @@ def _execute_load_batch(  # noqa: C901
                 else:
                     # Add error information to the lines that failed
                     first_failed = True
-                    for i, line in enumerate(current_chunk):
+                    for i, line in enumerate(valid_chunk):
                         # Check if this line corresponds to a created record
                         if i >= len(created_ids) or created_ids[i] is None:
                             # Try to get a specific error for this row
@@ -2113,10 +2128,25 @@ def _execute_load_batch(  # noqa: C901
                 or "read timeout" in error_str_lower
                 or type(e).__name__ == "ReadTimeout"
             ):
-                log.debug(
-                    "Ignoring client-side timeout to allow server processing "
-                    "to continue"
+                # A client-side read-timeout does not tell us whether the server
+                # committed the chunk. Previously these rows were advanced past with
+                # no id_map or fail-file entry, so they became silently unaccounted
+                # (and unrecoverable). Record them in the fail file instead: the run
+                # is then reconciled, and re-importing is idempotent for rows with an
+                # external id (load() upserts by xmlid), so a genuine server-side
+                # success is not duplicated on retry.
+                log.warning(
+                    f"Client read-timeout on {len(valid_chunk)} record(s) in batch "
+                    f"{batch_number}; recording them to the fail file (server commit "
+                    "status unknown, re-run to reconcile)."
                 )
+                for line in valid_chunk:
+                    aggregated_failed_lines.append(
+                        [
+                            *list(line),
+                            "Load failed: client read-timeout (server status unknown)",
+                        ]
+                    )
                 lines_to_process = lines_to_process[chunk_size:]
                 continue
 
@@ -2226,7 +2256,12 @@ def _execute_load_batch(  # noqa: C901
                         aggregated_failed_lines.extend(
                             fallback_result.get("failed_lines", [])
                         )
-                        lines_to_process = lines_to_process[chunk_size:]
+                        # Advance by the number of rows the fallback actually
+                        # processed (the full current_chunk), NOT the just-halved
+                        # chunk_size: using chunk_size here left the second half of
+                        # the chunk in the queue to be processed a second time,
+                        # duplicating any records with an empty id column.
+                        lines_to_process = lines_to_process[len(current_chunk) :]
                         serialization_retry_count = 0
                         thread_state["retry_attempt"] = 0  # Reset on success
                         continue
@@ -2673,8 +2708,7 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
     unique_id_field: str,
     ignore: list[str],
     context: dict[str, Any],
-    fail_writer: Optional[Any],
-    fail_handle: Optional[TextIO],
+    fail_file: Optional[str],
     max_connection: int,
     batch_size: int,
     batch_delay: float,
@@ -2700,8 +2734,10 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
         unique_id_field: The name of the column containing the unique source ID.
         ignore: A list of fields to ignore during import.
         context: The context dictionary for the Odoo RPC call.
-        fail_writer: The CSV writer object for recording failures.
-        fail_handle: The file handle for the fail file.
+        fail_file: Path to the fail file for recording failures, or None. The
+            writer is opened lazily once the streamed header is known, so failed
+            rows are persisted in streaming mode too (previously they were only
+            counted and then discarded).
         max_connection: The number of parallel worker threads to use.
         batch_size: The number of records to process in each batch.
         batch_delay: Delay in seconds between batch submissions.
@@ -2713,9 +2749,12 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
             including the `id_map` ({source_id: db_id}), a list of any
             `failed_lines`, and a `success` boolean flag.
     """
-    rpc_pass_1 = RPCThreadImport(
-        max_connection, progress, TaskID(0), fail_writer, fail_handle
-    )
+    # The fail file is opened lazily once the streamed header is known (below);
+    # the streaming loop writes failures explicitly, so the thread pool does not
+    # need the writer.
+    fail_writer: Optional[Any] = None
+    fail_handle: Optional[TextIO] = None
+    rpc_pass_1 = RPCThreadImport(max_connection, progress, TaskID(0), None, None)
 
     # Calculate number of batches for progress display
     num_batches = (total_records + batch_size - 1) // batch_size if total_records else 1
@@ -2757,6 +2796,12 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
                         f"Unique ID field '{unique_id_field}' not found in header."
                     )
                     return {"success": False, "id_map": {}, "failed_lines": []}
+                # Now the header is known, open the fail file so streamed failures
+                # are persisted (not just counted).
+                if fail_file:
+                    fail_writer, fail_handle = _setup_fail_file(
+                        fail_file, header, separator, encoding
+                    )
 
             # Warn about empty id values in this batch
             _warn_empty_ids(batch_header, batch_data, start_row=cumulative_row_count)
@@ -2793,7 +2838,13 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
                     result = future.result()
                     if result:
                         combined_id_map.update(result.get("id_map", {}))
-                        combined_failed_lines.extend(result.get("failed_lines", []))
+                        batch_failed = result.get("failed_lines", [])
+                        combined_failed_lines.extend(batch_failed)
+                        # Persist failures to the fail file so streamed rows that
+                        # fail are recoverable, not silently dropped.
+                        if batch_failed and fail_writer and fail_handle:
+                            fail_writer.writerows(batch_failed)
+                            fail_handle.flush()
                         # Update progress
                         progress.advance(pass_1_task)
                 except Exception as e:
@@ -2809,6 +2860,9 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
         log.warning("Import interrupted by user.")
         rpc_pass_1.abort_flag = True
         aborted = True
+    finally:
+        if fail_handle:
+            fail_handle.close()
 
     return {
         "success": not aborted,
@@ -3430,8 +3484,9 @@ def import_data(  # noqa: C901
         except Exception as e:
             log.warning(f"Error during skip-existing filtering, continuing: {e}")
 
-    # For streaming mode, we defer fail file setup (header not known yet)
-    # For standard mode, set up fail file now
+    # For streaming mode the fail file is opened inside _orchestrate_streaming_pass_1
+    # once the header is known (it is passed the fail_file path directly).
+    # For standard mode, set up the fail file now.
     fail_writer, fail_handle = None, None
     if not can_stream and fail_file and header is not None:
         fail_writer, fail_handle = _setup_fail_file(
@@ -3477,8 +3532,7 @@ def import_data(  # noqa: C901
                     unique_id_field,
                     ignore,
                     context,
-                    fail_writer,
-                    fail_handle,
+                    fail_file,
                     max_connection,
                     batch_size,
                     batch_delay,

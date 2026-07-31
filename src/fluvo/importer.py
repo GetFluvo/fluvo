@@ -559,7 +559,8 @@ def run_import_for_migration(
     data: list[list[Any]],
     worker: int = 1,
     batch_size: int = 10,
-) -> None:
+    fail_file: Optional[str] = None,
+) -> tuple[bool, dict[str, int]]:
     """Orchestrates the data import process from in-memory data.
 
     This function adapts in-memory data to the file-based import engine by
@@ -573,9 +574,17 @@ def run_import_for_migration(
         data (list[list[Any]]): A list of lists representing the data rows.
         worker (int): The number of simultaneous connections to use.
         batch_size (int): The number of records to process in each batch.
+        fail_file (Optional[str]): Path to write rows that fail to import, so a
+            migration never silently drops data. When None, no fail file is written.
+
+    Returns:
+        tuple[bool, dict[str, int]]: ``(overall_success, stats)`` from the import
+        engine, so the caller can detect (and report) partial failures.
     """
     log.info("Starting data import from in-memory data...")
     tmp_path = ""
+    success: bool = False
+    stats: dict[str, int] = {}
     try:
         with tempfile.NamedTemporaryFile(
             mode="w+", delete=False, suffix=".csv", newline=""
@@ -585,11 +594,12 @@ def run_import_for_migration(
             writer.writerows(data)
             tmp_path = tmp.name
         log.info(f"In-memory data written to temporary file: {tmp_path}")
-        import_threaded.import_data(
+        success, stats = import_threaded.import_data(
             config=config,
             model=model,
             unique_id_field="id",  # Migration import assumes 'id'
             file_csv=tmp_path,
+            fail_file=fail_file,
             # The temp file is written with csv.writer (comma-delimited); import_data
             # defaults to ';', so the separator must be set explicitly or the header
             # parses as a single column (#192).
@@ -608,3 +618,4 @@ def run_import_for_migration(
             os.remove(tmp_path)
 
     log.info("In-memory import process finished.")
+    return success, stats

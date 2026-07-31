@@ -28,6 +28,12 @@ def test_run_migration_success_with_mapping(
     )
     mock_processor.return_value = mock_processor_instance
 
+    # run_migration unpacks (success, stats) from the import.
+    mock_run_import.return_value = (
+        True,
+        {"total_records": 1, "created_records": 1, "failed_records": 0},
+    )
+
     # Define a valid custom mapping where the value is a callable mapper function
     custom_mapping = {
         "name": mapper.val("name", postprocess=lambda x, s: f"Transformed {x}")
@@ -75,6 +81,12 @@ def test_run_migration_success_no_mapping(
     )
     mock_processor.return_value = mock_processor_instance
 
+    # run_migration unpacks (success, stats) from the import.
+    mock_run_import.return_value = (
+        True,
+        {"total_records": 1, "created_records": 1, "failed_records": 0},
+    )
+
     # 2. Action
     run_migration(
         config_export="src.conf", config_import="dest.conf", model="res.partner"
@@ -111,3 +123,37 @@ def test_run_migration_no_data_exported(
     mock_log_warning.assert_called_once_with("No data exported. Migration finished.")
     # The import function should never be called
     mock_run_import.assert_not_called()
+
+
+@patch("fluvo.migrator.run_import_for_migration")
+@patch("fluvo.migrator.run_export_for_migration")
+@patch("fluvo.migrator.Processor")
+def test_run_migration_reports_import_failure(
+    mock_processor: MagicMock,
+    mock_run_export: MagicMock,
+    mock_run_import: MagicMock,
+) -> None:
+    """A partial import must make the migration return False (no silent success)."""
+    mock_run_export.return_value = (["id", "name"], [["1", "Source Name"]])
+    mock_processor_instance = MagicMock()
+    mock_processor_instance.process.return_value = pl.DataFrame(
+        {"id": ["1"], "name": ["Source Name"]}
+    )
+    mock_processor.return_value = mock_processor_instance
+
+    # Import reports a failure (one record did not import).
+    mock_run_import.return_value = (
+        False,
+        {"total_records": 1, "created_records": 0, "failed_records": 1},
+    )
+
+    result = run_migration(
+        config_export="src.conf", config_import="dest.conf", model="res.partner"
+    )
+
+    assert result is False
+    # A fail file path is passed so the failed rows are recoverable.
+    assert "fail_file" in mock_run_import.call_args.kwargs
+    assert mock_run_import.call_args.kwargs["fail_file"].endswith(
+        "res_partner_migration_fail.csv"
+    )

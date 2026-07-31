@@ -4,6 +4,7 @@ This module contains the logic for performing a direct, in-memory
 migration of data from one Odoo instance to another.
 """
 
+import os
 from collections.abc import Mapping
 from typing import Any, Callable, Optional, Union
 
@@ -26,11 +27,28 @@ def run_migration(
     export_batch_size: int = 100,
     import_worker: int = 1,
     import_batch_size: int = 10,
-) -> None:
+) -> bool:
     """Performs a server-to-server data migration.
 
     This function chains together the export, transform, and import processes
     without creating intermediate files.
+
+    Args:
+        config_export: Path to the source (export) connection config file.
+        config_import: Path to the destination (import) connection config file.
+        model: The Odoo model to migrate.
+        domain: Odoo domain (as a string) selecting the source records.
+        fields: Fields to export; defaults to all when None/empty.
+        mapping: Optional per-column transform mapping; a 1-to-1 mapping is used
+            when None.
+        export_worker: Number of parallel export connections.
+        export_batch_size: Records read per export batch.
+        import_worker: Number of parallel import connections.
+        import_batch_size: Records written per import batch.
+
+    Returns:
+        bool: True if every exported record imported successfully; False if any
+        record failed (the failures are written to ``<model>_migration_fail.csv``).
     """
     log.info("--- Starting Server-to-Server Migration ---")
 
@@ -48,7 +66,7 @@ def run_migration(
 
     if not header or not data:
         log.warning("No data exported. Migration finished.")
-        return
+        return True  # Nothing to migrate is a successful no-op, not a failure.
 
     log.info(f"Successfully exported {len(data)} records.")
 
@@ -76,13 +94,29 @@ def run_migration(
 
     # Step 3: Import the transformed data into the destination database
     log.info(f"Importing {len(to_import_data_list)} records into destination...")
-    run_import_for_migration(
+    # Route failures to a fail file so a partial migration is never reported as a
+    # clean success (silent data loss in the tool's headline workflow).
+    fail_file = os.path.join(
+        os.getcwd(), f"{model.replace('.', '_')}_migration_fail.csv"
+    )
+    success, stats = run_import_for_migration(
         config=config_import,
         model=model,
         header=to_import_header,
         data=to_import_data_list,
         worker=import_worker,
         batch_size=import_batch_size,
+        fail_file=fail_file,
     )
 
-    log.info("--- Migration Finished Successfully ---")
+    if success:
+        log.info("--- Migration Finished Successfully ---")
+    else:
+        failed = stats.get("failed_records", 0)
+        unaccounted = stats.get("unaccounted_records", 0)
+        log.error(
+            f"--- Migration completed WITH FAILURES: {failed} failed, "
+            f"{unaccounted} unaccounted of {stats.get('total_records', 0)} record(s). "
+            f"See {fail_file} to retry. ---"
+        )
+    return success
