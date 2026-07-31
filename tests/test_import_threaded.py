@@ -208,7 +208,7 @@ class TestExecuteLoadBatch:
             "Reducing chunk size to 2."
         )
         mock_progress.console.print.assert_any_call(
-            "[yellow]WARN:[/] Batch 1 hit transient error (memory). "
+            "[yellow]WARN:[/] Batch 1 hit transient error (memory error). "
             "Reducing chunk size to 1."
         )
 

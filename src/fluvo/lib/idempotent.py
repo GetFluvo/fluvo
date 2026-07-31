@@ -92,7 +92,7 @@ def compare_values(source_value: Any, target_value: Any) -> bool:
     return str(norm_source) == str(norm_target)
 
 
-def get_existing_records(
+def get_existing_records(  # noqa: C901
     connection: Any,
     model: str,
     external_ids: list[str],
@@ -118,25 +118,31 @@ def get_existing_records(
         ir_model_data = connection.get_model("ir.model.data")
         model_obj = connection.get_model(model)
 
-        # Build lookup for external IDs
+        # Build lookup for external IDs. Resolve them in bulk: group names by
+        # module and issue one search_read per module (chunked), instead of one
+        # RPC per external id — a 100k-row --skip-unchanged run went from 100k
+        # round-trips to a handful.
         ext_id_to_res_id: dict[str, int] = {}
-
+        names_by_module: dict[str, list[str]] = {}
         for ext_id in external_ids:
             if "." not in ext_id:
                 continue
-
             module, name = ext_id.split(".", 1)
-            records = ir_model_data.search_read(
-                [
-                    ("module", "=", module),
-                    ("name", "=", name),
-                    ("model", "=", model),
-                ],
-                ["res_id"],
-                limit=1,
-            )
-            if records:
-                ext_id_to_res_id[ext_id] = records[0]["res_id"]
+            names_by_module.setdefault(module, []).append(name)
+
+        for module, names in names_by_module.items():
+            for i in range(0, len(names), 2000):
+                chunk = names[i : i + 2000]
+                rows = ir_model_data.search_read(
+                    [
+                        ("module", "=", module),
+                        ("name", "in", chunk),
+                        ("model", "=", model),
+                    ],
+                    ["module", "name", "res_id"],
+                )
+                for row in rows:
+                    ext_id_to_res_id[f"{row['module']}.{row['name']}"] = row["res_id"]
 
         if not ext_id_to_res_id:
             return result

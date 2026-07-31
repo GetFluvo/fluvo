@@ -88,7 +88,9 @@ class TestGetExistingRecords:
         mock_conn = MagicMock()
 
         ir_model_data = MagicMock()
-        ir_model_data.search_read.return_value = [{"res_id": 1}]
+        ir_model_data.search_read.return_value = [
+            {"module": "base", "name": "test", "res_id": 1}
+        ]
 
         model_obj = MagicMock()
         model_obj.search_read.return_value = [{"id": 1, "name": "Test"}]
@@ -103,6 +105,36 @@ class TestGetExistingRecords:
 
         assert "base.test" in result
         assert result["base.test"]["name"] == "Test"
+
+    def test_resolves_external_ids_in_one_batched_call(self) -> None:
+        """Many external ids in one module resolve via a single search_read (#12).
+
+        Previously this did one RPC per id (100k rows -> 100k round-trips).
+        """
+        mock_conn = MagicMock()
+        ir_model_data = MagicMock()
+        ir_model_data.search_read.return_value = [
+            {"module": "__import__", "name": "a", "res_id": 1},
+            {"module": "__import__", "name": "b", "res_id": 2},
+        ]
+        model_obj = MagicMock()
+        model_obj.search_read.return_value = [
+            {"id": 1, "name": "A"},
+            {"id": 2, "name": "B"},
+        ]
+        mock_conn.get_model.side_effect = lambda m: (
+            ir_model_data if m == "ir.model.data" else model_obj
+        )
+
+        result = idempotent.get_existing_records(
+            mock_conn, "res.partner", ["__import__.a", "__import__.b"], ["name"]
+        )
+
+        assert set(result) == {"__import__.a", "__import__.b"}
+        # One batched ir.model.data lookup, not one per id.
+        ir_model_data.search_read.assert_called_once()
+        domain = ir_model_data.search_read.call_args.args[0]
+        assert ("name", "in", ["a", "b"]) in domain
 
     def test_handles_missing_records(self) -> None:
         """Test handling records not found in Odoo."""
