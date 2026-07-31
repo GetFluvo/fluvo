@@ -122,6 +122,11 @@ def precommit(session: nox.Session) -> None:
     session.run(
         "uv",
         "sync",
+        # --frozen: install exactly what uv.lock pins and never re-resolve, so CI
+        # (and local nox) use a reproducible toolchain. Without this, uv may pick up
+        # newer transitive versions than the lock, which silently drifts tool output
+        # (e.g. pydoclint's baseline rendering) and breaks pre-commit on unrelated PRs.
+        "--frozen",
         "--python",
         str(session.python),
         "--group",
@@ -142,6 +147,11 @@ def mypy(session: nox.Session) -> None:
     session.run(
         "uv",
         "sync",
+        # --frozen: install exactly what uv.lock pins and never re-resolve, so CI
+        # (and local nox) use a reproducible toolchain. Without this, uv may pick up
+        # newer transitive versions than the lock, which silently drifts tool output
+        # (e.g. pydoclint's baseline rendering) and breaks pre-commit on unrelated PRs.
+        "--frozen",
         "--python",
         str(session.python),
         "--group",
@@ -166,6 +176,11 @@ def tests(session: nox.Session) -> None:
     session.run(
         "uv",
         "sync",
+        # --frozen: install exactly what uv.lock pins and never re-resolve, so CI
+        # (and local nox) use a reproducible toolchain. Without this, uv may pick up
+        # newer transitive versions than the lock, which silently drifts tool output
+        # (e.g. pydoclint's baseline rendering) and breaks pre-commit on unrelated PRs.
+        "--frozen",
         "--python",
         str(session.python),
         "--group",
@@ -246,6 +261,11 @@ def typeguard_tests(session: nox.Session) -> None:
     session.run(
         "uv",
         "sync",
+        # --frozen: install exactly what uv.lock pins and never re-resolve, so CI
+        # (and local nox) use a reproducible toolchain. Without this, uv may pick up
+        # newer transitive versions than the lock, which silently drifts tool output
+        # (e.g. pydoclint's baseline rendering) and breaks pre-commit on unrelated PRs.
+        "--frozen",
         "--python",
         str(session.python),
         "--group",
@@ -271,6 +291,11 @@ def xdoctest(session: nox.Session) -> None:
     session.run(
         "uv",
         "sync",
+        # --frozen: install exactly what uv.lock pins and never re-resolve, so CI
+        # (and local nox) use a reproducible toolchain. Without this, uv may pick up
+        # newer transitive versions than the lock, which silently drifts tool output
+        # (e.g. pydoclint's baseline rendering) and breaks pre-commit on unrelated PRs.
+        "--frozen",
         "--python",
         str(session.python),
         "--group",
@@ -293,6 +318,11 @@ def docs_build(session: nox.Session) -> None:
     session.run(
         "uv",
         "sync",
+        # --frozen: install exactly what uv.lock pins and never re-resolve, so CI
+        # (and local nox) use a reproducible toolchain. Without this, uv may pick up
+        # newer transitive versions than the lock, which silently drifts tool output
+        # (e.g. pydoclint's baseline rendering) and breaks pre-commit on unrelated PRs.
+        "--frozen",
         "--python",
         str(session.python),
         "--group",
@@ -324,6 +354,11 @@ def docs_linkcheck(session: nox.Session) -> None:
     session.run(
         "uv",
         "sync",
+        # --frozen: install exactly what uv.lock pins and never re-resolve, so CI
+        # (and local nox) use a reproducible toolchain. Without this, uv may pick up
+        # newer transitive versions than the lock, which silently drifts tool output
+        # (e.g. pydoclint's baseline rendering) and breaks pre-commit on unrelated PRs.
+        "--frozen",
         "--python",
         str(session.python),
         "--group",
@@ -348,6 +383,11 @@ def docs(session: nox.Session) -> None:
     session.run(
         "uv",
         "sync",
+        # --frozen: install exactly what uv.lock pins and never re-resolve, so CI
+        # (and local nox) use a reproducible toolchain. Without this, uv may pick up
+        # newer transitive versions than the lock, which silently drifts tool output
+        # (e.g. pydoclint's baseline rendering) and breaks pre-commit on unrelated PRs.
+        "--frozen",
         "--python",
         str(session.python),
         "--group",
