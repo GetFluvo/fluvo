@@ -67,6 +67,17 @@ class TestErrorCategorization:
         assert category == retry.ErrorCategory.TRANSIENT
         assert pattern in ("500", "internal server error")
 
+    def test_permanent_error_with_incidental_500_not_transient(self) -> None:
+        """A permanent error whose text merely contains '500' isn't transient (#11)."""
+        category, pattern = retry.categorize_error("Invalid value 500 for field 'x'")
+        assert category == retry.ErrorCategory.PERMANENT
+        assert pattern == "invalid value"
+
+    def test_permanent_error_with_incidental_memory_not_transient(self) -> None:
+        """A 'memory'-substring field name no longer forces a transient retry (#11)."""
+        category, _ = retry.categorize_error("unknown field memory_size in model")
+        assert category == retry.ErrorCategory.PERMANENT
+
     def test_categorize_permanent_unique_constraint(self) -> None:
         """Test that unique constraint errors are categorized as permanent."""
         category, pattern = retry.categorize_error(

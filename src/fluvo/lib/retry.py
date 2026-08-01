@@ -73,7 +73,6 @@ TRANSIENT_ERROR_PATTERNS = [
     "connection closed",
     "network unreachable",
     "name resolution failed",
-    "dns",
     "broken pipe",
     "connection aborted",
     "remotedisconnected",
@@ -93,7 +92,6 @@ TRANSIENT_ERROR_PATTERNS = [
     "json decode",
     "expecting value",  # JSONDecodeError message
     "empty response",
-    "no data",
     "incomplete read",
     "response ended prematurely",
     "eof occurred",
@@ -109,14 +107,21 @@ TRANSIENT_ERROR_PATTERNS = [
     "too many connections",
     "poolerror",
     "out of memory",
-    "memory",
+    "memoryerror",
+    "memory error",
     # Odoo/server transient
     "bus.bus",
     "cursor already closed",
     "transaction aborted",
     "server closed connection",
     "internal server error",
-    "500",
+    # NOTE: bare substrings like "500", "memory", "dns" and "no data" were removed:
+    # they match permanent errors whose text merely *contains* those characters
+    # (an id/amount "…500…", a "memory_" field, "no data provided"), which
+    # misclassified them as transient and triggered a chunk-halving retry storm
+    # before the row reached the fail file. The specific variants above
+    # ("internal server error", "out of memory", "name resolution failed", the
+    # 502/503/504 gateway codes, "empty response") still cover the real transients.
 ]
 
 PERMANENT_ERROR_PATTERNS = [

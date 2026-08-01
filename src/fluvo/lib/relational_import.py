@@ -849,7 +849,10 @@ def run_write_o2m_tuple_import(
         if not parent_db_id:
             continue
 
-        o2m_json_data = record[field]
+        # Read from actual_field, not field: when field isn't a column the code
+        # above falls back to the "<field>/id" column, and reading record[field]
+        # here would KeyError on exactly that fallback path.
+        o2m_json_data = record[actual_field]
         try:
             child_records = json.loads(o2m_json_data)
             if not isinstance(child_records, list):

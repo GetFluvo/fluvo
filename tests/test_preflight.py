@@ -363,10 +363,14 @@ class TestLanguageCheck:
 class TestDeferralAndStrategyCheck:
     """Tests for the deferral_and_strategy_check pre-flight checker."""
 
-    def test_direct_relational_import_strategy_for_large_volumes(
+    def test_write_tuple_strategy_for_large_volumes(
         self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock
     ) -> None:
-        """Verify 'direct_relational_import' is chosen for many m2m links."""
+        """Verify 'write_tuple' is chosen for many m2m links too.
+
+        The former 'direct_relational_import' path (>= 500 links) was broken and
+        removed; all many2many now route through the working write_tuple path.
+        """
         mock_df_header = MagicMock()
         mock_df_header.columns = ["id", "name", "category_id"]
 
@@ -399,10 +403,7 @@ class TestDeferralAndStrategyCheck:
         )
         assert result is True
         assert "category_id" in import_plan["deferred_fields"]
-        assert (
-            import_plan["strategies"]["category_id"]["strategy"]
-            == "direct_relational_import"
-        )
+        assert import_plan["strategies"]["category_id"]["strategy"] == "write_tuple"
 
     def test_write_tuple_strategy_when_missing_relation_info(
         self, mock_polars_read_csv: MagicMock, mock_conf_lib: MagicMock

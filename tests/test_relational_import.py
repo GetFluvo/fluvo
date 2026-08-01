@@ -723,20 +723,17 @@ class TestRunWriteO2MTupleImportEdgeCases:
     def test_run_write_o2m_tuple_import_with_id_suffix_field(
         self, mock_get_conn: MagicMock
     ) -> None:
-        """Test O2M import with /id suffix field name in DataFrame.
+        """When only the '<field>/id' column exists, read the o2m data from it (#14).
 
-        Note: This tests that when source has 'line_ids/id' but we call with 'line_ids',
-        the code finds the /id column but still expects line_ids for data access.
-        This is a limitation in the current implementation.
+        The code detects the '<field>/id' fallback column for filtering; it must
+        also read the row data from that column. Previously it read record[field],
+        which KeyError'd on exactly this fallback path (field absent as a column).
         """
-        # Provide BOTH columns to test the filtering logic
+        # Only the '/id' column exists (the bare field name is absent).
         source_df = pl.DataFrame(
             {
                 "id": ["p1"],
-                "line_ids": ['[{"product": "prodA"}]'],
-                "line_ids/id": [
-                    "external_id_not_used"
-                ],  # This triggers the fallback detection
+                "line_ids/id": ['[{"product": "prodA"}]'],
             }
         )
         mock_parent_model = MagicMock()
@@ -760,6 +757,11 @@ class TestRunWriteO2MTupleImportEdgeCases:
         )
 
         assert result is True
+        # The child records were written from the '/id' column's JSON, keyed by
+        # the real Odoo field name.
+        mock_parent_model.write.assert_called_once_with(
+            [1], {"line_ids": [(0, 0, {"product": "prodA"})]}
+        )
 
     @patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
     def test_run_write_o2m_tuple_import_json_decode_error(

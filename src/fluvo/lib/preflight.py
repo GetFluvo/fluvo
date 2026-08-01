@@ -31,15 +31,6 @@ def _handle_m2m_field(
     df: pl.DataFrame,
 ) -> tuple[bool, dict[str, Any]]:
     """Handle many2many field processing and strategy selection."""
-    # Ensure the column is treated as string for splitting
-    relation_count = (
-        df.lazy()
-        .select(pl.col(field_name).cast(pl.Utf8).str.split(","))
-        .select(pl.col(field_name).list.len())
-        .sum()
-        .collect()
-        .item()
-    )
     # Check if required keys exist for many2many fields
     relation_table = field_info.get("relation_table")
     relation_field = field_info.get("relation_field")
@@ -47,20 +38,18 @@ def _handle_m2m_field(
 
     strategy_details = {}
     if relation_table and relation_field:
-        if relation_count >= 500:
-            strategy_details = {
-                "strategy": "direct_relational_import",
-                "relation_table": relation_table,
-                "relation_field": relation_field,
-                "relation": relation,
-            }
-        else:
-            strategy_details = {
-                "strategy": "write_tuple",
-                "relation_table": relation_table,
-                "relation_field": relation_field,
-                "relation": relation,
-            }
+        # Always use write_tuple for many2many. The former
+        # "direct_relational_import" path (selected at >= 500 links) could not
+        # work: it wrote the temp CSV comma-delimited but re-imported it with the
+        # ';' default, produced no id column, and targeted the SQL relation table
+        # name instead of an Odoo model — so it raised mid-Pass-2 after Pass 1 had
+        # committed. write_tuple handles any link count via batched (6,0) writes.
+        strategy_details = {
+            "strategy": "write_tuple",
+            "relation_table": relation_table,
+            "relation_field": relation_field,
+            "relation": relation,
+        }
     else:
         # Log a warning when relation information is incomplete
         log.warning(
