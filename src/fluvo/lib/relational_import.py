@@ -567,8 +567,9 @@ def run_write_tuple_import(
     progress: Progress,
     task_id: TaskID,
     original_filename: str,
+    m2m_mode: str = "replace",
 ) -> bool:
-    """Orchestrates the 'write_tuple' import for relational fields."""
+    """Orchestrate the 'write_tuple' import for m2m fields (m2m_mode replace|add)."""
     progress.update(
         task_id,
         description=f"Pass 2/2: Updating relations for [bold]{field}[/bold]",
@@ -657,6 +658,7 @@ def run_write_tuple_import(
         related_model_df,
         original_filename,
         batch_size,
+        m2m_mode,
     )
 
 
@@ -673,6 +675,7 @@ def _create_relational_records(
     related_model_df: pl.DataFrame,
     original_filename: str,
     batch_size: int,
+    m2m_mode: str = "replace",
 ) -> bool:
     """Create records in the relational table.
 
@@ -694,6 +697,8 @@ def _create_relational_records(
         related_model_df: DataFrame with related model IDs
         original_filename: The original filename
         batch_size: The batch size for processing
+        m2m_mode: "replace" (default) sets each owner's set with (6, 0, ids);
+            "add" links values with (4, id), keeping any pre-existing links.
 
     Returns:
         True if successful, False otherwise
@@ -752,10 +757,15 @@ def _create_relational_records(
     # Update each owning record with its many2many field values
     for owning_id, related_ids in grouped_data.items():
         try:
-            # For many2many fields, we use the (6, 0, [IDs]) command to replace
-            # the entire set of related records for this owner
-            # This replaces any existing relationships with the new set
-            m2m_command = [(6, 0, related_ids)]
+            if m2m_mode == "add":
+                # Additive: (4, id) links each related record without touching
+                # existing links, so a partial/re-import never wipes links that
+                # aren't in this file (and re-linking is a no-op in Odoo).
+                m2m_command: list[Any] = [(4, rid) for rid in related_ids]
+            else:
+                # Default "replace": (6, 0, [IDs]) makes the set exactly this list,
+                # treating the file as the single source of truth for the field.
+                m2m_command = [(6, 0, related_ids)]
 
             # Update the owning record with the many2many field
             owning_model.write([owning_id], {field: m2m_command})

@@ -1174,6 +1174,15 @@ def vat_validate_cmd(
     "Odoo's load() would silently merge such rows into one record.",
 )
 @click.option(
+    "--m2m-mode",
+    type=click.Choice(["replace", "add"]),
+    default="replace",
+    show_default=True,
+    help="How many2many fields are written in Pass 2. 'replace' makes each record's "
+    "set exactly the values in the file (single source of truth); 'add' only links "
+    "the file's values, leaving any pre-existing links intact.",
+)
+@click.option(
     "--no-cache",
     is_flag=True,
     default=False,

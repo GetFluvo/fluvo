@@ -105,6 +105,18 @@ This means for most standard cases, the import will work without any extra flags
 fluvo import --file path/to/res_partner_with_parents.csv --model res.partner
 ```
 
+```{admonition} many2many write mode: `--m2m-mode`
+:class: note
+
+By default (`--m2m-mode replace`) fluvo treats the file as the **single source of
+truth** for a many2many field: each record's set becomes exactly the values in the
+file (a `(6, 0, ids)` command), so links not in the file are removed. Pass
+`--m2m-mode add` to instead **only add** the file's links (`(4, id)`), leaving any
+pre-existing links intact — useful for enriching records incrementally or
+re-importing a partial file without wiping existing relations. `add` is idempotent
+(re-linking an existing relation is a no-op).
+```
+
 If your unique identifier column is named something else (e.g., external_id), you must specify it using the --unique-id-field option.
 
 ```bash
