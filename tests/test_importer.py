@@ -751,6 +751,55 @@ def test_run_import_partial_success_runs_strategies(
     mock_write_tuple.assert_called_once()
 
 
+@patch("fluvo.importer.relational_import.run_write_tuple_import")
+@patch("fluvo.importer.import_threaded.import_data")
+@patch("fluvo.importer._run_preflight_checks")
+def test_run_import_pass2_skips_when_source_unreadable(
+    mock_preflight: MagicMock,
+    mock_import_data: MagicMock,
+    mock_write_tuple: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Pass 2 skips (no crash) when the source can't be re-read (#8).
+
+    Pass 1 has already committed, so an unreadable/empty source on the relational
+    pass logs a warning and skips relational population rather than aborting.
+    """
+    # Empty source file -> pl.read_csv raises -> Pass 2 is skipped gracefully.
+    source_file = tmp_path / "source.csv"
+    source_file.touch()
+
+    def preflight_side_effect(*_args: Any, **kwargs: Any) -> bool:
+        kwargs["import_plan"]["strategies"] = {"tag_ids": {"strategy": "write_tuple"}}
+        return True
+
+    mock_preflight.side_effect = preflight_side_effect
+    mock_import_data.return_value = (True, {"total_records": 1, "id_map": {"1": 1}})
+
+    run_import(
+        config="test_connection.conf",
+        filename=str(source_file),
+        model="res.partner",
+        fail=False,
+        deferred_fields=None,
+        auto_defer=False,
+        unique_id_field=None,
+        no_preflight_checks=False,
+        headless=True,
+        worker=1,
+        batch_size=100,
+        skip=0,
+        separator=",",
+        ignore=None,
+        context={},
+        encoding="utf-8",
+        o2m=False,
+        groupby=None,
+    )
+    # No crash, and the strategy is not attempted without source data.
+    mock_write_tuple.assert_not_called()
+
+
 class TestImporterEdgeCases:
     """Additional edge case tests for importer module."""
 
