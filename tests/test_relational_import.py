@@ -125,6 +125,61 @@ def test_run_write_tuple_import(
     assert result is True
     # Should have called write on the owning model, not create on the relation model
     assert mock_owning_model.write.call_count >= 1
+    # Default mode replaces the set with a single (6, 0, ids) command.
+    replace_cmds = [
+        cmd
+        for call in mock_owning_model.write.call_args_list
+        for cmd in call.args[1]["category_id"]
+    ]
+    assert replace_cmds and all(cmd[0] == 6 for cmd in replace_cmds)
+
+
+@patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
+@patch("fluvo.lib.relational_import._resolve_related_ids")
+def test_run_write_tuple_import_add_mode(
+    mock_resolve_ids: MagicMock,
+    mock_get_conn: MagicMock,
+) -> None:
+    """m2m_mode='add' links values with (4, id), leaving existing links intact."""
+    source_df = pl.DataFrame({"id": ["p1"], "category_id": ["cat1,cat2"]})
+    mock_resolve_ids.return_value = pl.DataFrame(
+        {"external_id": ["cat1", "cat2"], "db_id": [11, 12]}
+    )
+    mock_owning_model = MagicMock()
+    mock_get_conn.return_value.get_model.return_value = mock_owning_model
+    strategy_details = {
+        "relation_table": "res.partner.category.rel",
+        "relation_field": "partner_id",
+        "relation": "category_id",
+    }
+    progress = Progress()
+    task_id = progress.add_task("test")
+
+    result = relational_import.run_write_tuple_import(
+        "dummy.conf",
+        "res.partner",
+        "category_id",
+        strategy_details,
+        source_df,
+        {"p1": 1},
+        1,
+        10,
+        progress,
+        task_id,
+        "source.csv",
+        m2m_mode="add",
+    )
+
+    assert result is True
+    commands = [
+        cmd
+        for call in mock_owning_model.write.call_args_list
+        for cmd in call.args[1]["category_id"]
+    ]
+    assert commands, "expected m2m write commands"
+    # Every command is an additive (4, id); none replaces the set.
+    assert all(cmd[0] == 4 for cmd in commands)
+    assert {cmd[1] for cmd in commands} == {11, 12}
 
 
 @patch("fluvo.lib.relational_import.cache.load_id_map", return_value=None)

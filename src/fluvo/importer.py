@@ -156,6 +156,7 @@ def run_import(  # noqa: C901
     auto_clean: bool = False,
     fix_missing_variants: bool = False,
     allow_xmlid_collisions: bool = False,
+    m2m_mode: str = "replace",
 ) -> Optional[dict[str, int]]:
     """Main entry point for the import command, handling all orchestration.
 
@@ -477,6 +478,7 @@ def run_import(  # noqa: C901
                         progress,
                         task_id,
                         filename,
+                        m2m_mode,
                     )
                     if not result:
                         log.warning(
