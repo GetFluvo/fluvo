@@ -18,6 +18,7 @@ from fluvo.enums import PreflightMode
 from ..logging_config import log
 from . import cache, conf_lib, sort
 from .actions import language_installer
+from .internal.tools import to_xmlid
 from .internal.ui import _show_error_panel, _show_warning_panel
 
 # A registry to hold all pre-flight check functions
@@ -664,6 +665,109 @@ def deferral_and_strategy_check(
 
     log.info("Pre-flight Check Successful: All columns are valid fields on the model.")
     return True
+
+
+@register_check
+def xmlid_collision_check(  # noqa: C901
+    preflight_mode: "PreflightMode",
+    filename: str,
+    import_plan: dict[str, Any],
+    **kwargs: Any,
+) -> bool:
+    """Fail fast when distinct source IDs sanitize to the same Odoo external ID.
+
+    ``to_xmlid`` maps spaces/commas/pipes/newlines to ``_``, so two different
+    source IDs (e.g. ``"a b"`` and ``"a,b"``) can collapse to one xmlid. Because
+    Odoo's ``load()`` upserts on the xmlid, that silently *merges* the two rows
+    into a single record (the later one overwrites the earlier). Detect it here,
+    before anything is written, and abort — unless the caller passed
+    ``allow_xmlid_collisions``. Also warn about blank-id rows that carry
+    relational data, which Pass 2 cannot link to any record.
+
+    Args:
+        preflight_mode: The current pre-flight mode.
+        filename: Path to the CSV being validated.
+        import_plan: The shared import plan (read for relational field names).
+        **kwargs: separator, encoding, unique_id_field, allow_xmlid_collisions.
+
+    Returns:
+        bool: False (abort) only on unopted-in collisions; True otherwise.
+    """
+    separator = kwargs.get("separator", ";")
+    encoding = kwargs.get("encoding", "utf-8")
+    unique_id_field = kwargs.get("unique_id_field") or "id"
+    allow_collisions = kwargs.get("allow_xmlid_collisions", False)
+
+    header = _get_csv_header(filename, separator)
+    if not header:
+        return True  # header issues are reported by other checks
+
+    id_index = next(
+        (i for i, c in enumerate(header) if c.lower() == unique_id_field.lower()),
+        -1,
+    )
+    if id_index < 0:
+        return True  # no id column -> nothing can collide
+
+    # Pass-2 (relational/deferred) columns, matched by base field name.
+    relational_bases = {
+        f.split("/")[0]
+        for f in list(import_plan.get("strategies", {}).keys())
+        + list(import_plan.get("deferred_fields", []))
+    }
+    relational_indices = [
+        i for i, c in enumerate(header) if c.split("/")[0] in relational_bases
+    ]
+
+    xmlid_to_raw: dict[str, set[str]] = {}
+    blank_id_with_relations = 0
+    try:
+        with open(filename, encoding=encoding, newline="") as f:
+            reader = csv.reader(f, delimiter=separator)
+            next(reader, None)  # skip header
+            for row in reader:
+                if id_index >= len(row):
+                    continue
+                raw = row[id_index].strip()
+                if not raw:
+                    # Blank id is legal (a plain create) but can't be linked in
+                    # Pass 2; only a concern if the row actually carries relations.
+                    if any(i < len(row) and row[i].strip() for i in relational_indices):
+                        blank_id_with_relations += 1
+                    continue
+                xmlid_to_raw.setdefault(to_xmlid(raw), set()).add(raw)
+    except Exception as e:
+        log.warning(f"Could not scan IDs for xmlid collisions: {e}")
+        return True
+
+    if blank_id_with_relations:
+        log.warning(
+            f"{blank_id_with_relations} row(s) have a blank '{unique_id_field}' but "
+            "carry relational data. Pass 2 cannot link relations to a record without "
+            "an external id; give those rows an id if their relations must be set."
+        )
+
+    collisions = {k: v for k, v in xmlid_to_raw.items() if len(v) > 1}
+    if not collisions:
+        return True
+
+    sample = list(collisions.items())[:10]
+    detail = "\n".join(f"  {sorted(raws)} -> '{xmlid}'" for xmlid, raws in sample)
+    more = "" if len(collisions) <= 10 else f"\n  (+{len(collisions) - 10} more)"
+    message = (
+        f"{len(collisions)} external-id collision(s): distinct source ids collapse "
+        "to the same Odoo xmlid via to_xmlid(), which would silently merge those "
+        f"rows into one record.\n{detail}{more}\n"
+        "Fix the ids (e.g. avoid mixing separators like ' ' and ','), or re-run "
+        "with --allow-xmlid-collisions to proceed anyway."
+    )
+
+    if allow_collisions:
+        log.warning(f"Proceeding despite external-id collisions.\n{message}")
+        return True
+
+    _show_error_panel("External ID collision", message)
+    return False
 
 
 def _extract_ids_from_csv(

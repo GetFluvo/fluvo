@@ -155,6 +155,7 @@ def run_import(  # noqa: C901
     resolve_relations: Optional[list[dict[str, Any]]] = None,
     auto_clean: bool = False,
     fix_missing_variants: bool = False,
+    allow_xmlid_collisions: bool = False,
 ) -> Optional[dict[str, int]]:
     """Main entry point for the import command, handling all orchestration.
 
@@ -251,6 +252,7 @@ def run_import(  # noqa: C901
             groupby=groupby,
             check_refs=check_refs,
             encoding=encoding,
+            allow_xmlid_collisions=allow_xmlid_collisions,
         ):
             return None
 

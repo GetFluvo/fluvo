@@ -72,6 +72,23 @@ When you run an import, Odoo's `load` method performs the following logic for ea
 
 This built-in upsert logic is essential for incremental data loads and for re-running scripts to correct or enrich data that has already been imported.
 
+```{admonition} External IDs must be unique *after* sanitization
+:class: warning
+
+Fluvo sanitizes each `id` for Odoo by replacing spaces, commas, pipes and
+newlines with `_`. Two **different** source IDs can therefore collapse to the
+**same** external ID — e.g. `a b` and `a,b` both become `a_b`. Because Odoo
+upserts on the external ID, such rows would be **silently merged into one
+record** (the later row overwrites the earlier). A pre-flight check detects this
+and **aborts before anything is written**, listing the offending IDs. Fix the
+source IDs (don't mix separators like spaces and commas), or pass
+`--allow-xmlid-collisions` to proceed anyway.
+
+Rows with a **blank** `id` are fine — each is created as an independent record —
+but they can't be linked to relational (Pass 2) data, so fluvo warns if a blank-id
+row also carries many2many / one2many values.
+```
+
 ## Automatic Handling of Relational Data
 
 The `import` command is now "smart." It automatically detects complex relationships in your data and uses the best strategy to import it.

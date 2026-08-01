@@ -1165,6 +1165,14 @@ def vat_validate_cmd(
     "Without this flag, fluvo only warns about them.",
 )
 @click.option(
+    "--allow-xmlid-collisions",
+    is_flag=True,
+    default=False,
+    help="Proceed even when distinct source ids sanitize to the same Odoo external "
+    "id (e.g. 'a b' and 'a,b' both become 'a_b'). By default fluvo aborts, because "
+    "Odoo's load() would silently merge such rows into one record.",
+)
+@click.option(
     "--defer-parent-store",
     is_flag=True,
     default=False,
