@@ -640,28 +640,32 @@ def test_run_import_invalid_context(mock_show_error: MagicMock) -> None:
     mock_show_error.assert_called_once()
 
 
-@patch("fluvo.importer.relational_import.run_direct_relational_import")
+@patch("fluvo.importer.relational_import.run_write_tuple_import")
 @patch("fluvo.importer.import_threaded.import_data")
 @patch("fluvo.importer._run_preflight_checks")
-def test_run_import_fail_mode_with_strategies(
+def test_run_import_fail_mode_runs_strategies(
     mock_preflight: MagicMock,
     mock_import_data: MagicMock,
-    mock_relational_import: MagicMock,
+    mock_write_tuple: MagicMock,
     tmp_path: Path,
 ) -> None:
-    """Test that relational strategies are skipped in fail mode."""
+    """Relational strategies now run in --fail mode for the retried records (#8).
+
+    Previously they were skipped, so records that only imported on the fail retry
+    never got their m2m/o2m fields populated.
+    """
+    # The original source still exists on a --fail retry; Pass 2 reads it (the
+    # fail file only holds rows that failed *again*, not the retried successes).
     source_file = tmp_path / "source.csv"
-    source_file.touch()
-    # Create fail file in environment-specific folder (test from test_connection.conf)
+    source_file.write_text("id,name,tag_ids\n1,test,t1\n")
+    # Fail file in the environment-specific folder (test from test_connection.conf).
     env_dir = tmp_path / "test"
     env_dir.mkdir(parents=True)
     fail_file = env_dir / "res_partner_fail.csv"
-    fail_file.write_text("id,name\n1,test")
+    fail_file.write_text("id,name,tag_ids,_ERROR_REASON\n1,test,t1,boom\n")
 
     def preflight_side_effect(*_args: Any, **kwargs: Any) -> bool:
-        kwargs["import_plan"]["strategies"] = {
-            "field": {"strategy": "direct_relational_import"}
-        }
+        kwargs["import_plan"]["strategies"] = {"tag_ids": {"strategy": "write_tuple"}}
         return True
 
     mock_preflight.side_effect = preflight_side_effect
@@ -680,7 +684,7 @@ def test_run_import_fail_mode_with_strategies(
         worker=1,
         batch_size=100,
         skip=0,
-        separator=";",
+        separator=",",
         ignore=None,
         context={},
         encoding="utf-8",
@@ -688,7 +692,112 @@ def test_run_import_fail_mode_with_strategies(
         groupby=None,
     )
     mock_import_data.assert_called_once()
-    mock_relational_import.assert_not_called()
+    # The strategy runs for the retried records (id_map is non-empty).
+    mock_write_tuple.assert_called_once()
+
+
+@patch("fluvo.importer.relational_import.run_write_tuple_import")
+@patch("fluvo.importer.import_threaded.import_data")
+@patch("fluvo.importer._run_preflight_checks")
+def test_run_import_partial_success_runs_strategies(
+    mock_preflight: MagicMock,
+    mock_import_data: MagicMock,
+    mock_write_tuple: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """A partially-failed import still populates relations for imported rows (#8).
+
+    Previously a single failed row skipped Pass 2 for every record; now Pass 2
+    runs for the records in id_map.
+    """
+    source_file = tmp_path / "source.csv"
+    source_file.write_text("id,name,tag_ids\n1,a,t1\n2,b,t2\n")
+    # A fail file with >1 line marks a partial failure (fail_file_was_created).
+    env_dir = tmp_path / "test"
+    env_dir.mkdir(parents=True)
+    (env_dir / "res_partner_fail.csv").write_text(
+        "id,name,tag_ids,_ERROR_REASON\n2,b,t2,boom\n"
+    )
+
+    def preflight_side_effect(*_args: Any, **kwargs: Any) -> bool:
+        kwargs["import_plan"]["strategies"] = {"tag_ids": {"strategy": "write_tuple"}}
+        return True
+
+    mock_preflight.side_effect = preflight_side_effect
+    # Overall success, but only record "1" imported ("2" is in the fail file).
+    mock_import_data.return_value = (True, {"total_records": 2, "id_map": {"1": 1}})
+
+    run_import(
+        config="test_connection.conf",
+        filename=str(source_file),
+        model="res.partner",
+        fail=False,
+        deferred_fields=None,
+        auto_defer=False,
+        unique_id_field=None,
+        no_preflight_checks=False,
+        headless=True,
+        worker=1,
+        batch_size=100,
+        skip=0,
+        separator=",",
+        ignore=None,
+        context={},
+        encoding="utf-8",
+        o2m=False,
+        groupby=None,
+    )
+    # Pass 2 ran despite the partial failure.
+    mock_write_tuple.assert_called_once()
+
+
+@patch("fluvo.importer.relational_import.run_write_tuple_import")
+@patch("fluvo.importer.import_threaded.import_data")
+@patch("fluvo.importer._run_preflight_checks")
+def test_run_import_pass2_skips_when_source_unreadable(
+    mock_preflight: MagicMock,
+    mock_import_data: MagicMock,
+    mock_write_tuple: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Pass 2 skips (no crash) when the source can't be re-read (#8).
+
+    Pass 1 has already committed, so an unreadable/empty source on the relational
+    pass logs a warning and skips relational population rather than aborting.
+    """
+    # Empty source file -> pl.read_csv raises -> Pass 2 is skipped gracefully.
+    source_file = tmp_path / "source.csv"
+    source_file.touch()
+
+    def preflight_side_effect(*_args: Any, **kwargs: Any) -> bool:
+        kwargs["import_plan"]["strategies"] = {"tag_ids": {"strategy": "write_tuple"}}
+        return True
+
+    mock_preflight.side_effect = preflight_side_effect
+    mock_import_data.return_value = (True, {"total_records": 1, "id_map": {"1": 1}})
+
+    run_import(
+        config="test_connection.conf",
+        filename=str(source_file),
+        model="res.partner",
+        fail=False,
+        deferred_fields=None,
+        auto_defer=False,
+        unique_id_field=None,
+        no_preflight_checks=False,
+        headless=True,
+        worker=1,
+        batch_size=100,
+        skip=0,
+        separator=",",
+        ignore=None,
+        context={},
+        encoding="utf-8",
+        o2m=False,
+        groupby=None,
+    )
+    # No crash, and the strategy is not attempted without source data.
+    mock_write_tuple.assert_not_called()
 
 
 class TestImporterEdgeCases:
