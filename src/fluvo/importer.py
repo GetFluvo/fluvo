@@ -404,13 +404,34 @@ def run_import(  # noqa: C901
             cache.save_id_map(config, model, id_map)
 
     # --- Pass 2: Relational Strategies ---
-    if is_truly_successful and import_plan.get("strategies") and not fail:
-        source_df = pl.read_csv(
-            filename,
-            separator=separator,
-            truncate_ragged_lines=True,
-            infer_schema_length=0,  # Read all columns as strings
-        )
+    # Run whenever records were imported and relational strategies were planned —
+    # including a *partially* successful import and a --fail retry. Each strategy
+    # looks every row up in id_map and skips anything not imported, so this only
+    # ever writes relations for records that actually exist. Previously this
+    # required a fully-clean import AND non-fail mode, so a single failed row left
+    # every *other* record's m2m/o2m fields unpopulated, and the recommended
+    # "run, then retry the fail file" flow never populated relations at all (#8).
+    # source_df is read from the original ``filename``; id_map scopes the writes to
+    # the imported subset.
+    source_df: Optional[pl.DataFrame] = None
+    if id_map and import_plan.get("strategies"):
+        try:
+            source_df = pl.read_csv(
+                filename,
+                separator=separator,
+                truncate_ragged_lines=True,
+                infer_schema_length=0,  # Read all columns as strings
+            )
+        except Exception as e:
+            # Never crash Pass 2 (Pass 1 already committed): if the source can't be
+            # re-read (e.g. an empty or missing original file on a --fail retry),
+            # log and skip relational population rather than aborting.
+            log.warning(
+                f"Could not read '{filename}' for relational Pass 2; "
+                f"skipping relational fields. Error: {e}"
+            )
+
+    if source_df is not None and import_plan.get("strategies"):
         with suppress_console_handler(), Progress() as progress:
             task_id = progress.add_task(
                 "Pass 2/2: Relational fields",
