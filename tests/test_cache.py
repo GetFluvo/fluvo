@@ -67,7 +67,9 @@ def test_get_cache_dir_handles_exception(
     mock_instance.get.side_effect = Exception("Test exception")
     cache_dir = cache.get_cache_dir("dummy.conf")
     assert cache_dir is None
-    assert "Could not create or access cache directory" in caplog.text
+    # get_cache_dir now delegates to resolve_cache_dir; the fingerprint step
+    # reports the failure.
+    assert "Could not fingerprint connection config" in caplog.text
 
 
 @patch("fluvo.lib.cache.get_cache_dir", return_value=None)
@@ -405,3 +407,54 @@ def test_export_id_map_handles_connection_error(
 ) -> None:
     """A connection failure is swallowed and returns None."""
     assert cache.export_id_map({"hostname": "h"}, "res.partner", "name") is None
+
+
+def test_set_cache_enabled_false_disables_cache_dir() -> None:
+    """--no-cache (set_cache_enabled(False)) yields no cache dir -> no read/write."""
+    cache.set_cache_enabled(False)
+    try:
+        cfg = {"hostname": "h", "port": 8069, "database": "d"}
+        assert cache.resolve_cache_dir(cfg) is None
+        assert cache.get_cache_dir("dummy.conf") is None
+    finally:
+        cache.set_cache_enabled(True)
+
+
+@patch("fluvo.lib.cache._database_uuid")
+def test_uuid_folds_into_fingerprint(mock_uuid: MagicMock) -> None:
+    """The database uuid distinguishes otherwise-identical connections (#15)."""
+    cfg = {"hostname": "h", "port": 8069, "database": "d"}
+    mock_uuid.return_value = "uuid-A"
+    fp_a = cache._connection_fingerprint(cfg)
+    mock_uuid.return_value = "uuid-B"
+    fp_b = cache._connection_fingerprint(cfg)
+    assert fp_a != fp_b  # a rebuild/restore (new uuid) -> fresh cache
+    assert fp_a.endswith("uuid-A")
+    assert fp_b.endswith("uuid-B")
+
+
+@patch("fluvo.lib.cache._database_uuid", return_value=None)
+def test_uuid_unavailable_falls_back_to_base(mock_uuid: MagicMock) -> None:
+    """When the uuid can't be read, the fingerprint is just host+port+db."""
+    fp = cache._connection_fingerprint({"hostname": "h", "port": 8069, "database": "d"})
+    assert fp == "h8069d"
+
+
+def test_database_uuid_none_on_read_failure() -> None:
+    """A read failure (e.g. ACL) yields None -> graceful fallback (#15)."""
+    cache._uuid_by_fingerprint.clear()
+    with patch(
+        "fluvo.lib.conf_lib.get_connection_from_dict", side_effect=Exception("acl")
+    ):
+        assert cache._database_uuid({"hostname": "h"}, "fp-x") is None
+
+
+@patch("fluvo.lib.conf_lib.get_connection_from_dict")
+def test_database_uuid_reads_config_parameter(mock_conn: MagicMock) -> None:
+    """The uuid comes from ir.config_parameter.get_param('database.uuid')."""
+    cache._uuid_by_fingerprint.clear()
+    get_param = mock_conn.return_value.get_model.return_value.get_param
+    get_param.return_value = "the-uuid"
+    assert cache._database_uuid({"hostname": "h"}, "fp-y") == "the-uuid"
+    mock_conn.return_value.get_model.assert_called_with("ir.config_parameter")
+    get_param.assert_called_with("database.uuid")

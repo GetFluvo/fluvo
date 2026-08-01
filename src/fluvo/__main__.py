@@ -10,6 +10,7 @@ import click
 from .converter import run_path_to_image, run_url_to_image
 from .exporter import run_export
 from .importer import _infer_model_from_filename, run_import
+from .lib import cache
 from .lib.actions.language_installer import run_language_installation
 from .lib.actions.module_manager import (
     run_module_installation,
@@ -1173,6 +1174,14 @@ def vat_validate_cmd(
     "Odoo's load() would silently merge such rows into one record.",
 )
 @click.option(
+    "--no-cache",
+    is_flag=True,
+    default=False,
+    help="Disable the on-disk id-map cache for this run (read and write). Use it "
+    "after restoring/rebuilding the target database, when cached natural-key -> id "
+    "mappings from a previous run may no longer be valid.",
+)
+@click.option(
     "--defer-parent-store",
     is_flag=True,
     default=False,
@@ -1262,6 +1271,9 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
         return
 
     # Handle protocol option - create config dict if protocol specified
+    # --no-cache disables the on-disk id-map cache process-wide for this run.
+    cache.set_cache_enabled(not kwargs.pop("no_cache", False))
+
     protocol = kwargs.pop("protocol", None)
     if protocol:
         # Pass config as dict with protocol instead of file path
