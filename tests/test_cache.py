@@ -428,6 +428,7 @@ def test_uuid_folds_into_fingerprint(mock_uuid: MagicMock) -> None:
     fp_a = cache._connection_fingerprint(cfg)
     mock_uuid.return_value = "uuid-B"
     fp_b = cache._connection_fingerprint(cfg)
+    assert fp_a is not None and fp_b is not None
     assert fp_a != fp_b  # a rebuild/restore (new uuid) -> fresh cache
     assert fp_a.endswith("uuid-A")
     assert fp_b.endswith("uuid-B")
