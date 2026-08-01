@@ -10,12 +10,61 @@ import polars as pl
 
 from ..logging_config import log
 
+_cache_enabled = True
+_uuid_by_fingerprint: dict[str, Optional[str]] = {}
+
+
+def set_cache_enabled(enabled: bool) -> None:
+    """Enable or disable the on-disk cache process-wide (the --no-cache switch).
+
+    Args:
+        enabled: False disables all cache reads and writes; True (default)
+            restores normal caching.
+    """
+    global _cache_enabled
+    _cache_enabled = enabled
+
+
+# Folding the Odoo database.uuid into the cache key invalidates the cache when the
+# target database is rebuilt, or a *different* dump is restored under the same
+# host/db name — the record ids change but host+port+db alone would not. A
+# minimal-privilege API user may lack read access to ir.config_parameter; on any
+# failure _database_uuid returns None and the caller falls back to the host+port+db
+# key (restore-detection is simply unavailable for that user).
+def _database_uuid(
+    config: Union[str, dict[str, Any]], base_fingerprint: str
+) -> Optional[str]:
+    """Best-effort Odoo ``database.uuid``, memoized per connection fingerprint."""
+    if base_fingerprint in _uuid_by_fingerprint:
+        return _uuid_by_fingerprint[base_fingerprint]
+    uuid: Optional[str] = None
+    try:
+        from . import conf_lib  # local import avoids an import cycle
+
+        connection = (
+            conf_lib.get_connection_from_dict(config)
+            if isinstance(config, dict)
+            else conf_lib.get_connection_from_config(config)
+        )
+        value = connection.get_model("ir.config_parameter").get_param("database.uuid")
+        if value:
+            uuid = str(value)
+    except Exception as e:
+        log.debug(
+            "Could not read database.uuid for the cache key "
+            f"(restore-detection unavailable for this user): {e}"
+        )
+    _uuid_by_fingerprint[base_fingerprint] = uuid
+    return uuid
+
 
 def _connection_fingerprint(config: Union[str, dict[str, Any]]) -> Optional[str]:
-    """Return a stable hostname+port+database fingerprint for a config.
+    """Return a stable host+port+db(+database.uuid) fingerprint for a config.
 
     Accepts either a path to a connection .conf file or a connection dict, so the
-    cache works regardless of how the caller supplied the connection.
+    cache works regardless of how the caller supplied the connection. The database
+    uuid is appended when readable, so a rebuilt/restored database gets a fresh
+    cache instead of reusing stale id mappings (see :func:`_database_uuid`).
 
     Args:
         config: Connection file path or a connection dict.
@@ -25,19 +74,23 @@ def _connection_fingerprint(config: Union[str, dict[str, Any]]) -> Optional[str]
     """
     try:
         if isinstance(config, dict):
-            return (
+            base = (
                 f"{config.get('hostname')}{config.get('port')}{config.get('database')}"
             )
-        parser = configparser.ConfigParser()
-        parser.read(config)
-        return (
-            f"{parser.get('Connection', 'hostname')}"
-            f"{parser.get('Connection', 'port')}"
-            f"{parser.get('Connection', 'database')}"
-        )
+        else:
+            parser = configparser.ConfigParser()
+            parser.read(config)
+            base = (
+                f"{parser.get('Connection', 'hostname')}"
+                f"{parser.get('Connection', 'port')}"
+                f"{parser.get('Connection', 'database')}"
+            )
     except Exception as e:  # pragma: no cover - defensive
         log.error(f"Could not fingerprint connection config: {e}")
         return None
+
+    uuid = _database_uuid(config, base)
+    return f"{base}{uuid}" if uuid else base
 
 
 def resolve_cache_dir(config: Union[str, dict[str, Any]]) -> Optional[Path]:
@@ -49,6 +102,8 @@ def resolve_cache_dir(config: Union[str, dict[str, Any]]) -> Optional[Path]:
     Returns:
         A Path to the unique cache directory, or None on failure.
     """
+    if not _cache_enabled:
+        return None
     fingerprint = _connection_fingerprint(config)
     if fingerprint is None:
         return None
@@ -65,27 +120,16 @@ def resolve_cache_dir(config: Union[str, dict[str, Any]]) -> Optional[Path]:
 def get_cache_dir(config_file: str) -> Optional[Path]:
     """Generates a unique, connection-specific cache directory path.
 
+    Delegates to :func:`resolve_cache_dir` so both entry points share the same
+    fingerprint (host+port+db+database.uuid) and the --no-cache switch.
+
     Args:
         config_file: Path to the Odoo connection configuration file.
 
     Returns:
         A Path object to the unique cache directory, or None on failure.
     """
-    try:
-        config = configparser.ConfigParser()
-        config.read(config_file)
-        connection_str = (
-            f"{config.get('Connection', 'hostname')}"
-            f"{config.get('Connection', 'port')}"
-            f"{config.get('Connection', 'database')}"
-        )
-        hash_id = hashlib.sha256(connection_str.encode()).hexdigest()
-        cache_dir = Path(".fluvo_cache") / hash_id
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        return cache_dir
-    except Exception as e:
-        log.error(f"Could not create or access cache directory: {e}")
-        return None
+    return resolve_cache_dir(config_file)
 
 
 def save_id_map(config_file: str, model: str, id_map: dict[str, int]) -> None:

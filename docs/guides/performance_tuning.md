@@ -424,6 +424,17 @@ Format: `source_column:model:key_field:relation_field[:xmlid|dbid]` (repeatable)
 database-specific. The id-map is cached to parquet and reused across runs. From a
 transform script, the same is available as `Processor.resolve_relation(...)`.
 
+```{admonition} Cache keying and `--no-cache`
+:class: note
+
+The cache is keyed by host, port, database **and the Odoo `database.uuid`**, so a
+rebuilt database or a *different* dump restored under the same name gets a fresh
+cache automatically (the record ids changed, so the old mappings must not be
+reused). If your API user can't read `ir.config_parameter`, fluvo falls back to
+host+port+db keying — pass **`--no-cache`** for that run after a restore to be
+safe. `--no-cache` disables all id-map cache reads and writes for the run.
+```
+
 > **Measured:** importing **2,000 `res.partner`** records with `country_id` ran in
 > **6.96s** the naive way (Odoo `name_search` per row) versus **4.27s** pre-resolved —
 > a **1.6× speedup** *even though the data has only 5 distinct countries* (which Odoo
