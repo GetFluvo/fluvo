@@ -863,3 +863,91 @@ class TestValidateHeader:
         assert "1 non-stored readonly" in call_args[0][1]
         # 'id' field should NOT be in the warning (it's mandatory for imports)
         assert "'id'" not in call_args[0][1]
+
+
+class TestXmlidCollisionCheck:
+    """Tests for the xmlid_collision_check pre-flight check (#10)."""
+
+    @staticmethod
+    def _write(tmp_path: Path, content: str) -> str:
+        f = tmp_path / "src.csv"
+        f.write_text(content)
+        return str(f)
+
+    @patch("fluvo.lib.preflight._show_error_panel")
+    def test_collision_aborts(self, mock_panel: MagicMock, tmp_path: Path) -> None:
+        """Distinct ids sanitizing to one xmlid abort before any write."""
+        # "a b" and "a,b" both sanitize to "a_b".
+        path = self._write(tmp_path, "id;name\na b;one\na,b;two\n")
+        result = preflight.xmlid_collision_check(
+            preflight_mode=PreflightMode.NORMAL,
+            filename=path,
+            import_plan={},
+            separator=";",
+            unique_id_field="id",
+        )
+        assert result is False
+        mock_panel.assert_called_once()
+
+    @patch("fluvo.lib.preflight._show_error_panel")
+    def test_collision_opt_out_proceeds(
+        self, mock_panel: MagicMock, tmp_path: Path
+    ) -> None:
+        """--allow-xmlid-collisions downgrades the abort to a warning."""
+        path = self._write(tmp_path, "id;name\na b;one\na,b;two\n")
+        result = preflight.xmlid_collision_check(
+            preflight_mode=PreflightMode.NORMAL,
+            filename=path,
+            import_plan={},
+            separator=";",
+            unique_id_field="id",
+            allow_xmlid_collisions=True,
+        )
+        assert result is True
+        mock_panel.assert_not_called()
+
+    def test_no_collision_passes(self, tmp_path: Path) -> None:
+        """Distinct, non-colliding ids pass."""
+        path = self._write(tmp_path, "id;name\nrec1;one\nrec2;two\n")
+        assert (
+            preflight.xmlid_collision_check(
+                preflight_mode=PreflightMode.NORMAL,
+                filename=path,
+                import_plan={},
+                separator=";",
+                unique_id_field="id",
+            )
+            is True
+        )
+
+    @patch("fluvo.lib.preflight.log.warning")
+    def test_blank_id_with_relations_warns(
+        self, mock_warning: MagicMock, tmp_path: Path
+    ) -> None:
+        """A blank id carrying relational data warns (Pass 2 can't link it)."""
+        path = self._write(tmp_path, "id;tag_ids\n;t1\n")
+        result = preflight.xmlid_collision_check(
+            preflight_mode=PreflightMode.NORMAL,
+            filename=path,
+            import_plan={"strategies": {"tag_ids": {"strategy": "write_tuple"}}},
+            separator=";",
+            unique_id_field="id",
+        )
+        assert result is True
+        assert any("blank" in str(c).lower() for c in mock_warning.call_args_list)
+
+    @patch("fluvo.lib.preflight.log.warning")
+    def test_blank_id_without_relations_is_ok(
+        self, mock_warning: MagicMock, tmp_path: Path
+    ) -> None:
+        """A blank id with no relational data is fine (a plain create)."""
+        path = self._write(tmp_path, "id;name\n;plain\n")
+        result = preflight.xmlid_collision_check(
+            preflight_mode=PreflightMode.NORMAL,
+            filename=path,
+            import_plan={},
+            separator=";",
+            unique_id_field="id",
+        )
+        assert result is True
+        assert not any("blank" in str(c).lower() for c in mock_warning.call_args_list)
