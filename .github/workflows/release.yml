@@ -81,7 +81,7 @@ jobs:
           echo "Releasing version ${pkg}."
 
       - name: Collect all build artifacts into dist/
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: "*"
