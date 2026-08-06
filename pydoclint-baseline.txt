@@ -256,10 +256,14 @@ src/fluvo/lib/internal/rpc_thread.py
     DOC203: Method `RpcThread.spawn_thread` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
 --------------------
 src/fluvo/lib/internal/tools.py
-    DOC404: Function `batch` yield type(s) in docstring not consistent with the return annotation. The yield type (the 0th arg in Generator[...]/Iterator[...]): list[Any]; docstring "yields" section types:
+    DOC404: Function `batch` yield type(s) in docstring not consistent with the return annotation. The yield type (the 0th arg in Generator[...]/Iterator[...]): Any; docstring "yields" section types:
     DOC201: Function `to_m2o` does not have a return section in docstring
     DOC203: Function `to_m2o` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
     DOC001: Function/method `to_m2m`: Potential formatting errors in docstring. Error message: Expected a colon in 'separated by commas.'. (Note: DOC001 could trigger other unrelated violations under this function/method too. Please fix the docstring formatting first.)
+    DOC101: Function `to_m2m`: Docstring contains fewer arguments than in function signature.
+    DOC103: Function `to_m2m`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [prefix: str, value: str].
+    DOC201: Function `to_m2m` does not have a return section in docstring
+    DOC203: Function `to_m2m` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
     DOC301: Class `AttributeLineDict`: __init__() should not have a docstring; please combine it with the docstring of the class
 --------------------
 src/fluvo/lib/mapper.py
@@ -373,11 +377,6 @@ tests/e2e/assertions.py
     DOC103: Function `run_full_import`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [auto_defer: bool, batch_size: int, conn_config: dict[str, Any], deferred_fields: Optional[list[str]], file_csv: str, groupby: Optional[list[str]], model: str, no_preflight_checks: bool, separator: str, unique_id_field: Optional[str], worker: int].
     DOC203: Function `run_full_import` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Optional[dict[str, int]]']; docstring return section types: ['']
     DOC203: Function `assert_failures` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['list[dict[str, str]]']; docstring return section types: ['']
---------------------
-tests/e2e/conftest.py
-    DOC101: Function `odoo_endpoint`: Docstring contains fewer arguments than in function signature.
-    DOC103: Function `odoo_endpoint`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [request: pytest.FixtureRequest].
-    DOC404: Function `odoo_endpoint` yield type(s) in docstring not consistent with the return annotation. The yield type (the 0th arg in Generator[...]/Iterator[...]): dict[str, object]; docstring "yields" section types:
 --------------------
 tests/e2e/generators.py
     DOC101: Function `write_csv`: Docstring contains fewer arguments than in function signature.
