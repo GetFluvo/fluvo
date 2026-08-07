@@ -42,3 +42,17 @@ jobs:
 
       - name: Run e2e integrity suite (small tier) on Odoo ${{ matrix.odoo_version }}
         run: uv run nox -s e2e
+
+      - name: Upload e2e coverage to Codecov
+        # Always upload: partial coverage from a failed scenario is still useful,
+        # and this must not gate the e2e run. Each matrix Odoo version uploads under
+        # the same `e2e` flag; Codecov unions them (a line covered by any version
+        # counts). codecov.yml carries this flag forward onto non-nightly commits.
+        if: always()
+        uses: codecov/codecov-action@v7
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          files: ./coverage-e2e.xml
+          flags: e2e
+          fail_ci_if_error: false

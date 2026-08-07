@@ -205,15 +205,25 @@ def e2e(session: nox.Session) -> None:
     The default small tier runs here; pass ``-- -m large`` (with a larger
     FLUVO_E2E_SCALE) for the opt-in stress tier.
     """
-    session.install("pytest", "pytest-mock")
+    session.install("pytest", "pytest-mock", "pytest-cov", "coverage[toml]")
     session.install("-e", ".")
     args = session.posargs or ["-m", "not large"]
     # Override the default addopts (which ignores tests/e2e and runs doctests).
+    # Also measure src coverage: the e2e suite drives the import/export engine
+    # against a real Odoo, exercising error/retry/relational paths the unit tests
+    # can't reach. That report is uploaded to Codecov under the `e2e` flag so those
+    # genuinely-tested lines finally count (see .github/workflows/e2e.yml).
     session.run(
         "pytest",
         "tests/e2e",
         "-o",
         "addopts=",
+        "--cov=src",
+        "--cov-branch",
+        "--cov-report=xml:coverage-e2e.xml",
+        # The e2e suite only exercises the import/export engine, so it can't meet
+        # the global fail_under=85 on its own — Codecov gates the merged total.
+        "--cov-fail-under=0",
         *args,
     )
 

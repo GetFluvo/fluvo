@@ -138,7 +138,18 @@ omit = [
 [tool.coverage.report]
 show_missing = true
 fail_under = 85
-exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:"]
+# exclude_also appends to the built-in default (`pragma: no cover`). These are
+# lines that are unreachable-by-design or pure boilerplate, so requiring coverage
+# for them would only add noise. Business logic and error handlers are NOT here —
+# those get real tests.
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "raise AssertionError",
+    "@(?:typing\\.)?overload",
+    "@(?:abc\\.)?abstractmethod",
+]
 
 [tool.mypy]
 strict = true
