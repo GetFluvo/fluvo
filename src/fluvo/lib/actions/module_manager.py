@@ -28,14 +28,14 @@ def run_update_module_list(config: str) -> bool:
 
     try:
         log.info("Triggering app list update. This may take a moment...")
-        # This call triggers the server-side scan of the addons path.
+        # This call triggers the server-side scan of the addons path and
+        # commits it server-side, so no explicit cache clear is needed.
+        # (The public ``clear_caches()`` method was removed from the ORM in
+        # Odoo 19 and is not RPC-exposed -- calling it 404s. See issue #236.)
         module_obj.update_list()
 
-        # IMPORTANT: Clear the model's cache to ensure we get fresh data.
-        module_obj.clear_caches()
-
         # Perform a search to ensure the client syncs with the server state.
-        # This acts as a "wait" signal.
+        # This is a fresh RPC read, so it already reflects the updated list.
         total_modules = module_obj.search_count([])
         log.info(f"App list update complete. Found {total_modules} total modules.")
         return True
