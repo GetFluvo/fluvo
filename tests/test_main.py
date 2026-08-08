@@ -1936,9 +1936,7 @@ def test_import_company_id_xmlid_resolved(
         )
         assert result.exit_code == 0
         mock_run_import.assert_called_once()
-        assert mock_run_import.call_args.kwargs["context"][
-            "allowed_company_ids"
-        ] == [7]
+        assert mock_run_import.call_args.kwargs["context"]["allowed_company_ids"] == [7]
         # module.name was split correctly for the ir.model.data search
         domain = mock_imd.search.call_args[0][0]
         assert ("module", "=", "base") in domain
@@ -2074,9 +2072,10 @@ def test_import_all_companies_with_protocol(
             ],
         )
         assert result.exit_code == 0
-        assert mock_run_import.call_args.kwargs["context"][
-            "allowed_company_ids"
-        ] == [1, 2]
+        assert mock_run_import.call_args.kwargs["context"]["allowed_company_ids"] == [
+            1,
+            2,
+        ]
 
 
 # --- Import command: option parsing branches ---
@@ -2839,9 +2838,7 @@ def test_migrate_failure_exits_nonzero(mock_fn: MagicMock, runner: CliRunner) ->
 
 
 @patch("fluvo.__main__.run_create_missing_variants")
-def test_create_missing_variants_success(
-    mock_fn: MagicMock, runner: CliRunner
-) -> None:
+def test_create_missing_variants_success(mock_fn: MagicMock, runner: CliRunner) -> None:
     """create-missing-variants parses a domain and forwards options."""
     mock_fn.return_value = True
     with runner.isolated_filesystem():
@@ -2985,9 +2982,7 @@ def test_vat_disable_failure(mock_fn: MagicMock, runner: CliRunner) -> None:
 
 
 @patch("fluvo.__main__.disable_vat_validation")
-def test_vat_disable_writes_output_file(
-    mock_fn: MagicMock, runner: CliRunner
-) -> None:
+def test_vat_disable_writes_output_file(mock_fn: MagicMock, runner: CliRunner) -> None:
     """`vat disable --output` writes the saved settings to a JSON file."""
     import json
 
@@ -3123,12 +3118,8 @@ def test_vat_validate_truncates_long_result_lists(
         valid_count=0,
         invalid_count=21,
         error_count=11,
-        invalid_partners=[
-            {"id": i, "vat": "BE0", "name": f"P{i}"} for i in range(21)
-        ],
-        error_partners=[
-            {"id": i, "vat": "BE0", "error": "boom"} for i in range(11)
-        ],
+        invalid_partners=[{"id": i, "vat": "BE0", "name": f"P{i}"} for i in range(21)],
+        error_partners=[{"id": i, "vat": "BE0", "error": "boom"} for i in range(11)],
     )
     with runner.isolated_filesystem():
         _conn()
