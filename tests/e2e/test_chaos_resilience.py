@@ -23,6 +23,9 @@ import pytest
 
 from fluvo.lib import conf_lib
 
+from . import assertions as A
+from . import generators as G
+
 
 @pytest.mark.chaos
 def test_harness_injects_transport_fault_into_fluvo(
@@ -44,3 +47,127 @@ def test_harness_injects_transport_fault_into_fluvo(
     toxiproxy.reset()
     conn3 = conf_lib.get_connection_from_dict(dict(conn_config_flaky))
     assert conn3.get_model("res.partner").search_count([]) >= 0
+
+
+@pytest.mark.chaos
+def test_connection_reset_mid_import_is_reconciled_and_recovers(
+    conn_config_flaky: dict[str, Any], toxiproxy: Any, rpc: Any, tmp_path: Any
+) -> None:
+    """A reset_peer fault during an import loses nothing; a clean re-run recovers.
+
+    Per #197 the contract under fault is *reconciliation*, not success: every source
+    row must end up imported or in the fail file. reset_peer can even commit a batch
+    server-side while the client sees a reset (fluvo then fail-files it); the
+    idempotent xmlid upsert makes a clean recovery run converge to exactly ``n``
+    records with no duplicates.
+    """
+    prefix = "chaosreset"
+    n = 60
+    header = ["id", "name", "email", "is_company"]
+    csv_path = G.write_csv(str(tmp_path / "reset.csv"), header, G.partners(n, prefix))
+    fail_path = str(tmp_path / "reset_fail.csv")
+
+    # Inject connection resets on a fraction of connections, so the import hits real
+    # transport faults mid-flight (many small batches raise the hit probability).
+    toxiproxy.add_toxic("odoo", "rst", "reset_peer", toxicity=0.5, timeout=0)
+    try:
+        _success, stats = A.import_with_stats(
+            conn_config_flaky,
+            "res.partner",
+            csv_path,
+            fail_path,
+            worker=2,
+            batch_size=10,
+        )
+    finally:
+        # Clear the fault before asserting / recovering.
+        toxiproxy.reset()
+
+    # Contract under fault: nothing silently dropped (not necessarily "success").
+    A.assert_reconciled(stats)
+
+    # Recovery: a clean re-run upserts every row by its external id, converging to
+    # exactly n records — whatever the fault already committed stays put (no dupes).
+    A.import_with_stats(
+        conn_config_flaky,
+        "res.partner",
+        csv_path,
+        str(tmp_path / "reset_recover_fail.csv"),
+        worker=2,
+        batch_size=10,
+    )
+    A.assert_db_count(rpc, "res.partner", G.name_domain(prefix), n)
+
+
+@pytest.mark.chaos
+def test_truncation_during_pass2_relations_is_reconciled_and_recovers(
+    conn_config_flaky: dict[str, Any], toxiproxy: Any, rpc: Any, tmp_path: Any
+) -> None:
+    """A truncation fault during Pass-2 relational writes loses no links after recovery.
+
+    Where the reset scenario stresses record creation, this targets *Pass 2* — the
+    deferred relational write. The base records are created cleanly first, so the
+    injected ``limit_data`` truncation lands on the ``parent_id`` linking phase (its
+    xmlid-resolution reads are the large responses truncation bites). Per #197 the
+    fault must not silently drop data: reconciliation holds, and a clean re-run
+    materialises *every* deferred parent link with no duplicate records.
+    """
+    prefix = "chaostrunc"
+    n = 60
+    rows = G.hierarchy(n, prefix)
+    expected_children = sum(1 for r in rows if r["parent_id"])
+    base_header = ["id", "name", "email", "is_company"]
+    hier_header = [*base_header, "parent_id"]
+
+    # Phase 1 — create the records cleanly; no relation written yet.
+    base_csv = G.write_csv(
+        str(tmp_path / "trunc_base.csv"),
+        base_header,
+        [{k: r[k] for k in base_header} for r in rows],
+    )
+    A.import_with_stats(
+        conn_config_flaky,
+        "res.partner",
+        base_csv,
+        str(tmp_path / "trunc_base_fail.csv"),
+    )
+
+    # Phase 2 — write parent_id (deferred → Pass 2) under a truncation fault.
+    hier_csv = G.write_csv(str(tmp_path / "trunc_hier.csv"), hier_header, rows)
+    toxiproxy.add_toxic("odoo", "trunc", "limit_data", toxicity=0.5, bytes=200)
+    try:
+        _success, stats = A.import_with_stats(
+            conn_config_flaky,
+            "res.partner",
+            hier_csv,
+            str(tmp_path / "trunc_fail.csv"),
+            deferred_fields=["parent_id"],
+            worker=2,
+            batch_size=10,
+        )
+    finally:
+        toxiproxy.reset()
+
+    # Contract under fault: nothing silently dropped.
+    A.assert_reconciled(stats)
+
+    # Recovery: a clean re-run completes every deferred link, converging to exactly
+    # n records (idempotent xmlid upsert) with all parents resolved.
+    A.import_with_stats(
+        conn_config_flaky,
+        "res.partner",
+        hier_csv,
+        str(tmp_path / "trunc_recover_fail.csv"),
+        deferred_fields=["parent_id"],
+        worker=2,
+        batch_size=10,
+    )
+    A.assert_db_count(rpc, "res.partner", G.name_domain(prefix), n)
+    with_parent = A.count(
+        rpc,
+        "res.partner",
+        [["name", "like", f"{prefix} %"], ["parent_id", "!=", False]],
+    )
+    assert with_parent == expected_children, (
+        f"Pass-2 links incomplete after recovery: {with_parent}/{expected_children}"
+    )

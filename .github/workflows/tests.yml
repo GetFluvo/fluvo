@@ -59,7 +59,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --all-groups
+          uv sync --all-groups --frozen
 
       - name: Compute pre-commit cache key
         if: matrix.session == 'pre-commit'
@@ -130,7 +130,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --all-groups
+          uv sync --all-groups --frozen
 
       - name: Download coverage data
         uses: actions/download-artifact@v8

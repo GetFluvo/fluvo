@@ -40,8 +40,8 @@ dist/
 *_failed.csv
 testdata/
 
-# uv lock file
-uv.lock
+# uv.lock is committed: CI uses `uv sync --frozen` for reproducible builds.
+# (Leaving it unpinned let `uv` pull argcomplete 3.7.x, which broke the py3.9 jobs.)
 
 # pydoclint baseline
 
