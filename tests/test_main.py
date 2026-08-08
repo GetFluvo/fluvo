@@ -1,8 +1,10 @@
 """Test cases for the __main__ module."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
+from click import unstyle
 from click.testing import CliRunner
 
 from fluvo import __main__
@@ -2136,31 +2138,34 @@ def test_import_defer_parent_store_sets_context(
 
 @patch("fluvo.__main__.run_import")
 def test_import_on_missing_ref_parsing(
-    mock_run_import: MagicMock, runner: CliRunner
+    mock_run_import: MagicMock, runner: CliRunner, caplog: pytest.LogCaptureFixture
 ) -> None:
     """--on-missing-ref parses create/skip/empty and warns on bad input."""
     with runner.isolated_filesystem():
         _conn()
-        result = runner.invoke(
-            __main__.cli,
-            [
-                "import",
-                "--connection-file",
-                "conn.conf",
-                "--file",
-                "my.csv",
-                "--model",
-                "res.partner",
-                "--on-missing-ref",
-                "country_id:create,user_id:skip,category_id:empty,badformat,x:bogus",
-            ],
-        )
+        with caplog.at_level(logging.WARNING, logger="fluvo"):
+            result = runner.invoke(
+                __main__.cli,
+                [
+                    "import",
+                    "--connection-file",
+                    "conn.conf",
+                    "--file",
+                    "my.csv",
+                    "--model",
+                    "res.partner",
+                    "--on-missing-ref",
+                    "country_id:create,user_id:skip,category_id:empty,badformat,x:bogus",
+                ],
+            )
         assert result.exit_code == 0
         context = mock_run_import.call_args.kwargs["context"]
         assert context["name_create_enabled_fields"] == {"country_id": True}
         assert context["import_set_empty_fields"] == ["category_id"]
-        assert "Invalid --on-missing-ref format" in result.output
-        assert "Unknown action 'bogus'" in result.output
+        # Assert on the raw log records, not result.output: the Rich handler
+        # colourises and width-truncates rendered output under FORCE_COLOR/CI.
+        assert "Invalid --on-missing-ref format" in caplog.text
+        assert "Unknown action 'bogus'" in caplog.text
 
 
 @patch("fluvo.__main__.run_import")
@@ -3131,6 +3136,9 @@ def test_vat_validate_truncates_long_result_lists(
             __main__.cli, ["vat", "validate", "--connection-file", "conn.conf"]
         )
         assert result.exit_code == 0
-        assert "Invalid VAT Numbers" in result.output
-        assert "and 1 more" in result.output  # 21 invalid -> 20 shown + 1 more
-        assert "Errors:" in result.output
+        # Strip ANSI: Rich auto-highlights numbers under FORCE_COLOR, so the raw
+        # output splits "and 1 more" with colour codes around the digit.
+        output = unstyle(result.output)
+        assert "Invalid VAT Numbers" in output
+        assert "and 1 more" in output  # 21 invalid -> 20 shown + 1 more
+        assert "Errors:" in output
