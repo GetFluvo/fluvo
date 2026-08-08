@@ -63,7 +63,7 @@ dev = [
     "pre-commit >=2.16.0",
     "pre-commit-hooks >=4.6.0",
     "pytest >=6.2.5",
-    "pygments >=2.10.0",
+    "pygments<2.21",
     "nox >=2024.04.14",
     "pytest-mock",
 ]
@@ -76,7 +76,7 @@ docs = [
     "sphinx-click >=3.0.2",
     "sphinx_mermaid",
     "sphinx_copybutton",
-    "pygments <2.20",  # shibuya passes int linespans; pygments 2.20 escapes it -> crash
+    "pygments<2.21",  # shibuya passes int linespans; pygments 2.20 escapes it -> crash
 ]
 mypy = ["mypy >=0.930", "pytest-mock"]
 typeguard = ["typeguard >=2.13.3"]
@@ -89,7 +89,7 @@ dev = [
     "pre-commit >=2.16.0",
     "pre-commit-hooks >=4.6.0",
     "pytest >=6.2.5",
-    "pygments >=2.10.0",
+    "pygments>=2.10.0",
     "nox >=2024.04.14",
     "pytest-mock",
 ]
@@ -102,7 +102,7 @@ docs = [
     "sphinx-click >=3.0.2",
     "sphinx_mermaid",
     "sphinx_copybutton",
-    "pygments <2.20",  # shibuya passes int linespans; pygments 2.20 escapes it -> crash
+    "pygments<2.21",  # shibuya passes int linespans; pygments 2.20 escapes it -> crash
 ]
 mypy = ["mypy >=0.930", "pytest-mock"]
 typeguard = ["typeguard >=2.13.3"]
