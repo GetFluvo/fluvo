@@ -152,3 +152,6 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           files: ./coverage.xml
+          # Flagged so Codecov merges it with the nightly `e2e` flag (which is
+          # carried forward on commits where the e2e workflow doesn't run).
+          flags: unit

@@ -1,4 +1,22 @@
 comment: false
+
+# Two coverage sources are merged into the project total:
+#   unit — pytest on every push/PR (tests.yml), always fresh.
+#   e2e  — the nightly Odoo matrix (e2e.yml), which drives the import/export engine
+#          against a real server and covers error/retry/relational paths unit tests
+#          can't reach. It runs on a schedule, not per-commit, so it's carried
+#          forward onto commits that don't have their own e2e upload.
+# NOTE: the e2e contribution only appears after the first nightly run following a
+# merge; until then the number reflects `unit` alone.
+flag_management:
+  default_rules:
+    carryforward: true
+  individual_flags:
+    - name: unit
+      carryforward: false
+    - name: e2e
+      carryforward: true
+
 coverage:
   status:
     project:
