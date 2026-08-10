@@ -2033,9 +2033,7 @@ class TestSendViesNotifications:
         connection = MagicMock()
         connection.get_model.return_value = mock_mail_obj
 
-        invalid = [
-            {"id": i, "name": f"P{i}", "vat": f"BE{i}"} for i in range(55)
-        ]
+        invalid = [{"id": i, "name": f"P{i}", "vat": f"BE{i}"} for i in range(55)]
         _send_vies_notifications(connection, invalid, [10])
 
         body = mock_mail_obj.create.call_args[0][0]["body"]
