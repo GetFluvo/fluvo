@@ -1,5 +1,6 @@
 """Test the core mapper functions."""
 
+import base64
 import inspect
 import logging
 import os
@@ -14,6 +15,13 @@ from fluvo.lib.internal.exceptions import SkippingError
 
 # Import MapperFunc for type hinting in this test file
 from fluvo.lib.mapper import MapperFunc
+
+# Direct references to the *real* implementations. The autouse fixture below
+# patches ``fluvo.lib.mapper.concat`` and ``fluvo.lib.mapper._get_field_value``
+# at the module level, but these local bindings keep pointing at the originals,
+# letting us exercise their real bodies.
+from fluvo.lib.mapper import _get_field_value as real_get_field_value
+from fluvo.lib.mapper import concat as real_concat
 
 # --- Type Aliases ---
 LineDict = dict[str, Any]
@@ -593,3 +601,180 @@ def test_m2o_map_fun_with_skip_and_empty_concat_value_state_passed(
     mock_concat_actual.assert_called_once_with("_", "non_existent_field")
     assert state["concat_calls"] == 1
     mock_to_m2o.assert_not_called()
+
+
+# --- Additional coverage tests ---
+
+
+def test_get_field_value_real_returns_value_and_default() -> None:
+    """Tests the real _get_field_value helper returns the value or the default."""
+    line: LineDict = {"col1": "A"}
+    assert real_get_field_value(line, "col1") == "A"
+    assert real_get_field_value(line, "missing", default="fallback") == "fallback"
+    assert real_get_field_value(line, "missing") is None
+
+
+def test_real_concat_joins_non_empty_values() -> None:
+    """Tests the real concat mapper joins present values and drops empty ones."""
+    assert real_concat("_", "col1", "col2")(LINE_SIMPLE, {}) == "A_B"
+    # empty_col contributes nothing, so only col1 remains.
+    assert real_concat("-", "col1", "empty_col")(LINE_SIMPLE, {}) == "A"
+
+
+def test_real_concat_skip_raises_on_empty() -> None:
+    """Tests the real concat mapper raises SkippingError when empty and skip=True."""
+    with pytest.raises(SkippingError):
+        real_concat("_", "empty_col", skip=True)(LINE_SIMPLE, {})
+
+
+def test_val_null_values_becomes_default() -> None:
+    """Tests that a value listed in state['null_values'] is treated as None."""
+    mapper_func = mapper.val("col1", default="DEFAULT")
+    assert mapper_func(LINE_SIMPLE, {"null_values": ["A"]}) == "DEFAULT"
+
+
+def test_val_skip_raises_on_empty() -> None:
+    """Tests that val raises SkippingError when skip=True and the value is empty."""
+    mapper_func = mapper.val("empty_col", skip=True)
+    with pytest.raises(SkippingError):
+        mapper_func(LINE_SIMPLE, {})
+
+
+def test_cond_selects_true_and_false_mappers() -> None:
+    """Tests that cond picks the true/false mapper based on the field's truthiness."""
+    mapper_func = mapper.cond("col1", "col2", "col3")
+    # col1 is truthy -> use the true mapper (col2's value).
+    assert mapper_func(LINE_SIMPLE, {}) == "B"
+    # col1 is falsy -> use the false mapper (col3's value).
+    assert mapper_func({"col1": "", "col2": "B", "col3": "C"}, {}) == "C"
+
+
+def test_num_returns_default_for_empty_and_none() -> None:
+    """Tests that num returns the default for missing and empty inputs."""
+    assert mapper.num("missing")({}, {}) is None
+    assert mapper.num("blank", default=7)({"blank": ""}, {}) == 7
+
+
+def test_num_returns_default_on_invalid_number() -> None:
+    """Tests that num returns the default when the value cannot be parsed."""
+    assert mapper.num("val", default=-1)({"val": "not-a-number"}, {}) == -1
+
+
+def test_field_returns_column_name_or_empty() -> None:
+    """Tests that field returns the column name when set, else an empty string."""
+    assert mapper.field("col1")(LINE_SIMPLE, {}) == "col1"
+    assert mapper.field("empty_col")(LINE_SIMPLE, {}) == ""
+
+
+def test_m2m_returns_default_when_no_ids() -> None:
+    """Tests that m2m returns the provided default when no IDs are produced."""
+    mapper_func = mapper.m2m("p", "empty_tags", default="DEFAULT")
+    assert mapper_func(LINE_M2M, {}) == "DEFAULT"
+
+
+def test_m2m_id_list_callable_one_arg_fallback() -> None:
+    """Tests m2m_id_list falls back to a one-arg callable on a TypeError."""
+
+    def one_arg(line: LineDict) -> str:
+        return "OneVal"
+
+    mapper_func = mapper.m2m_id_list("prefix", one_arg)
+    assert mapper_func(LINE_SIMPLE, {}) == ["prefix.OneVal"]
+
+
+def test_m2m_id_list_ignores_non_callable_non_string_arg() -> None:
+    """Tests m2m_id_list ignores args that are neither strings nor callables."""
+    mapper_func = mapper.m2m_id_list("prefix", 123)
+    assert mapper_func(LINE_SIMPLE, {}) == []
+
+
+def test_m2m_id_list_truthy_non_string_value() -> None:
+    """Tests m2m_id_list stringifies truthy non-string mapper results."""
+
+    def num_mapper(line: LineDict, state: StateDict) -> int:
+        return 5
+
+    mapper_func = mapper.m2m_id_list("prefix", num_mapper)
+    assert mapper_func(LINE_SIMPLE, {}) == ["prefix.5"]
+
+
+def test_m2m_value_list_callable_one_arg_fallback() -> None:
+    """Tests m2m_value_list falls back to a one-arg callable on TypeError."""
+
+    def one_arg(line: LineDict) -> str:
+        return "OneVal"
+
+    mapper_func = mapper.m2m_value_list(one_arg)
+    assert mapper_func(LINE_SIMPLE, {}) == ["OneVal"]
+
+
+def test_m2m_value_list_ignores_non_callable_non_string_arg() -> None:
+    """Tests m2m_value_list ignores args that are neither strings nor callables."""
+    mapper_func = mapper.m2m_value_list(123)
+    assert mapper_func(LINE_SIMPLE, {}) == []
+
+
+def test_m2m_value_list_truthy_non_string_value() -> None:
+    """Tests m2m_value_list stringifies truthy non-string mapper results."""
+
+    def num_mapper(line: LineDict, state: StateDict) -> int:
+        return 42
+
+    mapper_func = mapper.m2m_value_list(num_mapper)
+    assert mapper_func(LINE_SIMPLE, {}) == ["42"]
+
+
+def test_binary_url_to_base64_success(mocker: MagicMock) -> None:
+    """Tests binary_url_to_base64 returns base64 content on a successful download."""
+    mock_response = MagicMock()
+    mock_response.content = b"file_content"
+    mock_response.raise_for_status.return_value = None
+    mocker.patch("fluvo.lib.mapper.httpx.get", return_value=mock_response)
+
+    mapper_func = mapper.binary_url_to_base64("col1")
+    expected = base64.b64encode(b"file_content").decode("utf-8")
+    assert mapper_func(LINE_SIMPLE, {}) == expected
+
+
+def test_m2o_att_skips_empty_values() -> None:
+    """Tests m2o_att skips attribute columns whose value is empty."""
+    line: LineDict = {"Color": "Blue", "Empty": ""}
+    mapper_func = mapper.m2o_att("ATT", ["Color", "Empty"])
+    assert mapper_func(line, {}) == {"Color": "ATT.Color_Blue"}
+
+
+def test_concat_field_value_m2m_skips_empty_values() -> None:
+    """Tests concat_field_value_m2m skips attribute columns whose value is empty."""
+    line: LineDict = {"Color": "Blue", "Empty": ""}
+    mapper_func = mapper.concat_field_value_m2m("_", "Color", "Empty")
+    assert mapper_func(line, {}) == "Color_Blue"
+
+
+def test_path_to_image_returns_none_for_empty_path() -> None:
+    """Tests path_to_image returns None when the source column is empty."""
+    mapper_func = mapper.path_to_image("missing", "/base")
+    assert mapper_func(LINE_SIMPLE, {}) is None
+
+
+def test_path_to_image_returns_none_when_missing_file(mocker: MagicMock) -> None:
+    """Tests path_to_image returns None and warns when the file does not exist."""
+    mocker.patch("os.path.exists", return_value=False)
+    mapper_func = mapper.path_to_image("col1", "/base")
+    assert mapper_func(LINE_SIMPLE, {}) is None
+
+
+def test_path_to_image_success(mocker: MagicMock) -> None:
+    """Tests path_to_image returns base64 content for an existing file."""
+    mocker.patch("os.path.exists", return_value=True)
+    mocker.patch("builtins.open", mocker.mock_open(read_data=b"image_bytes"))
+    mapper_func = mapper.path_to_image("col1", "/base")
+    expected = base64.b64encode(b"image_bytes").decode("utf-8")
+    assert mapper_func(LINE_SIMPLE, {}) == expected
+
+
+def test_path_to_image_returns_none_on_os_error(mocker: MagicMock) -> None:
+    """Tests path_to_image returns None when reading the file raises OSError."""
+    mocker.patch("os.path.exists", return_value=True)
+    mocker.patch("builtins.open", side_effect=OSError("read failed"))
+    mapper_func = mapper.path_to_image("col1", "/base")
+    assert mapper_func(LINE_SIMPLE, {}) is None
