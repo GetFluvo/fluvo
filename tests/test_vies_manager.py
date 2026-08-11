@@ -17,8 +17,11 @@ from fluvo.lib.actions.vies_manager import (
     _is_retriable_error,
     _load_settings_from_backup,
     _save_settings_to_backup,
+    _send_vies_notifications,
+    _validate_vat_vies,
     check_vat_settings_backup_status,
     disable_vat_validation,
+    disable_vies_check,
     get_vat_validation_settings,
     restore_vat_settings_from_backup,
     restore_vat_validation_settings,
@@ -1546,3 +1549,543 @@ class TestSaveSettingsToBackupEdgeCases:
         with patch("builtins.open", side_effect=OSError("Write failed")):
             result = _save_settings_to_backup(settings, backup_path)
             assert result is False
+
+
+class TestValidateVatChecksumValidDutch:
+    """Test the passing Dutch checksum branch."""
+
+    def test_valid_dutch_vat_checksum_passes(self) -> None:
+        """Test that a well-formed Dutch VAT passes the checksum branch."""
+        is_valid, error = validate_vat_checksum("NL123456789B01")
+        assert is_valid is True
+        assert error is None
+
+
+class TestGetVatValidationSettingsStdnumModelError:
+    """Test stdnum retrieval when the config-parameter model is unavailable."""
+
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
+    def test_stdnum_get_model_error_is_swallowed(
+        self, mock_get_connection: MagicMock
+    ) -> None:
+        """Test that a failure to get ir.config_parameter leaves stdnum empty."""
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.return_value = [
+            {"id": 1, "name": "Company 1", "vat_check_vies": True},
+        ]
+
+        def get_model(model: str) -> MagicMock:
+            if model == "res.company":
+                return mock_company_obj
+            raise Exception("model unavailable")
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = get_model
+        mock_get_connection.return_value = mock_connection
+
+        settings = get_vat_validation_settings(config="dummy.conf", include_stdnum=True)
+
+        assert settings is not None
+        assert settings.stdnum_settings == {}
+        assert settings.vies_settings == {1: True}
+
+
+class TestDisableVatValidationMoreEdgeCases:
+    """Additional branch coverage for disable_vat_validation."""
+
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
+    def test_returns_none_when_settings_unavailable(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test that disable aborts and returns None when original settings fail."""
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.side_effect = Exception("search failed")
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value = mock_company_obj
+        mock_get_connection.return_value = mock_connection
+
+        result = disable_vat_validation(
+            config="dummy.conf",
+            disable_vies=True,
+            disable_stdnum=False,
+            save_settings=True,
+            backup_dir=tmp_path,
+        )
+
+        assert result is None
+
+    @patch("fluvo.lib.actions.vies_manager._save_settings_to_backup")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
+    def test_continues_when_backup_save_fails(
+        self,
+        mock_get_connection: MagicMock,
+        mock_save: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that disable proceeds even when the backup file cannot be saved."""
+        mock_save.return_value = False
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.return_value = [
+            {"id": 1, "name": "Company 1", "vat_check_vies": True},
+        ]
+        mock_param_obj = MagicMock()
+        mock_param_obj.get_param.return_value = "True"
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = lambda m: (
+            mock_company_obj if m == "res.company" else mock_param_obj
+        )
+        mock_get_connection.return_value = mock_connection
+
+        result = disable_vat_validation(
+            config="dummy.conf",
+            disable_vies=True,
+            disable_stdnum=False,
+            save_settings=True,
+            backup_dir=tmp_path,
+        )
+
+        assert result is not None
+        mock_save.assert_called_once()
+
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
+    def test_disable_vies_with_company_ids_filter(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test that disabling VIES for specific companies filters by id."""
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.return_value = [
+            {"id": 1, "name": "Company 1", "vat_check_vies": True},
+        ]
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value = mock_company_obj
+        mock_get_connection.return_value = mock_connection
+
+        result = disable_vat_validation(
+            config="dummy.conf",
+            company_ids=[1],
+            disable_vies=True,
+            disable_stdnum=False,
+            backup_dir=tmp_path,
+        )
+
+        assert result is not None
+        # The last search_read (the disable step) must include the id filter.
+        disable_domain = mock_company_obj.search_read.call_args[0][0]
+        assert ("id", "in", [1]) in disable_domain
+
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
+    def test_stdnum_get_model_error_is_swallowed(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test that a stdnum get_model failure during disable is swallowed."""
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.return_value = []
+
+        def get_model(model: str) -> MagicMock:
+            if model == "res.company":
+                return mock_company_obj
+            raise Exception("model unavailable")
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = get_model
+        mock_get_connection.return_value = mock_connection
+
+        result = disable_vat_validation(
+            config="dummy.conf",
+            disable_vies=False,
+            disable_stdnum=True,
+            backup_dir=tmp_path,
+        )
+
+        assert result is not None
+
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
+    def test_outer_exception_returns_original_settings(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test that a search failure in the disable step returns original settings."""
+        mock_company_obj = MagicMock()
+        # First search_read (get settings) succeeds; second (disable) fails.
+        mock_company_obj.search_read.side_effect = [
+            [{"id": 1, "name": "Company 1", "vat_check_vies": True}],
+            Exception("search failed during disable"),
+        ]
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value = mock_company_obj
+        mock_get_connection.return_value = mock_connection
+
+        result = disable_vat_validation(
+            config="dummy.conf",
+            disable_vies=True,
+            disable_stdnum=False,
+            save_settings=True,
+            backup_dir=tmp_path,
+        )
+
+        assert result is not None
+        assert result.vies_settings == {1: True}
+
+
+class TestDisableViesCheckLegacy:
+    """Test the legacy disable_vies_check wrapper."""
+
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
+    def test_legacy_wrapper_disables_only_vies(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test that disable_vies_check disables VIES without touching stdnum."""
+        mock_company_obj = MagicMock()
+        mock_company_obj.search_read.return_value = [
+            {"id": 1, "name": "Company 1", "vat_check_vies": True},
+        ]
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value = mock_company_obj
+        mock_get_connection.return_value = mock_connection
+
+        with patch(
+            "fluvo.lib.actions.vies_manager._get_backup_file_path",
+            return_value=tmp_path / "backup.json",
+        ):
+            result = disable_vies_check(config="dummy.conf")
+
+        assert result is not None
+        assert result.vies_settings == {1: True}
+
+
+class TestRestoreModelErrors:
+    """Cover the model-level error branches in restore_vat_validation_settings."""
+
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    def test_stdnum_model_error_non_retriable(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test a non-retriable failure obtaining ir.config_parameter fails restore."""
+
+        def get_model(model: str) -> MagicMock:
+            if model == "res.company":
+                return MagicMock()
+            raise Exception("Access denied")
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = get_model
+        mock_get_connection.return_value = mock_connection
+
+        config = {"host": "localhost", "database": "test_db"}
+        settings = VatValidationSettings(
+            stdnum_settings={"base_vat.vat_check_on_save": "True"}
+        )
+
+        result = restore_vat_validation_settings(config, settings, backup_dir=tmp_path)
+        assert result is False
+
+    @patch("fluvo.lib.actions.vies_manager.time.sleep")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    def test_stdnum_model_error_retriable_then_success(
+        self, mock_get_connection: MagicMock, mock_sleep: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test a retriable ir.config_parameter error retries and then succeeds."""
+        mock_param_obj = MagicMock()
+        call_count = [0]
+
+        def get_model(model: str) -> MagicMock:
+            if model == "res.company":
+                return MagicMock()
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("503 Service Unavailable")
+            return mock_param_obj
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = get_model
+        mock_get_connection.return_value = mock_connection
+
+        config = {"host": "localhost", "database": "test_db"}
+        settings = VatValidationSettings(
+            stdnum_settings={"base_vat.vat_check_on_save": "True"}
+        )
+
+        result = restore_vat_validation_settings(
+            config, settings, backup_dir=tmp_path, initial_delay=0.01
+        )
+        assert result is True
+        assert mock_sleep.called
+
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    def test_vies_model_error_non_retriable(
+        self, mock_get_connection: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test a non-retriable failure obtaining res.company fails restore."""
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = Exception("Access denied")
+        mock_get_connection.return_value = mock_connection
+
+        config = {"host": "localhost", "database": "test_db"}
+        settings = VatValidationSettings(vies_settings={1: True})
+
+        result = restore_vat_validation_settings(config, settings, backup_dir=tmp_path)
+        assert result is False
+
+    @patch("fluvo.lib.actions.vies_manager.time.sleep")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_dict")
+    def test_vies_model_error_retriable_then_success(
+        self, mock_get_connection: MagicMock, mock_sleep: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test a retriable res.company error retries and then succeeds."""
+        mock_company_obj = MagicMock()
+        call_count = [0]
+
+        def get_model(model: str) -> MagicMock:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("503 Service Unavailable")
+            return mock_company_obj
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = get_model
+        mock_get_connection.return_value = mock_connection
+
+        config = {"host": "localhost", "database": "test_db"}
+        settings = VatValidationSettings(vies_settings={1: True})
+
+        result = restore_vat_validation_settings(
+            config, settings, backup_dir=tmp_path, initial_delay=0.01
+        )
+        assert result is True
+        assert mock_sleep.called
+
+
+class TestRunViesValidationFullLoop:
+    """Cover the main batch-processing loop of run_vies_validation."""
+
+    @patch("fluvo.lib.actions.vies_manager.time.sleep")
+    @patch("fluvo.lib.actions.vies_manager._validate_vat_vies")
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
+    def test_processes_batches_valid_invalid_error(
+        self,
+        mock_get_connection: MagicMock,
+        mock_validate: MagicMock,
+        mock_sleep: MagicMock,
+    ) -> None:
+        """Test that the loop tallies valid, invalid, empty and error partners."""
+        mock_partner_obj = MagicMock()
+        mock_partner_obj.search_count.return_value = 4
+        mock_partner_obj.search.side_effect = [[1, 2], [3, 4]]
+        mock_partner_obj.read.side_effect = [
+            [
+                {
+                    "id": 1,
+                    "name": "P1",
+                    "vat": "BE1",
+                    "user_id": [5, "u"],
+                    "country_id": [1, "BE"],
+                },
+                {
+                    "id": 2,
+                    "name": "P2",
+                    "vat": "BE2",
+                    "user_id": False,
+                    "country_id": [1, "BE"],
+                },
+            ],
+            [
+                {
+                    "id": 3,
+                    "name": "P3",
+                    "vat": "BE3",
+                    "user_id": False,
+                    "country_id": False,
+                },
+                {
+                    "id": 4,
+                    "name": "P4",
+                    "vat": "",
+                    "user_id": False,
+                    "country_id": False,
+                },
+            ],
+        ]
+        mock_mail_obj = MagicMock()
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.side_effect = lambda m: (
+            mock_mail_obj if m == "mail.message" else mock_partner_obj
+        )
+        mock_get_connection.return_value = mock_connection
+
+        # P1 valid, P2 invalid, P3 raises (error). P4 has no VAT (skipped).
+        mock_validate.side_effect = [True, False, Exception("vies boom")]
+
+        result = run_vies_validation(
+            config="dummy.conf",
+            batch_size=2,
+            delay_between_batches=1.0,
+            notify_user_ids=[10],
+        )
+
+        assert result.total_checked == 4
+        assert result.valid_count == 1
+        assert result.invalid_count == 1
+        assert result.error_count == 1
+        assert result.invalid_partners[0]["name"] == "P2"
+        assert result.error_partners[0]["name"] == "P3"
+        # A delay happens between the two batches.
+        mock_sleep.assert_called_once_with(1.0)
+        # Invalid partners plus notify_user_ids triggers a notification.
+        mock_mail_obj.create.assert_called_once()
+
+    @patch("fluvo.lib.actions.vies_manager.conf_lib.get_connection_from_config")
+    def test_outer_exception_returns_partial_result(
+        self, mock_get_connection: MagicMock
+    ) -> None:
+        """Test that an error after connecting returns the (empty) result object."""
+        mock_partner_obj = MagicMock()
+        mock_partner_obj.search_count.side_effect = Exception("count failed")
+
+        mock_connection = MagicMock()
+        mock_connection.get_model.return_value = mock_partner_obj
+        mock_get_connection.return_value = mock_connection
+
+        result = run_vies_validation(config="dummy.conf")
+        assert result.total_checked == 0
+
+
+class TestValidateVatVies:
+    """Tests for the internal _validate_vat_vies helper."""
+
+    def _connection_returning(self, partner_obj: MagicMock) -> MagicMock:
+        """Build a mock connection whose get_model returns partner_obj."""
+        connection = MagicMock()
+        connection.get_model.return_value = partner_obj
+        return connection
+
+    def test_vies_vat_check_dict_valid(self) -> None:
+        """Test that a dict result with valid=True returns True."""
+        partner_obj = MagicMock()
+        partner_obj.vies_vat_check.return_value = {"valid": True}
+        connection = self._connection_returning(partner_obj)
+        assert _validate_vat_vies(connection, "BE123", {}) is True
+
+    def test_vies_vat_check_dict_invalid(self) -> None:
+        """Test that a dict result with valid=False returns False."""
+        partner_obj = MagicMock()
+        partner_obj.vies_vat_check.return_value = {"valid": False}
+        connection = self._connection_returning(partner_obj)
+        assert _validate_vat_vies(connection, "BE123", {}) is False
+
+    def test_vies_vat_check_non_dict_truthy(self) -> None:
+        """Test that a truthy non-dict result returns True."""
+        partner_obj = MagicMock()
+        partner_obj.vies_vat_check.return_value = 1
+        connection = self._connection_returning(partner_obj)
+        assert _validate_vat_vies(connection, "BE123", {}) is True
+
+    def test_falls_back_to_simple_vat_check(self) -> None:
+        """Test the fallback to simple_vat_check when vies_vat_check fails."""
+        partner_obj = MagicMock()
+        partner_obj.vies_vat_check.side_effect = Exception("not available")
+        partner_obj.simple_vat_check.return_value = True
+        connection = self._connection_returning(partner_obj)
+        partner = {"country_id": [7, "BE"]}
+        assert _validate_vat_vies(connection, "BE123", partner) is True
+        partner_obj.simple_vat_check.assert_called_once_with(7, "BE123")
+
+    def test_last_resort_returns_true(self) -> None:
+        """Test that when no check method works the last resort returns True."""
+        partner_obj = MagicMock()
+        partner_obj.vies_vat_check.side_effect = Exception("not available")
+        partner_obj.simple_vat_check.side_effect = Exception("not available")
+        connection = self._connection_returning(partner_obj)
+        assert _validate_vat_vies(connection, "BE123", {"country_id": False}) is True
+
+    def test_reraises_on_connection_error(self) -> None:
+        """Test that a failure obtaining the partner model is re-raised."""
+        connection = MagicMock()
+        connection.get_model.side_effect = Exception("connection lost")
+        with pytest.raises(Exception, match="connection lost"):
+            _validate_vat_vies(connection, "BE123", {})
+
+
+class TestSendViesNotifications:
+    """Tests for the internal _send_vies_notifications helper."""
+
+    def test_creates_one_message_per_user(self) -> None:
+        """Test that one notification message is created per user id."""
+        mock_mail_obj = MagicMock()
+        connection = MagicMock()
+        connection.get_model.return_value = mock_mail_obj
+
+        invalid = [
+            {"id": 1, "name": "P1", "vat": "BE1"},
+            {"id": 2, "name": "P2", "vat": "BE2"},
+        ]
+        _send_vies_notifications(connection, invalid, [10, 20])
+
+        assert mock_mail_obj.create.call_count == 2
+
+    def test_truncates_partner_list_over_50(self) -> None:
+        """Test that more than 50 invalid partners are truncated in the message."""
+        mock_mail_obj = MagicMock()
+        connection = MagicMock()
+        connection.get_model.return_value = mock_mail_obj
+
+        invalid = [{"id": i, "name": f"P{i}", "vat": f"BE{i}"} for i in range(55)]
+        _send_vies_notifications(connection, invalid, [10])
+
+        body = mock_mail_obj.create.call_args[0][0]["body"]
+        assert "and 5 more" in body
+
+    def test_handles_create_error_gracefully(self) -> None:
+        """Test that a failure to create a message does not raise."""
+        mock_mail_obj = MagicMock()
+        mock_mail_obj.create.side_effect = Exception("create failed")
+        connection = MagicMock()
+        connection.get_model.return_value = mock_mail_obj
+
+        invalid = [{"id": 1, "name": "P1", "vat": "BE1"}]
+        # Should not raise.
+        _send_vies_notifications(connection, invalid, [10])
+
+    def test_handles_model_error_gracefully(self) -> None:
+        """Test that a failure to get the mail model does not raise."""
+        connection = MagicMock()
+        connection.get_model.side_effect = Exception("model unavailable")
+
+        invalid = [{"id": 1, "name": "P1", "vat": "BE1"}]
+        # Should not raise.
+        _send_vies_notifications(connection, invalid, [10])
+
+
+class TestRunImportDisableViesFalse:
+    """Cover the disable_vies=False branch of the import workflow."""
+
+    @patch("fluvo.lib.actions.vies_manager.restore_vat_validation_settings")
+    @patch("fluvo.lib.actions.vies_manager.disable_vat_validation")
+    def test_import_disable_only_stdnum(
+        self,
+        mock_disable: MagicMock,
+        mock_restore: MagicMock,
+    ) -> None:
+        """Test the workflow with only stdnum disabled (disable_vies=False)."""
+        mock_settings = VatValidationSettings(stdnum_settings={"p": "v"})
+        mock_disable.return_value = mock_settings
+        mock_restore.return_value = True
+
+        mock_import_func = MagicMock(return_value="result")
+
+        result = run_import_with_vat_validation_disabled(
+            config="dummy.conf",
+            import_func=mock_import_func,
+            import_kwargs={},
+            disable_vies=False,
+            disable_stdnum=True,
+        )
+
+        assert result == "result"
+        call_kwargs = mock_disable.call_args[1]
+        assert call_kwargs["disable_vies"] is False
+        assert call_kwargs["disable_stdnum"] is True
