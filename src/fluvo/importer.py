@@ -221,7 +221,11 @@ def run_import(  # noqa: C901
                     title="[bold green]No Recovery Needed[/bold green]",
                 )
             )
-            return None
+            # An empty id_map, NOT None: a --fail run with nothing to retry
+            # *completed successfully* (there was nothing to do). The CLI treats a
+            # None return as a fatal abort and exits non-zero (#247), so this
+            # benign no-op must stay distinguishable from a real failure.
+            return {}
         log.info(
             f"Running in --fail mode. Retrying {line_count - 1} records from: "
             f"{fail_path}"
