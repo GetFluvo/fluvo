@@ -1,6 +1,6 @@
 [project]
 name = "fluvo"
-version = "0.0.2"
+version = "0.0.3"
 description = "Fast data into Odoo — high-performance Polars-backed ETL."
 readme = "README.md"
 requires-python = ">=3.9"
