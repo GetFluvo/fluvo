@@ -15,7 +15,7 @@ config:
   theme: redux
 ---
 flowchart TD
-    A(["Odoo-Data-Flow"]) -- Processor
+    A(["Fluvo"]) -- Processor
     Mapper --- B["Transform Python Script"]
     B --- C["Client CSV File"]
     B --> D["Transformed CSV Files for import"]
@@ -37,7 +37,7 @@ config:
   theme: redux
 ---
 flowchart TD
-    A["Odoo-Data-Flow"] -- Import --- B["odoo-client lib"]
+    A["Fluvo"] -- Import --- B["odoo-client lib"]
     B --- C["Transformed CSV Files"]
     B L_B_D_0@--> D["odoo"]
     n1["Configuration File"] --> B
