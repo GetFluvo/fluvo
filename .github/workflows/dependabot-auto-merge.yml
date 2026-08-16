@@ -1,0 +1,50 @@
+name: Dependabot auto-merge
+
+# Low-maintenance dependency upkeep: patch/minor version bumps and any security
+# update merge themselves once CI is green. Major (semver-major) version bumps are
+# held for a human — they're the ones that break builds — unless they're a security
+# fix, in which case CI still gates the merge, so a breaking one stays open.
+#
+# Safe by construction:
+#   * `pull_request_target` gives a write-scoped token, but we never check out or
+#     run the PR's code — we only call the GitHub API via `gh`. No untrusted code runs.
+#   * `gh pr merge --auto` enables auto-merge; the branch-protection `all-checks`
+#     gate holds the actual merge until the full CI matrix passes.
+
+on: pull_request_target
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+
+      - name: Enable auto-merge (patch, minor, or security)
+        if: >-
+          ${{ steps.meta.outputs.update-type == 'version-update:semver-patch'
+           || steps.meta.outputs.update-type == 'version-update:semver-minor'
+           || steps.meta.outputs.ghsa-id != '' }}
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr review --approve "$PR_URL"
+          gh pr merge --auto --squash "$PR_URL"
+
+      - name: Comment on held major bumps
+        if: >-
+          ${{ steps.meta.outputs.update-type == 'version-update:semver-major'
+           && steps.meta.outputs.ghsa-id == '' }}
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment "$PR_URL" --body \
+            "🚦 Held for manual review: this is a **major** version bump (\`${{ steps.meta.outputs.dependency-names }}\`), which can introduce breaking changes. Auto-merge is limited to patch, minor, and security updates. Review and merge by hand if it looks safe."

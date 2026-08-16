@@ -155,3 +155,22 @@ jobs:
           # Flagged so Codecov merges it with the nightly `e2e` flag (which is
           # carried forward on commits where the e2e workflow doesn't run).
           flags: unit
+
+  # Single, stable gate for branch protection. Requiring this one context — rather
+  # than every matrix leg by name — means the required-checks list never has to
+  # change when the test matrix grows or shrinks. `coverage` is intentionally NOT
+  # a dependency: it's reporting (Codecov), not a correctness gate, so a flaky
+  # upload never blocks a merge.
+  all-checks:
+    name: all-checks
+    if: always()
+    needs: [tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job did not succeed
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+        run: |
+          echo "One or more required jobs did not succeed: ${{ join(needs.*.result, ', ') }}"
+          exit 1
+      - name: All required jobs passed
+        run: echo "All required checks passed."
