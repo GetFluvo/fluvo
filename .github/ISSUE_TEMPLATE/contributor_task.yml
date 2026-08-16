@@ -1,0 +1,67 @@
+name: Contributor task
+description: A well-scoped unit of work handed to an external/freelance contributor.
+labels: ["contributor-task"]
+title: "[task]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A task is "ready to hand out" only when **done is defined as passing tests**,
+        not prose. fluvo's test suite — especially `tests/e2e` — is the acceptance
+        language. A contributor should be able to know they're finished by running a
+        command, without asking. If you can't phrase acceptance as a test, the task
+        isn't scoped yet.
+  - type: textarea
+    id: context
+    attributes:
+      label: Context & goal
+      description: What are we changing and why? Link related issues/PRs.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Which files / modules / connectors are in play. Point at the code.
+      placeholder: |
+        - src/fluvo/...
+        - tests/e2e/test_integrity_relations.py
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria — as tests
+      description: >-
+        Every criterion must be checkable by running a command. Use the existing
+        suite as the vocabulary. Delete the examples that don't apply and make the
+        rest concrete.
+      value: |
+        Done when all of these pass:
+
+        - [ ] `uv run nox -s tests` is green, and a new/updated test asserts the behaviour:
+              `tests/test_<module>.py::test_<name>` covers <case>.
+        - [ ] e2e scenario passes: `uv run nox -s e2e` with
+              `tests/e2e/test_integrity_<...>.py::<test>` (add a scenario if the
+              behaviour is import/export integrity — see tests/e2e/README.md).
+        - [ ] Coverage on the touched module does not drop (the coverage gate stays green).
+        - [ ] `uv run nox -s pre-commit mypy` is green (lint, format, pydoclint baseline, types).
+        - [ ] The `all-checks` gate is green on the PR.
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Explicitly out of scope
+      description: What NOT to touch (prevents scope creep and surprise diffs).
+    validations:
+      required: false
+  - type: checkboxes
+    id: agreements
+    attributes:
+      label: For the contributor
+      options:
+        - label: I will sign the CLA on my first PR (the bot will prompt me).
+          required: false
+        - label: I've read tests/e2e/README.md if this task touches import/export integrity.
+          required: false

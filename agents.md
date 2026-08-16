@@ -1,56 +1,71 @@
-# Agent Instructions for Project: fluvo
+# Agent instructions for fluvo
 
-This document guides the AI agent in developing the `fluvo` project.
+Guidance for AI coding agents working in this repository.
 
-## 🎯 Project Context & Goal
+## What fluvo is
 
-This is an **Odoo module**. All code, dependencies, and architectural decisions must be compatible with the Odoo version specified in the Git branch.
+fluvo is a **Python package** (a library plus a CLI) — **not** an Odoo module, and
+it is not installed inside Odoo. It is a Polars-backed ETL engine that imports,
+exports, and migrates data by talking to **Odoo 16–19 over RPC**
+(xmlrpc / jsonrpc / json2). Because it connects over RPC, fluvo's own Python
+version is decoupled from the target Odoo's — you can drive an old Odoo database
+from a modern Python.
 
--   **Odoo Version Detection:** Before starting, determine the Odoo version by inspecting the Git branch name. Use this command to extract it:
-    ```sh
-    git rev-parse --abbrev-ref HEAD | sed -n 's/^\([0-9]\{1,2\}\.0\).*/\1/p'
-    ```
--   **Strategic Goal:** All implemented functionality must align with the Fluvo strategic blueprint.
+- Source lives in `src/fluvo/`. The CLI entry point is `fluvo = fluvo.__main__:cli`.
+- Release wheels are **mypyc-compiled** (`FLUVO_COMPILE_MYPYC=1`); the code must
+  stay mypyc-compatible.
+- License is **LGPL-3.0**. fluvo is a derivative of Thibault Francois'
+  `odoo_csv_import`; see `NOTICE`. Do not propose relicensing the core.
+- There is **no Odoo-version-from-branch-name** convention. Ignore any such
+  instruction — that scheme was dropped. Target Odoo versions are handled at
+  runtime over RPC, and exercised by the e2e suite (Odoo 16–19), not by branches.
 
----
+## Toolchain
 
-## 🛠️ Environment Setup
+Everything runs through **uv** and **nox**. Install once:
 
-Jules must set up its environment using **Nox**.
+```sh
+uv sync --all-groups --frozen   # exact locked deps (uv.lock is committed)
+```
 
-1.  Ensure `nox` is installed: `pip install nox`.
-2.  Run the initial setup session to create the virtual environment and install all dependencies: `nox -s setup`.
+Then use nox sessions (each is isolated):
 
----
+```sh
+uv run nox                          # the full local gate (what CI runs)
+uv run nox -s tests pre-commit mypy # fast iteration subset
+uv run nox -s tests                 # unit tests (tests/)
+uv run nox -s pre-commit            # ruff lint+format, pydoclint, file hygiene
+uv run nox -s mypy                  # strict type check
+uv run nox -s e2e                   # end-to-end integrity suite (see below)
+```
 
-## 📝 Development & Quality Rules
+Available sessions: `pre-commit`, `mypy`, `tests`, `typeguard`, `xdoctest`,
+`docs-build`, `coverage`, `e2e`.
 
-For every task, you **MUST** adhere to the following rules without exception.
+## Quality rules (enforced by CI — the `all-checks` gate)
 
-#### 1. Testing and Validation
+1. **Tests.** Add or update tests for every change; coverage is gated. Unit tests
+   are in `tests/`. Integrity behaviour (no silent data loss, relations, roundtrip
+   types, idempotency) belongs in `tests/e2e/` — read `tests/e2e/README.md`.
+2. **Types.** Fully type-hinted; `mypy --strict` must pass with zero errors. Use
+   lowercase builtins (`list`, `dict`, `X | None`).
+3. **Lint/format.** `ruff` (pinned to the version in `.pre-commit-config.yaml`);
+   line length 88. Run `uv run nox -s pre-commit` before committing.
+4. **Docstrings.** Google-style, checked by **pydoclint** against the committed
+   `pydoclint-baseline.txt`. Write complete `Args:`/`Returns:`. If you deliberately
+   change docstrings, refresh the baseline:
+   `uv run pydoclint --generate-baseline=True $(git ls-files '*.py')`.
 
-All code execution, testing, and checks **must** be performed within the Nox-managed environment.
+## The e2e suite
 
--   **Primary Command:** `nox` (runs the full suite)
--   **Quick Checks:** For faster iteration, run a subset: `nox -s pre-commit mypy tests`
+`tests/e2e` drives fluvo against a **real Odoo** in a disposable container to prove
+the guarantees unit tests can't (reconciliation, relational correctness). It is
+excluded from the default `tests` run and needs **podman or docker** on the host.
+Run it with `uv run nox -s e2e`; see `tests/e2e/README.md` for scenarios and knobs.
 
-#### 2. Code Quality & Formatting
+## Working agreement
 
-All generated Python code must be 100% compliant with the project's pre-commit configuration.
-
--   **Linter/Formatter:** `ruff`
--   **Import Sorting:** `isort`
--   **Line Length:** Maximum **88 characters**.
-
-#### 3. Type Safety
-
-Code must be fully type-hinted and pass `mypy` static analysis with zero errors.
-
--   **Typing Style:** Use lowercase standard types (e.g., `list`, `dict`).
-
-#### 4. Documentation
-
-All functions, methods, and classes require **Google-style docstrings**.
-
--   **Format:** Start with a one-line summary ending in a period, followed by a blank line.
--   **Content:** Clearly document `Args:` and `Returns:`.
+- Work on a feature branch off `master`; open a PR. `master` is protected and
+  requires the `all-checks` gate to be green.
+- Outside contributors sign the CLA on their first PR — see `CONTRIBUTING.md`.
+- Keep changes focused; update docs when behaviour or the CLI changes.

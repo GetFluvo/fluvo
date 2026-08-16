@@ -1,0 +1,44 @@
+// Dev container for fluvo — a one-command setup for the unit/lint/type toolchain.
+// Python matches the primary CI session (3.12; pyproject requires >=3.9). The
+// post-create step installs uv, syncs the FROZEN lockfile, and wires pre-commit.
+//
+// NOTE: the end-to-end suite (`nox -s e2e`, tests/e2e) additionally needs
+// podman or docker on the HOST to run the disposable Odoo 16–19 containers — see
+// tests/e2e/README.md. That is intentionally NOT provisioned here to keep the
+// container light; run the e2e suite on your host, or add the
+// "ghcr.io/devcontainers/features/docker-outside-of-docker" feature if your host
+// exposes a Docker socket.
+{
+  "name": "fluvo",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+
+  // uv installs into ~/.local/bin; make sure it's on PATH for terminals and tasks.
+  "remoteEnv": {
+    "PATH": "/home/vscode/.local/bin:${containerEnv:PATH}",
+    "UV_LINK_MODE": "copy"
+  },
+
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "ms-python.mypy-type-checker"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+        "python.terminal.activateEnvironment": true,
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true
+        }
+      }
+    }
+  }
+}

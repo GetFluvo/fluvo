@@ -1,0 +1,63 @@
+name: CLA Assistant
+
+# Records that every outside contributor has agreed to the Contributor License
+# Agreement (CLA.md) before their PR is merged. The CLA preserves Fluvo's
+# open-core option: the right to license contributions under both LGPL-3.0 and a
+# separate commercial license. Without this gate, an unsigned outside PR erodes
+# that option the moment it merges.
+#
+# How it works: on a PR from a non-allowlisted author, the action posts a comment
+# asking them to sign by replying with the exact sentence below. The signature is
+# recorded in a JSON file on a dedicated `cla-signatures` branch, and the action
+# sets a `license/cla` commit status. Add `license/cla` to master's required
+# status checks (branch protection) to make it a hard merge gate — it lives in its
+# own workflow (it needs `pull_request_target` + `issue_comment` triggers and
+# elevated permissions), so it cannot be folded into the `all-checks` job in
+# tests.yml, which only aggregates jobs within that workflow.
+#
+# One-time setup by a maintainer:
+#   * Create a repo secret `PERSONAL_ACCESS_TOKEN` (a PAT with `repo` scope) so the
+#     action can commit signatures to the `cla-signatures` branch.
+#   * Add `license/cla` to the required status checks on `master`.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, synchronize]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  cla:
+    runs-on: ubuntu-latest
+    steps:
+      - name: CLA Assistant
+        if: >-
+          (github.event.comment.body == 'recheck'
+            || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA')
+          || github.event_name == 'pull_request_target'
+        uses: contributor-assistant/github-action@v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Commits the signature file to the cla-signatures branch. Falls back to
+          # GITHUB_TOKEN if the PAT secret is not configured yet (the action still
+          # comments and sets the status, but cannot persist a signature).
+          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        with:
+          path-to-signatures: signatures/version1/cla.json
+          path-to-document: https://github.com/GetFluvo/fluvo/blob/master/CLA.md
+          branch: cla-signatures
+          custom-notsigned-prcomment: >-
+            Thank you for your contribution. Before we can merge it, we need you to
+            agree to our [Contributor License Agreement](https://github.com/GetFluvo/fluvo/blob/master/CLA.md).
+            Please read it, then post the following comment on this PR:
+          custom-pr-sign-comment: I have read the CLA Document and I hereby sign the CLA
+          custom-allsigned-prcomment: All contributors have signed the CLA. ✅
+          # Maintainers and bots are exempt so this never blocks Dependabot
+          # auto-merge or internal work.
+          allowlist: bosd,*[bot]

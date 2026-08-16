@@ -1,0 +1,63 @@
+name: Bug report
+description: Something in fluvo behaves incorrectly (wrong data, crash, bad exit code).
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. fluvo's core promise is *no silent data loss*, so
+        precise reproduction details matter a lot. The best report includes the
+        exact command and, where relevant, what reconciliation reported.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did fluvo do, and what did you expect instead?
+      placeholder: |
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: The exact `fluvo` command (redact hostnames/keys) and, if you can, a minimal CSV.
+      render: shell
+      placeholder: |
+        fluvo import --connection-file conf/uat.conf --file data/x.csv --model res.partner --worker 4 --size 500
+        echo "exit: $?"
+    validations:
+      required: true
+  - type: textarea
+    id: reconciliation
+    attributes:
+      label: Reconciliation / fail-file output
+      description: >-
+        If it's an import/export, paste the reconciliation summary (Created / Failed /
+        Unaccounted / Total) and any `_ERROR_REASON` rows from the fail file.
+      render: text
+    validations:
+      required: false
+  - type: input
+    id: fluvo-version
+    attributes:
+      label: fluvo version
+      description: Output of `fluvo --version`.
+      placeholder: "0.0.3"
+    validations:
+      required: true
+  - type: input
+    id: odoo-version
+    attributes:
+      label: Target Odoo version & protocol
+      placeholder: "Odoo 18, jsonrpc"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Python & OS
+      placeholder: "Python 3.12, Linux"
+    validations:
+      required: true
