@@ -97,6 +97,64 @@ def test_import_command_calls_runner(
         assert call_kwargs["model"] == "res.partner"
 
 
+@patch("fluvo.__main__.run_import")
+def test_import_command_exits_nonzero_on_fatal_abort(
+    mock_run_import: MagicMock, runner: CliRunner
+) -> None:
+    """A fatal abort (run_import returns None) must exit non-zero (#247).
+
+    Previously the CLI returned normally, so a run that authenticated badly and
+    imported nothing still reported success — invisible to `set -e` automation.
+    """
+    mock_run_import.return_value = None
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "my.csv",
+                "--model",
+                "res.partner",
+            ],
+        )
+        assert result.exit_code != 0
+        mock_run_import.assert_called_once()
+
+
+@patch("fluvo.__main__.run_import")
+def test_import_command_exits_zero_on_benign_noop(
+    mock_run_import: MagicMock, runner: CliRunner
+) -> None:
+    """A successful run that imported nothing (empty id_map) stays exit 0 (#247).
+
+    A `--fail` retry with an empty fail file completed successfully with nothing to
+    do; it must not be mistaken for the fatal-abort case.
+    """
+    mock_run_import.return_value = {}
+    with runner.isolated_filesystem():
+        with open("conn.conf", "w") as f:
+            f.write("[Connection]")
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "my.csv",
+                "--model",
+                "res.partner",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_run_import.assert_called_once()
+
+
 @patch("fluvo.__main__.run_export")
 def test_export_command_calls_runner(
     mock_run_export: MagicMock, runner: CliRunner
@@ -822,7 +880,9 @@ def test_import_post_action_not_called_on_failure(
                 "action_apply_inventory",
             ],
         )
-        assert result.exit_code == 0
+        # A failed import (run_import -> None) now exits non-zero (#247); the
+        # post-action must still be skipped.
+        assert result.exit_code != 0
         mock_run_import.assert_called_once()
         mock_post_action.assert_not_called()
 

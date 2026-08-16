@@ -905,8 +905,9 @@ class TestImporterEdgeCases:
             groupby=None,
         )
 
-        # Should return None without calling import_data
-        assert result is None
+        # A --fail run with nothing to retry is a benign no-op, NOT a failure: it
+        # returns an empty id_map (not None) so the CLI keeps exit 0 (#247).
+        assert result == {}
         mock_import_data.assert_not_called()
 
     @patch("fluvo.importer.import_threaded.import_data")

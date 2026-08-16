@@ -1516,6 +1516,7 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
 
     # Handle --sudo flag: temporarily disable record rules for the model
     sudo = kwargs.pop("sudo", False)
+    import_result: Optional[dict[str, int]] = None
     if sudo:
         from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
 
@@ -1672,6 +1673,15 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
                         context,
                         product_ids_for_move_update,
                     )
+
+    # #247: a None return means the run aborted fatally (bad credentials,
+    # unreachable model, invalid input) and imported nothing — the error panel is
+    # already rendered above. Propagate a non-zero exit so automation (set -e / $?)
+    # sees the failure instead of a false success. A successful import — including a
+    # partial one (fail file written) or a --fail run with nothing to retry — returns
+    # a dict (possibly empty) and keeps exit 0.
+    if import_result is None:
+        raise SystemExit(1)
 
 
 # --- Write Command (New) ---
