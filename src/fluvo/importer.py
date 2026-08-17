@@ -157,6 +157,7 @@ def run_import(  # noqa: C901
     fix_missing_variants: bool = False,
     allow_xmlid_collisions: bool = False,
     m2m_mode: str = "replace",
+    require_company: bool = False,
 ) -> Optional[dict[str, int]]:
     """Main entry point for the import command, handling all orchestration.
 
@@ -258,6 +259,8 @@ def run_import(  # noqa: C901
             check_refs=check_refs,
             encoding=encoding,
             allow_xmlid_collisions=allow_xmlid_collisions,
+            context=parsed_context,
+            require_company=require_company,
         ):
             return None
 
@@ -532,6 +535,11 @@ def run_import(  # noqa: C901
             )
         )
 
+    # On-the-record echo of which company the records landed in (#255). Set by the
+    # company_context_check preflight for company-specific models; blank otherwise.
+    company_ctx = import_plan.get("company_context") or {}
+    company_suffix = f"\n{company_ctx['line']}" if company_ctx.get("line") else ""
+
     if is_truly_successful:
         if final_deferred:  # It was a two-pass import
             summary = (
@@ -542,7 +550,7 @@ def run_import(  # noqa: C901
             title = f"[bold green]Import Complete for [cyan]{model}[/cyan][/bold green]"
             Console().print(
                 Panel(
-                    summary,
+                    summary + company_suffix,
                     title=title,
                     expand=False,
                 )
@@ -550,7 +558,8 @@ def run_import(  # noqa: C901
         else:  # Single pass
             Console().print(
                 Panel(
-                    f"Import for [cyan]{model}[/cyan] finished successfully.",
+                    f"Import for [cyan]{model}[/cyan] finished successfully."
+                    + company_suffix,
                     title="[bold green]Import Complete[/bold green]",
                 )
             )
@@ -562,7 +571,7 @@ def run_import(  # noqa: C901
                 f"Partial import for [cyan]{model}[/cyan]: "
                 f"[green]{num_imported}[/green] succeeded, "
                 f"[red]{num_failed}[/red] failed. "
-                f"See {fail_output_file} for failed records.",
+                f"See {fail_output_file} for failed records." + company_suffix,
                 title="[bold yellow]Import Partially Complete[/bold yellow]",
             )
         )

@@ -115,6 +115,53 @@ product_mapping = {
 
 ---
 
+## The Company Guard: Don't Import Into the Wrong Company
+
+The single most damaging silent mistake in a multi-company database is running an
+import **without choosing a company**. Every record then lands under the connecting
+user's default company — the import succeeds, reconciliation passes, and the data is
+wrong in a way that is expensive to unpick later. It happens most often on
+LLM-assisted or scripted runs, where nobody is watching the default.
+
+To prevent this, when you import a company-specific model (one with a `company_id`
+field or any company-dependent columns) and pass **neither** `--company-id` **nor**
+`--all-companies`, a pre-flight check warns you, naming the company that *will* be
+used and how many records are about to land there:
+
+```
+╭────────────────────────── No company specified ──────────────────────────────╮
+│ 'product.product' is company-specific and no --company-id / --all-companies   │
+│ was given.                                                                    │
+│                                                                               │
+│ 1,240 record(s) will be created under company 1 "YourCo NV".                  │
+│                                                                               │
+│ If that is not what you intend, re-run with --company-id <id>. In automation, │
+│ pass --require-company to turn this into a hard error.                         │
+╰───────────────────────────────────────────────────────────────────────────────╯
+```
+
+The resolved company is also echoed in the **run summary** (and the reconciliation
+report), so which company received the data is on the record either way — whether
+you set it explicitly or accepted the default.
+
+### `--require-company` for automation
+
+In a pipeline you don't want a warning you might miss — you want the run to stop.
+Pass `--require-company` to turn the unset case into a hard error with a non-zero
+exit code:
+
+```bash
+fluvo import \
+  --connection-file conf/prod.conf \
+  --file data/products.csv --model product.product \
+  --require-company        # aborts unless --company-id / --all-companies is given
+```
+
+This composes with `set -e` orchestration: a run that forgot the company fails
+loudly instead of quietly writing to the wrong one.
+
+---
+
 ## Importing Company-Dependent Fields (Cost Prices)
 
 Some fields in Odoo are **company-dependent**, meaning the same record can have different values for different companies. The most common example is `standard_price` (cost price) on `product.product`.
@@ -821,6 +868,7 @@ fluvo import \
 | `--context "{'inventory_mode': True}"` | Required to enable inventory adjustments |
 | `--sudo` | Bypasses record rules (needed for stock.quant) |
 | `--all-companies` | Enables cross-company access |
+| `--require-company` | Aborts a company-specific import unless the company is set explicitly |
 | `--skip-existing` | Allows safe re-runs without update errors |
 | `--post-action action_apply_inventory` | Applies the stock adjustment after import |
 
