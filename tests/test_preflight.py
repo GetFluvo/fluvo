@@ -1052,3 +1052,79 @@ class TestCompanyContextCheck:
         err.assert_not_called()
         assert plan["company_context"]["explicit"] is True
         assert 'Company: 3 "Acme BE"' in plan["company_context"]["line"]
+
+
+class TestExtractOdooErrorMessage:
+    """Concise message extraction from Odoo RPC faults (#252)."""
+
+    def test_dict_fault_message(self) -> None:
+        """A fault dict in args[0] yields its 'message'."""
+        err = Exception({"code": 200, "message": "Object x.y doesn't exist"})
+        assert preflight._extract_odoo_error_message(err) == "Object x.y doesn't exist"
+
+    def test_stringified_fault_message(self) -> None:
+        """A stringified fault dict has its message pulled out."""
+        err = Exception(
+            "{'code': 200, 'message': \"Object product.attribute.line doesn't exist\"}"
+        )
+        assert (
+            preflight._extract_odoo_error_message(err)
+            == "Object product.attribute.line doesn't exist"
+        )
+
+    def test_plain_error_falls_back_to_first_line(self) -> None:
+        """A plain error returns its first line."""
+        err = Exception("Something broke\nsecond line\nthird")
+        assert preflight._extract_odoo_error_message(err) == "Something broke"
+
+
+class TestGetOdooFieldsModelNotFound:
+    """A non-existent model shows a friendly 'Model Not Found' panel (#252)."""
+
+    @patch("fluvo.lib.preflight._show_error_panel")
+    @patch("fluvo.lib.preflight.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.preflight.cache.load_fields_get_cache", return_value=None)
+    def test_model_not_found_panel(
+        self,
+        _mock_cache: MagicMock,
+        mock_conn: MagicMock,
+        mock_panel: MagicMock,
+    ) -> None:
+        """A model-not-found fault shows the friendly panel, not a traceback."""
+        conn = MagicMock()
+        model_obj = MagicMock()
+        model_obj.fields_get.side_effect = Exception(
+            "{'message': \"Object product.attribute.line doesn't exist\"}"
+        )
+        conn.get_model.return_value = model_obj
+        mock_conn.return_value = conn
+
+        result = preflight._get_odoo_fields("conn.conf", "product.attribute.line")
+
+        assert result is None
+        title, body = mock_panel.call_args[0][0], mock_panel.call_args[0][1]
+        assert title == "Model Not Found"
+        assert "product.attribute.line" in body
+        # The raw server traceback must NOT be dumped into the panel.
+        assert "Traceback" not in body
+
+    @patch("fluvo.lib.preflight._show_error_panel")
+    @patch("fluvo.lib.preflight.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.preflight.cache.load_fields_get_cache", return_value=None)
+    def test_other_error_uses_connection_panel(
+        self,
+        _mock_cache: MagicMock,
+        mock_conn: MagicMock,
+        mock_panel: MagicMock,
+    ) -> None:
+        """A non-model error still uses the generic connection-error panel."""
+        conn = MagicMock()
+        model_obj = MagicMock()
+        model_obj.fields_get.side_effect = Exception("connection reset by peer")
+        conn.get_model.return_value = model_obj
+        mock_conn.return_value = conn
+
+        result = preflight._get_odoo_fields("conn.conf", "res.partner")
+
+        assert result is None
+        assert mock_panel.call_args[0][0] == "Odoo Connection Error"

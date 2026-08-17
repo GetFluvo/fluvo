@@ -5,6 +5,7 @@ systemic errors early (e.g., missing languages, incorrect configuration).
 """
 
 import csv
+import re
 from typing import Any, Callable, Optional, Union, cast
 
 import polars as pl
@@ -492,6 +493,40 @@ def language_check(
     return _handle_missing_languages(config, missing_languages, headless)
 
 
+def _extract_odoo_error_message(error: Exception) -> str:
+    """Pull the human-readable message out of an Odoo RPC error.
+
+    Odoo RPC faults arrive as a deeply-nested structure whose ``str()`` is a full
+    server-side traceback — useless to show a user in a panel. The one useful line
+    is the fault's ``message``. Return that when it can be found, otherwise a
+    trimmed first line.
+
+    Args:
+        error: The exception raised by the RPC call.
+
+    Returns:
+        str: A concise, human-readable error message.
+    """
+    # odoo-client-lib faults often carry the fault dict as the first arg.
+    candidates = [error.args[0] if error.args else None, error]
+    for candidate in candidates:
+        if isinstance(candidate, dict):
+            msg = candidate.get("message")
+            if isinstance(msg, str) and msg.strip():
+                return msg.strip()
+
+    text = str(error)
+    # Fall back: pull "'message': '...'" out of a stringified fault dict.
+    match = re.search(r"'message':\s*\"([^\"]+)\"", text) or re.search(
+        r"'message':\s*'([^']+)'", text
+    )
+    if match:
+        return match.group(1)
+
+    first_line = text.strip().splitlines()[0] if text.strip() else text
+    return first_line[:300]
+
+
 def _get_odoo_fields(
     config: Union[str, dict[str, Any]], model: str
 ) -> Optional[dict[str, Any]]:
@@ -526,10 +561,21 @@ def _get_odoo_fields(
             cache.save_fields_get_cache(config, model, odoo_fields)
         return odoo_fields
     except Exception as e:
-        _show_error_panel(
-            "Odoo Connection Error",
-            f"Could not connect to Odoo to get model fields. Error: {e}",
-        )
+        msg = _extract_odoo_error_message(e)
+        if "doesn't exist" in msg or "does not exist" in msg:
+            _show_error_panel(
+                "Model Not Found",
+                f"The model '[bold]{model}[/bold]' does not exist on this Odoo "
+                f"database.\n\n{msg}\n\n"
+                "Check the model name, and that the module providing it is "
+                "installed.",
+            )
+        else:
+            _show_error_panel(
+                "Odoo Connection Error",
+                f"Could not get fields for model '[bold]{model}[/bold]'.\n\n"
+                f"Error: {msg}",
+            )
         return None
 
 
