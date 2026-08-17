@@ -31,8 +31,15 @@ def run_update_module_list(config: str) -> bool:
         # This call triggers the server-side scan of the addons path.
         module_obj.update_list()
 
-        # IMPORTANT: Clear the model's cache to ensure we get fresh data.
-        module_obj.clear_caches()
+        # Best-effort cache clear. `clear_caches()` was removed from the ORM's RPC
+        # surface in Odoo 19 (it 404s / NotFound), and it is unnecessary anyway:
+        # update_list() commits server-side and the search_count() below is a fresh
+        # read that already reflects the new state. Guard it so older Odoo still gets
+        # the hint while Odoo 19+ no longer breaks the whole workflow (#236).
+        try:
+            module_obj.clear_caches()
+        except Exception as e:  # pragma: no cover - version-dependent, non-fatal
+            log.debug(f"clear_caches() unavailable (expected on Odoo 19+): {e}")
 
         # Perform a search to ensure the client syncs with the server state.
         # This acts as a "wait" signal.
@@ -74,6 +81,12 @@ def run_module_installation(
         return
 
     found_modules = module_obj.read(module_ids, ["name", "state"])
+    # Normalise the read() shape: some connectors (seen on Odoo 19 / json2) return a
+    # single dict rather than a list of dicts, which made the comprehensions below
+    # iterate dict keys (strings) and raise "string indices must be integers" (#236).
+    if isinstance(found_modules, dict):
+        found_modules = [found_modules]
+    found_modules = [m for m in found_modules if isinstance(m, dict)]
     log.info(f"Found modules: {found_modules}")
 
     modules_to_install = [m["id"] for m in found_modules if m["state"] == "uninstalled"]
