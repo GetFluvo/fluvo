@@ -397,6 +397,44 @@ The choice of mappers can impact performance.
 
 ---
 
+## Controlling Polars Threads (`POLARS_MAX_THREADS`)
+
+Fluvo's transform phase is **Polars-backed**, and Polars runs on its own thread
+pool. By default Polars sizes that pool to **every core it can see** and reads the
+setting **once, when it is first imported** — so it can only be tuned through the
+`POLARS_MAX_THREADS` environment variable, set *before* `fluvo` runs.
+
+Fluvo deliberately **does not set this for you**. Silently grabbing every core is
+rude on a shared migration box or CI runner, and an explicit knob is better than a
+surprise — so the default is left to Polars and the decision to you.
+
+When to set it:
+
+- **Dedicated box, big transforms** — let Polars use every core:
+
+  ```bash
+  export POLARS_MAX_THREADS=$(nproc)
+  fluvo import --connection-file conf/prod.conf --file data/products.csv --model product.product
+  ```
+
+- **Shared machine / CI, or running several fluvo jobs at once** — cap it so one
+  transform doesn't starve everything else:
+
+  ```bash
+  export POLARS_MAX_THREADS=4
+  ```
+
+- **Transform-light, import-heavy runs** — the wall-clock is dominated by Odoo's
+  ORM (see below) and the import's `--worker` connections, not Polars. A large
+  Polars pool competing with many import workers for CPU can even hurt; a modest
+  cap (e.g. 4) is usually fine.
+
+Put the `export` line at the top of the shell script that drives your migration
+(next to your `fluvo import` / `fluvo export` commands), so every run makes the
+choice explicitly and reproducibly.
+
+---
+
 ## Minimizing Odoo's ORM Work
 
 For most imports the wall-clock time is dominated by what **Odoo's ORM does on the
