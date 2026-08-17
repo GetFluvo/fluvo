@@ -1891,24 +1891,34 @@ def test_update_move_dates_exception(mock_get_conn: MagicMock) -> None:
 # --- run_project_flow Tests ---
 
 
-@patch("fluvo.__main__.log")
-def test_run_project_flow_with_name(mock_log: MagicMock) -> None:
-    """It logs the specific flow being executed when a name is given."""
+def test_run_project_flow_not_implemented_raises() -> None:
+    """The unimplemented flow runner aborts non-zero instead of silently succeeding.
+
+    Interim behaviour for #251: `--flow-file` must never exit 0 having done
+    nothing (the worst failure mode for a migration tool). run_project_flow raises
+    SystemExit with a non-zero code until the real runner lands.
+    """
     from fluvo.__main__ import run_project_flow
 
-    run_project_flow("flows.yml", "my_flow")
-    messages = [c.args[0] for c in mock_log.info.call_args_list]
-    assert any("my_flow" in m for m in messages)
+    for name in ("my_flow", None):
+        with pytest.raises(SystemExit) as exc_info:
+            run_project_flow("flows.yml", name)
+        assert exc_info.value.code != 0
 
 
-@patch("fluvo.__main__.log")
-def test_run_project_flow_all(mock_log: MagicMock) -> None:
-    """It logs that all flows will run when no name is given."""
-    from fluvo.__main__ import run_project_flow
+def test_flow_file_flag_exits_nonzero(runner: CliRunner) -> None:
+    """`fluvo --flow-file <existing>` exits non-zero (not a silent success) (#251).
 
-    run_project_flow("flows.yml", None)
-    messages = [c.args[0] for c in mock_log.info.call_args_list]
-    assert any("all flows" in m for m in messages)
+    The exit code is the contract that matters: a validated-but-unrun flow file
+    must not look like success. (The error text goes to a Rich stderr panel, which
+    wraps under CI's 80-col width, so we don't assert on its wording here — the
+    unit test above pins the message path.)
+    """
+    with runner.isolated_filesystem():
+        with open("flows.yml", "w") as f:
+            f.write("version: 1\n")
+        result = runner.invoke(__main__.cli, ["--flow-file", "flows.yml"])
+        assert result.exit_code != 0
 
 
 # --- Import command: protocol, context, company XML-id resolution ---
