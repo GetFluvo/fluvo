@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest a capability or improvement for fluvo.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What migration/ETL situation is painful today? Be concrete.
+      placeholder: "When migrating <X> from <legacy system>, I have to ..."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should fluvo do? A CLI flag, a mapper, a connector, a new check?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Where does this live? (Connectors are the intended community-contribution surface.)
+      options:
+        - Connector (new/changed source or target)
+        - Import/export engine
+        - CLI / UX
+        - Mapper / transform library
+        - Docs
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
