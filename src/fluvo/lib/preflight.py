@@ -98,6 +98,232 @@ def connection_check(
         return False
 
 
+def _preflight_connection(config: Union[str, dict[str, Any]]) -> Any:
+    """Open an Odoo connection from a config path or dict.
+
+    Args:
+        config: Connection config path or dict.
+
+    Returns:
+        Any: An Odoo connection object.
+    """
+    if isinstance(config, dict):
+        return conf_lib.get_connection_from_dict(config)
+    return conf_lib.get_connection_from_config(config_file=config)
+
+
+def _model_is_company_aware(header: list[str], odoo_fields: dict[str, Any]) -> bool:
+    """True if the model has a ``company_id`` field or any company-dependent column.
+
+    Args:
+        header: The source CSV header.
+        odoo_fields: ``fields_get`` metadata for the target model.
+
+    Returns:
+        bool: Whether this import can land records under a specific company.
+    """
+    if "company_id" in odoo_fields:
+        return True
+    return any(
+        odoo_fields.get(col.split("/")[0], {}).get("company_dependent", False)
+        for col in header
+    )
+
+
+def _count_data_rows(filename: str, separator: str, encoding: str) -> int:
+    """Count data rows (excluding the header) in a CSV, quote-aware.
+
+    Args:
+        filename: Path to the CSV.
+        separator: Field delimiter.
+        encoding: File encoding.
+
+    Returns:
+        int: The number of data rows, or 0 if the file cannot be read. Best-effort;
+            it only feeds a human-readable warning.
+    """
+    try:
+        with open(filename, encoding=encoding, newline="") as f:
+            reader = csv.reader(f, delimiter=separator)
+            next(reader, None)  # header
+            return sum(1 for _ in reader)
+    except Exception:  # pragma: no cover - counting is best-effort for the message
+        return 0
+
+
+def _fmt_company(company_id: int, names: dict[int, Optional[str]]) -> str:
+    """Format a company as ``id "Name"`` (or just the id if the name is unknown).
+
+    Args:
+        company_id: The company database id.
+        names: Mapping of company id to display name.
+
+    Returns:
+        str: The formatted company label.
+    """
+    name = names.get(company_id)
+    return f'{company_id} "{name}"' if name else str(company_id)
+
+
+def _resolve_company_names(
+    config: Union[str, dict[str, Any]], ids: list[int]
+) -> dict[int, Optional[str]]:
+    """Resolve ``res.company`` display names for the given ids (best-effort).
+
+    Args:
+        config: Connection config path or dict.
+        ids: Company database ids to resolve.
+
+    Returns:
+        dict[int, Optional[str]]: Mapping of company id to name (empty on failure).
+    """
+    try:
+        conn = _preflight_connection(config)
+        recs = conn.get_model("res.company").read(list(ids), ["name"])
+        if isinstance(recs, dict):
+            recs = [recs]
+        return {int(r["id"]): r.get("name") for r in recs}
+    except Exception as e:  # pragma: no cover - names only enrich the message
+        log.debug(f"Could not resolve company names: {e}")
+        return {}
+
+
+def _resolve_default_company(
+    config: Union[str, dict[str, Any]],
+) -> tuple[Optional[int], Optional[str]]:
+    """Resolve the connecting user's default company as ``(id, name)``.
+
+    Args:
+        config: Connection config path or dict.
+
+    Returns:
+        tuple[Optional[int], Optional[str]]: The default company id and display
+            name, or ``(None, None)`` if it can't be resolved.
+    """
+    try:
+        conn = _preflight_connection(config)
+        data = conn.get_model("res.users").read(conn.user_id, ["company_id"])
+        rec = data[0] if isinstance(data, list) else data
+        company = rec.get("company_id")
+        if isinstance(company, (list, tuple)) and company:
+            name = str(company[1]) if len(company) > 1 else None
+            return int(company[0]), name
+        if isinstance(company, int):
+            return company, None
+    except Exception as e:  # pragma: no cover - resolution is best-effort
+        log.debug(f"Could not resolve default company: {e}")
+    return None, None
+
+
+@register_check
+def company_context_check(
+    preflight_mode: "PreflightMode",
+    model: str,
+    filename: str,
+    config: Union[str, dict[str, Any]],
+    import_plan: dict[str, Any],
+    **kwargs: Any,
+) -> bool:
+    """Guard against silently importing into the wrong company (#255).
+
+    Running an import without choosing a company is the single most damaging
+    silent failure in the tool: every record lands under the connecting user's
+    default company, the import succeeds, reconciliation passes, and the data is
+    wrong in a way that is expensive to unpick. This check makes the company an
+    explicit, on-the-record decision for any model that has a ``company_id`` field
+    or company-dependent columns.
+
+    Behaviour when the target is company-specific:
+
+    - a company was chosen (``--company-id`` / ``--all-companies`` set
+      ``allowed_company_ids``): record it in the run summary and continue;
+    - no company chosen: warn loudly, naming the default company (id + name) that
+      *will* be used and the record count, and record it in the summary;
+    - no company chosen and ``--require-company`` set: abort with a clear error.
+
+    Args:
+        preflight_mode: The current pre-flight mode.
+        model: The target Odoo model.
+        filename: Path to the source CSV.
+        config: Connection config path or dict.
+        import_plan: Shared plan; the resolved company is stored under
+            ``company_context`` so the importer can echo it in the summary.
+        **kwargs: separator, encoding, context, require_company.
+
+    Returns:
+        bool: ``False`` only when ``--require-company`` is set and no company was
+        chosen (abort); ``True`` otherwise.
+    """
+    separator = kwargs.get("separator", ";")
+    encoding = kwargs.get("encoding", "utf-8")
+    context = kwargs.get("context") or {}
+    require_company = kwargs.get("require_company", False)
+
+    header = _get_csv_header(filename, separator)
+    if not header:
+        return True  # header problems are reported by other checks
+    odoo_fields = _get_odoo_fields(config, model)
+    if not odoo_fields:
+        return True  # connection / field errors are reported by other checks
+
+    if not _model_is_company_aware(header, odoo_fields):
+        return True
+
+    company_explicit = bool(context.get("allowed_company_ids"))
+
+    # Hard stop first — this decision needs no RPC.
+    if require_company and not company_explicit:
+        _show_error_panel(
+            "Company required",
+            f"Model '{model}' is company-specific, but no [bold]--company-id[/bold] "
+            "or [bold]--all-companies[/bold] was given and [bold]--require-company"
+            "[/bold] is set.\n\n"
+            "Re-run naming the target company, e.g. [bold cyan]--company-id 1"
+            "[/bold cyan] (a database id or an XML id like 'base.main_company').",
+        )
+        return False
+
+    n_rows = _count_data_rows(filename, separator, encoding)
+
+    if company_explicit:
+        ids = [int(i) for i in context["allowed_company_ids"]]
+        names = _resolve_company_names(config, ids)
+        shown = ", ".join(_fmt_company(i, names) for i in ids)
+        label = "Company" if len(ids) == 1 else "Companies"
+        line = f"{label}: {shown} (explicit)"
+        log.info(f"{line}; {n_rows} record(s).")
+        import_plan["company_context"] = {"line": line, "explicit": True}
+        return True
+
+    # No company chosen: resolve the default that WILL be used, and warn.
+    default_id, default_name = _resolve_default_company(config)
+    if default_id is not None:
+        who = (
+            f'company {default_id} "{default_name}"'
+            if default_name
+            else f"company {default_id}"
+        )
+    else:
+        who = "the connecting user's default company"
+    import_plan["company_context"] = {
+        "line": f"Company: {who} (default — no --company-id given)",
+        "explicit": False,
+    }
+    _show_warning_panel(
+        "No company specified",
+        f"'{model}' is company-specific and no [bold]--company-id[/bold] / "
+        "[bold]--all-companies[/bold] was given.\n\n"
+        f"[bold red]{n_rows} record(s) will be created under {who}.[/bold red]\n\n"
+        "If that is not what you intend, re-run with "
+        "[bold cyan]--company-id <id>[/bold cyan]. In automation, pass "
+        "[bold]--require-company[/bold] to turn this into a hard error.",
+    )
+    log.warning(
+        f"No --company-id given; {n_rows} record(s) will be created under {who}."
+    )
+    return True
+
+
 @register_check
 def self_referencing_check(
     preflight_mode: "PreflightMode",

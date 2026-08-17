@@ -1126,6 +1126,14 @@ def vat_validate_cmd(
     "importing records that reference data across multiple companies.",
 )
 @click.option(
+    "--require-company",
+    is_flag=True,
+    default=False,
+    help="For company-specific models, abort (non-zero exit) unless --company-id "
+    "or --all-companies is given, instead of silently importing under the "
+    "connecting user's default company. Recommended in automation.",
+)
+@click.option(
     "--o2m",
     is_flag=True,
     default=False,
