@@ -392,12 +392,35 @@ def _update_inventory_move_dates(
 
 
 def run_project_flow(flow_file: str, flow_name: Optional[str]) -> None:
-    """Placeholder for running a project flow."""
-    log.info(f"Running project flow from '{flow_file}'")
-    if flow_name:
-        log.info(f"Executing specific flow: '{flow_name}'")
-    else:
-        log.info("Executing all flows defined in the file.")
+    """Abort: the declarative flow runner is not implemented yet (see #251).
+
+    ``--flow-file`` is still advertised on the CLI, but the runner that would
+    execute a ``flows.yml`` does not exist. The previous placeholder validated the
+    file, printed two log lines, and returned normally — a run that exits 0 having
+    done nothing, which is the worst failure mode for a migration tool and
+    contradicts the reconciliation-first contract. Until the real runner lands,
+    fail loudly with a non-zero exit so automation never mistakes it for success.
+
+    Args:
+        flow_file: Path to the flow file the user asked to run (reported, not run).
+        flow_name: Specific flow name from ``--run``, if any (reported, not run).
+
+    Raises:
+        SystemExit: always, with code 1 — the flow runner is not implemented.
+    """
+    from .lib.internal.ui import _show_error_panel
+
+    target = f"flow '{flow_name}' from {flow_file}" if flow_name else flow_file
+    _show_error_panel(
+        "Flow runner not implemented",
+        f"Cannot run {target}: the declarative flow runner (flows.yml) is not "
+        "implemented yet, so [bold]nothing was executed[/bold].\n\n"
+        "Run your steps individually for now with [bold]fluvo import[/bold], "
+        "[bold]export[/bold], [bold]write[/bold], or [bold]migrate[/bold].\n\n"
+        "Track the flow runner at "
+        "https://github.com/GetFluvo/fluvo/issues/251.",
+    )
+    raise SystemExit(1)
 
 
 @click.group(
