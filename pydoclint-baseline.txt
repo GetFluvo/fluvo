@@ -21,7 +21,7 @@ src/fluvo/exporter.py
     DOC101: Function `run_export`: Docstring contains fewer arguments than in function signature.
     DOC103: Function `run_export`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [batch_size: int, config: Union[str, dict[str, Any]], context: Union[str, dict[str, Any]], domain: str, encoding: str, fields: str, model: str, output: Optional[str], resume_session: Optional[str], separator: str, streaming: bool, technical_names: bool, worker: int].
     DOC501: Function `run_export` has raise statements, but the docstring does not have a "Raises" section
-    DOC503: Function `run_export` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: []. Raised exceptions in the body: ['TypeError'].
+    DOC503: Function `run_export` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: []. Raised exceptions in the body: ['SystemExit', 'TypeError'].
 --------------------
 src/fluvo/import_threaded.py
     DOC203: Function `_extract_per_row_errors` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['dict[int, str]']; docstring return section types: ['']

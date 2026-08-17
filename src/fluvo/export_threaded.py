@@ -27,6 +27,7 @@ from .lib import cache, conf_lib
 from .lib.clean_expr import sanitize_newlines as sanitize_newlines_expr
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch
+from .lib.internal.ui import _show_error_panel
 from .lib.odoo_lib import ODOO_TO_POLARS_MAP
 from .logging_config import log, suppress_console_handler
 
@@ -366,16 +367,17 @@ def _initialize_export(  # noqa: C901
         )
         field_metadata = model_obj.fields_get(fields_for_metadata)
         fields_info = {}
+        missing_fields: list[str] = []
         for original_field in header:
             base_field = original_field.split("/")[0]
             meta = field_metadata.get(base_field)
 
             if not meta and original_field != ".id":
-                log.warning(
-                    f"Field '{original_field}' (base: '{base_field}') not found"
-                    f" on model '{model_name}'. "
-                    f"An empty column will be created."
-                )
+                # Fail fast (#253): previously this warned and created an empty
+                # column, which then crashed deep in the batch transform ("cannot
+                # cast List type ... to String") after fetching every record. Collect
+                # the bad fields and abort cleanly below, before any records are read.
+                missing_fields.append(original_field)
 
             field_type = "char"
             if meta:
@@ -397,6 +399,20 @@ def _initialize_export(  # noqa: C901
             # Store the original relation type for proper handling in enrichment
             if meta and meta.get("type") in ("many2one", "many2many", "one2many"):
                 fields_info[original_field]["relation_type"] = meta["type"]
+        if missing_fields:
+            _show_error_panel(
+                "Fields Not Found",
+                f"These fields do not exist on model '{model_name}':\n"
+                + "\n".join(f"  - {f}" for f in missing_fields)
+                + "\n\nExport aborted — nothing was written. Fix the field list "
+                "(check the names, and that the module providing them is installed), "
+                "then re-run.",
+            )
+            log.error(
+                f"Export aborted: fields not found on '{model_name}': {missing_fields}"
+            )
+            return None, None, None
+
         log.debug(f"Successfully initialized metadata. Fields info: {fields_info}")
         return connection, model_obj, fields_info
     except Exception as e:

@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import polars as pl
+import pytest
 from polars.testing import assert_frame_equal
 
 from fluvo.exporter import (
@@ -228,14 +229,20 @@ def test_show_success_panel(mock_console: MagicMock) -> None:
 def test_run_export_failure(
     mock_show_error_panel: MagicMock, mock_export_data: MagicMock
 ) -> None:
-    """Tests the main `run_export` function in a failure scenario."""
+    """Tests the main `run_export` function in a failure scenario.
+
+    A failed export renders the error panel (with the resume hint) and exits
+    non-zero, so automation doesn't mistake it for success (#253).
+    """
     mock_export_data.return_value = (False, "session-failed", 0, None)
-    run_export(
-        config="dummy.conf",
-        model="res.partner",
-        fields="id,name",
-        output="partners.csv",
-    )
+    with pytest.raises(SystemExit) as exc_info:
+        run_export(
+            config="dummy.conf",
+            model="res.partner",
+            fields="id,name",
+            output="partners.csv",
+        )
+    assert exc_info.value.code != 0
     mock_show_error_panel.assert_called_once()
     assert "Export Failed" in mock_show_error_panel.call_args.args[0]
     assert "session-failed" in mock_show_error_panel.call_args.args[1]
