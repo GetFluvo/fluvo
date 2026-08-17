@@ -35,18 +35,25 @@ permissions:
 jobs:
   cla:
     runs-on: ubuntu-latest
+    # The action can't persist a signature without a PAT (it needs to create/commit
+    # to the cla-signatures branch), and it hard-errors when the PAT is absent —
+    # which would red-X every PR before the one-time setup is done. Until the
+    # PERSONAL_ACCESS_TOKEN secret exists, skip the job cleanly so it doesn't block
+    # or alarm; the moment the secret is added, enforcement turns on automatically.
+    env:
+      HAS_PAT: ${{ secrets.PERSONAL_ACCESS_TOKEN != '' }}
     steps:
       - name: CLA Assistant
         if: >-
-          (github.event.comment.body == 'recheck'
+          env.HAS_PAT == 'true'
+          && ((github.event.comment.body == 'recheck'
             || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA')
-          || github.event_name == 'pull_request_target'
+          || github.event_name == 'pull_request_target')
         uses: contributor-assistant/github-action@v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Commits the signature file to the cla-signatures branch. Falls back to
-          # GITHUB_TOKEN if the PAT secret is not configured yet (the action still
-          # comments and sets the status, but cannot persist a signature).
+          # Persists the signature to the cla-signatures branch. Required — the job
+          # is skipped (above) until this secret is set.
           PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         with:
           path-to-signatures: signatures/version1/cla.json
