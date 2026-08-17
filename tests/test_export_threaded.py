@@ -41,14 +41,18 @@ def mock_conf_lib() -> Generator[MagicMock, None, None]:
 class TestInitializeExport:
     """Tests for the _initialize_export helper function."""
 
+    @patch("fluvo.export_threaded._show_error_panel")
     @patch("fluvo.export_threaded.log")
-    def test_initialize_export_warns_for_non_existent_field(
-        self, mock_log: MagicMock, mock_conf_lib: MagicMock
+    def test_initialize_export_aborts_for_non_existent_field(
+        self,
+        mock_log: MagicMock,
+        mock_panel: MagicMock,
+        mock_conf_lib: MagicMock,
     ) -> None:
-        """Non exsisting field test.
+        """A non-existent field aborts the export cleanly, naming it (#253).
 
-        Tests that a warning is logged for a field that does not exist
-        on the model.
+        Previously it warned and created an empty column, which then crashed deep
+        in the batch transform after reading every record. Now it fails fast.
         """
         # --- Arrange ---
         header = ["name", "non_existent_field"]
@@ -59,7 +63,7 @@ class TestInitializeExport:
         }
 
         # --- Act ---
-        _initialize_export(
+        result = _initialize_export(
             config="dummy.conf",
             model_name="res.partner",
             header=header,
@@ -67,12 +71,11 @@ class TestInitializeExport:
         )
 
         # --- Assert ---
-        mock_log.warning.assert_called_once()
-        call_args, _ = mock_log.warning.call_args
-        assert (
-            "Field 'non_existent_field' (base: 'non_existent_field') not found"
-            in call_args[0]
-        )
+        assert result == (None, None, None)
+        mock_panel.assert_called_once()
+        assert mock_panel.call_args[0][0] == "Fields Not Found"
+        assert "non_existent_field" in mock_panel.call_args[0][1]
+        mock_log.warning.assert_not_called()
 
     @patch("fluvo.export_threaded.log")
     def test_initialize_export_does_not_warn_for_valid_and_special_fields(

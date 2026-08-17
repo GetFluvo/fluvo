@@ -144,6 +144,10 @@ def run_export(  # noqa: D417
             "Export Failed",
             error_message,
         )
+        # A failed export must not report success to automation (#253): the panel
+        # above is rendered, and we exit non-zero. This covers the fail-fast abort
+        # on non-existent fields, which would otherwise return quietly.
+        raise SystemExit(1)
 
 
 def run_export_for_migration(
