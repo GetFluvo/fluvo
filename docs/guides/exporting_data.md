@@ -46,6 +46,10 @@ The tool will automatically use the high-performance **`read` method** if any of
 
 Otherwise, it defaults to the human-readable `export_data` method.
 
+```{note}
+Both export methods honour the `--context` you pass — including `lang` for translated fields. (Earlier versions ignored the context on the `read` path, so a `--context "{'lang': 'nl_NL'}"` combined with `.id`/`field/.id` or a technical field silently returned default-language values; that path now respects it.)
+```
+
 
 ### High-Performance, Streaming Exports
 
@@ -69,6 +73,7 @@ The `export` command is built for scalability. To handle massive datasets, it us
 | `--size` | The number of records to fetch in a single batch. Defaults to `1000`. |
 | `--sep` | The character separating columns. Defaults to a semicolon (`;`). |
 | `--technical-names` | A flag to force the use of the high-performance raw export mode. Often enabled automatically. |
+| `--languages` | Comma-separated language codes (e.g. `nl_NL,fr_FR`) to export translations for as `field@lang` columns. See [Exporting translations](#exporting-translations-fieldlang). |
 | `--streaming` | A flag to enable streaming mode for very large datasets. Slower but uses minimal memory. |
 | `--resume-session` | The ID of a failed export session to resume. The tool will append records to the existing output file. |
 
@@ -151,6 +156,36 @@ It now has special syntax for handling different ID formats, making it powerful 
 | `field/.id` | `read` | The related record's database ID (integer) | `5` |
 
 The tool is smart: if you use `.id` or `field/.id`, it automatically switches to a high-performance "raw" export mode (using Odoo's `read` method). Otherwise, it defaults to a human-readable mode (using `export_data`).
+
+### Exporting translations (`field@lang`)
+
+Export the translations of translatable fields as extra `field@lang` columns — the exact same wide convention the [importer](importing_data.md) reads, so `export → import` is a lossless round-trip.
+
+Two ways to request them, and they compose:
+
+- **Explicit columns**: list `field@lang` tokens in `--fields`, e.g. `--fields "id,name,name@nl_NL,name@fr_FR"`.
+- **`--languages` flag**: `--languages nl_NL,fr_FR` auto-expands *every* translatable field in `--fields` into one `field@lang` column per language. So `--fields "id,name,description" --languages nl_NL,fr_FR` emits `name@nl_NL`, `name@fr_FR`, `description@nl_NL`, `description@fr_FR` alongside the base columns.
+
+```bash
+fluvo export --connection-file conn.conf --model res.partner.category \
+  --fields "id,name" --languages "nl_NL,fr_FR" --output categories.csv
+```
+
+produces:
+
+```csv
+id,name,name@nl_NL,name@fr_FR
+__export__.tag_1,Customer,Klant,Client
+__export__.tag_2,Vendor,Leverancier,Fournisseur
+```
+
+How it works and what to expect:
+
+* The base (untranslated) columns are exported once; each language is then read in its own pass and stitched onto the same records. The records are selected **once** and the language passes are aligned by database id, so a `--domain` that filters a translated field still exports a consistent record set.
+* It validates up front (like the importer): each base field must be translatable and each language must be installed — an unknown language or a non-translatable field aborts the export before writing anything.
+* `--fields` must include an `id` (or `.id`) column: it is the join/re-import key. The export refuses without one.
+* `--streaming` and `--resume-session` are not supported together with translations (the per-language columns are merged in memory before writing).
+* **Round-trip caveat:** the round-trip is lossless only for records that have an external ID. Records without one export with an empty `id` (Odoo assigns none), and re-importing such a row **creates** a new record instead of updating the original — this is standard export/import behaviour, not specific to translations. Export `.id` (or ensure external IDs exist) if you need updates.
 
 ## Full Export Example
 

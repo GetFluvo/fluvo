@@ -148,3 +148,77 @@ def test_translation_benchmark_reports_ratio(
     # Soft guard: multi-language must stay within a generous bound of single-pass;
     # a real regression (e.g. per-row instead of per-language passes) would blow past.
     assert multi_secs <= base_secs * (n_langs + 1.0) + 5.0
+
+
+def test_export_emits_field_at_lang_and_round_trips(
+    conn_config: dict[str, Any],
+    rpc: Any,
+    tmp_path: Any,
+    translated_languages: list[str],
+) -> None:
+    """Export produces field@lang columns that re-import into the right languages.
+
+    Seeds translated categories, exports them with --languages, checks the file's
+    per-language columns match the DB truth, then re-imports the exported file into
+    fresh records and confirms each language landed — a full export->import loop on
+    the same column convention (#282).
+    """
+    import polars as pl
+
+    from fluvo import exporter
+
+    langs = translated_languages
+    prefix = "rt_seed"
+    n = 4
+    rows, header = _rows(n, prefix, langs)
+    seed_csv = G.write_csv(str(tmp_path / "seed.csv"), header, rows)
+    seed_map = A.run_full_import(conn_config, MODEL, seed_csv)
+    assert seed_map is not None and len(seed_map) == n
+
+    # Export just the seeded records, requesting all languages via --languages.
+    out = str(tmp_path / "exported.csv")
+    exporter.run_export(
+        config=conn_config,
+        model=MODEL,
+        fields="id,name",
+        output=out,
+        domain=str([["name", "like", f"{prefix} EN %"]]),
+        languages=",".join(langs),
+        separator=",",
+        context={},
+    )
+
+    df = pl.read_csv(out, separator=",")
+    for lang in langs:
+        assert f"name@{lang}" in df.columns, f"export missing name@{lang}"
+    assert df.height == n
+    # File values match what each record actually holds per language.
+    by_xmlid = {r["id"]: r for r in df.to_dicts()}
+    for i in range(n):
+        db_id = seed_map[f"{prefix}_c{i}"]
+        # exported `id` is the external id (module-qualified); match on suffix.
+        rec = next(r for xid, r in by_xmlid.items() if xid.endswith(f"{prefix}_c{i}"))
+        assert rec["name"] == _name_in(rpc, db_id, "en_US")
+        for lang in langs:
+            assert rec[f"name@{lang}"] == f"{prefix} {lang} {i}"
+
+    # Re-import the exported file under fresh ids -> translations must survive.
+    df2 = df.with_columns(
+        pl.col("id").str.replace_all(r".*rt_seed_c", "rt_rr_c").alias("id"),
+        pl.col("name").str.replace_all("rt_seed", "rt_rr").alias("name"),
+    )
+    for lang in langs:
+        col = f"name@{lang}"
+        df2 = df2.with_columns(
+            pl.col(col).str.replace_all("rt_seed", "rt_rr").alias(col)
+        )
+    rr_csv = str(tmp_path / "roundtrip.csv")
+    df2.write_csv(rr_csv, separator=",")
+
+    rr_map = A.run_full_import(conn_config, MODEL, rr_csv)
+    assert rr_map is not None and len(rr_map) == n
+    for i in range(n):
+        db_id = rr_map[f"rt_rr_c{i}"]
+        assert _name_in(rpc, db_id, "en_US") == f"rt_rr EN {i}"
+        for lang in langs:
+            assert _name_in(rpc, db_id, lang) == f"rt_rr {lang} {i}"

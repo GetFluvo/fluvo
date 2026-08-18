@@ -2120,6 +2120,15 @@ def write_cmd(connection_file: str, **kwargs: Any) -> None:
     'Default: None (no sanitization). Recommended: " | " to prevent '
     "CSV corruption from embedded newlines in text/char/html fields.",
 )
+@click.option(
+    "--languages",
+    default=None,
+    help="Comma-separated language codes (e.g. 'nl_NL,fr_FR') to export "
+    "translations for. Every translatable field in --fields is emitted as an "
+    "extra 'field@lang' column per language, alongside explicit 'field@lang' "
+    "tokens. Requires an 'id' (or '.id') column in --fields. Round-trips with "
+    "'fluvo import' (#282).",
+)
 def export_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     """Runs the data export process."""
     # Handle protocol option - create config dict if protocol specified

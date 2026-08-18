@@ -278,10 +278,13 @@ class RPCThreadExport(RpcThread):
             # Ensure 'id' is always present for session tracking
             read_fields.add("id")
 
-            # Fetch the raw data using the read method
+            # Fetch the raw data using the read method. Pass the context so this
+            # path honours it too (e.g. 'lang' for translated fields, #282) — the
+            # export_data path above already does, and dropping it here silently
+            # returned default-language values for technical/hybrid exports.
             raw_data = cast(
                 list[dict[str, Any]],
-                self.model.read(ids_to_export, list(read_fields)),
+                self.model.read(ids_to_export, list(read_fields), context=self.context),
             )
             if not raw_data:
                 return [], []
