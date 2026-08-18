@@ -2,9 +2,10 @@
 
 import ast
 import os
+import shlex
 from importlib.metadata import version as get_version
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import click
 
@@ -26,6 +27,9 @@ from .lib.actions.vies_manager import (
     run_vies_validation,
 )
 from .lib.flow_runner import StepOutcome, StepResult
+
+if TYPE_CHECKING:
+    from .lib.flow import Flow, FlowFile
 from .lib.validation import display_validation_results, validate_csv_data
 from .logging_config import log, setup_logging
 from .migrator import run_migration
@@ -542,10 +546,64 @@ def _render_flow_summary(results: list[StepResult], aborted: bool) -> None:
     Console().print(Panel(body, title=title, border_style=border, expand=False))
 
 
+def _render_dry_run(flow_file: "FlowFile", flows: "list[Flow]") -> None:
+    """Print the fully-resolved plan without executing anything (--dry-run, #251).
+
+    Shows the resolved variables and, for each step, the exact command line that
+    *would* run — built from the same argv logic the executor uses, so the plan
+    can't drift from reality. Connections are shown as file paths only; no secret
+    is read or printed.
+
+    Args:
+        flow_file: The parsed flow file (for its resolved variables).
+        flows: The selected flows to describe.
+    """
+    from rich.console import Console
+    from rich.panel import Panel
+
+    lines: list[str] = []
+    if flow_file.vars:
+        lines.append("[bold]Variables (resolved):[/bold]")
+        for name, value in flow_file.vars.items():
+            lines.append(f"  {name} = {value}")
+        lines.append("")
+
+    for flow in flows:
+        lines.append(
+            f"[bold cyan]Flow: {flow.name}[/bold cyan]  (on_error: {flow.on_error})"
+        )
+        for step in flow.steps:
+            argv = _build_step_argv(
+                step.with_, _command_option_specs(cli.commands[step.run])
+            )
+            cmdline = "fluvo " + step.run
+            if argv:
+                cmdline += " " + " ".join(shlex.quote(arg) for arg in argv)
+            override = (
+                ""
+                if step.on_error == flow.on_error
+                else f"  (on_error: {step.on_error})"
+            )
+            lines.append(f"  [bold]{step.id}[/bold]{override}")
+            lines.append(f"    {cmdline}")
+        lines.append("")
+
+    body = "\n".join(lines).rstrip() or "(no steps)"
+    Console().print(
+        Panel(
+            body,
+            title="[bold]Flow plan — dry run (nothing executed)[/bold]",
+            border_style="blue",
+            expand=False,
+        )
+    )
+
+
 def run_project_flow(
     flow_file: str,
     flow_names: Optional[list[str]],
     cli_vars: dict[str, str],
+    dry_run: bool = False,
 ) -> None:
     """Parse, validate, and execute a ``flows.yml`` (#251).
 
@@ -553,6 +611,7 @@ def run_project_flow(
         flow_file: Path to the flow file.
         flow_names: Flow names to run (from ``--run``), or ``None`` for all.
         cli_vars: Variable overrides from ``--var``.
+        dry_run: When True, print the resolved plan and execute nothing.
 
     Raises:
         SystemExit: with code 1 if the file is invalid or any step failed.
@@ -573,6 +632,10 @@ def run_project_flow(
     except FlowError as exc:
         _show_error_panel("Invalid flow file", str(exc))
         raise SystemExit(1) from exc
+
+    if dry_run:
+        _render_dry_run(parsed, flows)
+        return
 
     log.info(
         f"Running {len(flows)} flow(s) from '{flow_file}': "
@@ -617,6 +680,13 @@ def run_project_flow(
     help="Override a flow variable (repeatable). Highest precedence: "
     "--var > env.* > the file's vars block.",
 )
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Print the fully-resolved flow plan (the exact command per step) and "
+    "exit without executing anything.",
+)
 @click.pass_context
 def cli(
     ctx: click.Context,
@@ -625,6 +695,7 @@ def cli(
     flow_file: Optional[str],
     flow_name: Optional[str],
     cli_vars: tuple[str, ...],
+    dry_run: bool,
 ) -> None:
     """Fluvo: A tool for importing, exporting, and processing data."""
     setup_logging(verbose, log_file)
@@ -661,7 +732,7 @@ def cli(
     flow_names = (
         [n.strip() for n in flow_name.split(",") if n.strip()] if flow_name else None
     )
-    run_project_flow(effective_flow_file, flow_names, parsed_vars)
+    run_project_flow(effective_flow_file, flow_names, parsed_vars, dry_run=dry_run)
 
 
 # --- Module Management Command Group ---

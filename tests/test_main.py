@@ -2058,6 +2058,43 @@ def test_render_flow_summary_lists_fail_files(
     assert "failed" in out.lower()
 
 
+_DRY_RUN_FLOW = """
+version: 1
+vars:
+  conn: default.conf
+flows:
+  - name: partners
+    steps:
+      - run: import
+        with:
+          connection_file: "{{ vars.conn }}"
+          model: res.partner
+"""
+
+
+@patch("fluvo.__main__._run_flow_step")
+def test_dry_run_prints_plan_without_executing(
+    mock_step: MagicMock, runner: CliRunner
+) -> None:
+    """--dry-run shows the resolved plan and runs nothing (#251)."""
+    with runner.isolated_filesystem():
+        with open("flows.yml", "w") as f:
+            f.write(_DRY_RUN_FLOW)
+        result = runner.invoke(
+            __main__.cli,
+            ["--flow-file", "flows.yml", "--dry-run", "--var", "conn=prod.conf"],
+        )
+        assert result.exit_code == 0
+        mock_step.assert_not_called()  # nothing executed
+        out = unstyle(result.output)
+        assert "dry run" in out.lower()
+        assert "partners" in out
+        assert "res.partner" in out
+        # The --var override is resolved into the shown command, not the file default.
+        assert "prod.conf" in out
+        assert "default.conf" not in out
+
+
 # --- Import command: protocol, context, company XML-id resolution ---
 
 
