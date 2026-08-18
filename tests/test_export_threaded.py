@@ -124,7 +124,9 @@ class TestRPCThreadExport:
             technical_names=True,
         )
         thread._execute_batch([1], 1)
-        mock_model.read.assert_called_once_with([1], ["id"])
+        # read() now receives the export context too, so 'lang' (and any other
+        # context) is honoured on the technical/read path (#282).
+        mock_model.read.assert_called_once_with([1], ["id"], context={})
 
     def test_execute_batch_export_data(self: "TestRPCThreadExport") -> None:
         """Tests that model.export_data is called when use read method is False."""
