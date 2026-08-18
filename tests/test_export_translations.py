@@ -211,6 +211,63 @@ def test_run_translation_export_scopes_languages_by_db_id(tmp_path: Any) -> None
     assert df.to_dicts()[0] == {"id": "a", "name": "EN", "name@nl_NL": "NL"}
 
 
+def test_languages_flag_with_no_translatable_field_errors(tmp_path: Any) -> None:
+    """--languages that expands to nothing fails loud, not a silent plain export."""
+    with (
+        patch("fluvo.exporter.preflight._get_odoo_fields", return_value=FIELDS),
+        patch(
+            "fluvo.exporter.preflight._get_installed_languages",
+            return_value={"nl_NL"},
+        ),
+        patch("fluvo.exporter.export_threaded.export_data") as mock_export,
+        pytest.raises(SystemExit),
+    ):
+        exporter.run_export(
+            config="c.conf",
+            model="m",
+            fields="id",  # no translatable field to expand
+            output=str(tmp_path / "o.csv"),
+            languages="nl_NL",
+            context={},
+        )
+    mock_export.assert_not_called()  # never falls through to a plain export
+
+
+def test_run_translation_export_empty_keeps_full_header(tmp_path: Any) -> None:
+    """When no records match, the output still carries the full field@lang header."""
+    empty = pl.DataFrame(schema={".id": pl.Int64, "id": pl.Utf8, "name": pl.Utf8})
+
+    def fake(**kwargs: Any) -> tuple[bool, str, int, pl.DataFrame]:
+        return True, "sid", 0, empty.select(kwargs["header"])
+
+    plan = {
+        "base_fields": ["id", "name"],
+        "translations": {"nl_NL": ["name"]},
+        "key": "id",
+        "output_columns": ["id", "name", "name@nl_NL"],
+    }
+    out = str(tmp_path / "empty.csv")
+    with patch("fluvo.exporter.export_threaded.export_data", side_effect=fake):
+        ok, count = exporter._run_translation_export(
+            config="c.conf",
+            model="m",
+            plan=plan,
+            domain=[],
+            output=out,
+            context={},
+            worker=1,
+            batch_size=10,
+            separator=",",
+            encoding="utf-8",
+            technical_names=False,
+            sanitize_newlines=None,
+        )
+    assert ok and count == 0
+    df = pl.read_csv(out, separator=",")
+    assert df.columns == ["id", "name", "name@nl_NL"]
+    assert df.height == 0
+
+
 def test_run_translation_export_aborts_if_a_language_pass_fails(tmp_path: Any) -> None:
     """If a language pass fails, abort so no partial file is written."""
     base = pl.DataFrame({".id": [1], "id": ["a"], "name": ["EN"]})

@@ -46,6 +46,10 @@ The tool will automatically use the high-performance **`read` method** if any of
 
 Otherwise, it defaults to the human-readable `export_data` method.
 
+```{note}
+Both export methods honour the `--context` you pass — including `lang` for translated fields. (Earlier versions ignored the context on the `read` path, so a `--context "{'lang': 'nl_NL'}"` combined with `.id`/`field/.id` or a technical field silently returned default-language values; that path now respects it.)
+```
+
 
 ### High-Performance, Streaming Exports
 
@@ -181,6 +185,7 @@ How it works and what to expect:
 * It validates up front (like the importer): each base field must be translatable and each language must be installed — an unknown language or a non-translatable field aborts the export before writing anything.
 * `--fields` must include an `id` (or `.id`) column: it is the join/re-import key. The export refuses without one.
 * `--streaming` and `--resume-session` are not supported together with translations (the per-language columns are merged in memory before writing).
+* **Round-trip caveat:** the round-trip is lossless only for records that have an external ID. Records without one export with an empty `id` (Odoo assigns none), and re-importing such a row **creates** a new record instead of updating the original — this is standard export/import behaviour, not specific to translations. Export `.id` (or ensure external IDs exist) if you need updates.
 
 ## Full Export Example
 

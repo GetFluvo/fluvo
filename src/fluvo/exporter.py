@@ -214,9 +214,11 @@ def _run_translation_export(
     if df_base is None:
         return False, 0
     if not df_base.height:
-        df_base.select(
-            [c for c in plan["output_columns"] if c in df_base.columns]
-        ).write_csv(output, separator=separator)
+        # No records matched: still emit the full requested header (including the
+        # field@lang columns) so the schema is stable for a downstream re-import.
+        pl.DataFrame(schema={c: pl.Utf8 for c in plan["output_columns"]}).write_csv(
+            output, separator=separator
+        )
         return True, 0
 
     db_ids = [int(v) for v in df_base.get_column(join_key).to_list()]
@@ -304,6 +306,18 @@ def run_export(  # noqa: C901, D417
         _show_error_panel("Invalid translation export", str(exc))
         raise SystemExit(1) from exc
 
+    # --languages was asked for but expanded to nothing (no translatable field in
+    # --fields): fail loud rather than silently exporting a plain file.
+    if translation_plan is None and languages and languages.strip():
+        _show_error_panel(
+            "Nothing to translate",
+            f"--languages '{languages}' was given, but none of the fields in "
+            "--fields are translatable, so there is nothing to expand. Add a "
+            "translatable field (or an explicit 'field@lang' column), or drop "
+            "--languages.",
+        )
+        raise SystemExit(1)
+
     if translation_plan is not None:
         if streaming:
             _show_error_panel(
@@ -350,11 +364,29 @@ def run_export(  # noqa: C901, D417
             )
             raise SystemExit(1)
         langs = ", ".join(sorted(translation_plan["translations"]))
-        _show_success_panel(
+        base_message = (
             f"Exported {count} records to [bold cyan]{output}[/bold cyan] "
-            f"with translations for [bold]{langs}[/bold].\n"
-            "[green]Record count verified.[/green]"
+            f"with translations for [bold]{langs}[/bold]."
         )
+        # Verify the file on disk actually holds `count` rows, like the plain path.
+        try:
+            actual = len(pl.read_csv(output, separator=separator))
+        except Exception as e:  # pragma: no cover - validation is best-effort
+            log.warning(f"Could not validate record count in {output}: {e}")
+            _show_success_panel(base_message)
+            return
+        if actual == count:
+            _show_success_panel(
+                f"{base_message}\n[green]Record count verified.[/green]"
+            )
+        else:
+            _show_error_panel(
+                "Count Validation Warning",
+                f"{base_message}\n\n[bold yellow]Warning:[/bold yellow] "
+                "Record count mismatch.\n"
+                f" - Expected: {count} records\n"
+                f" - Found:    {actual} records in the output file.",
+            )
         return
 
     success, session_id, record_count, _ = export_threaded.export_data(
