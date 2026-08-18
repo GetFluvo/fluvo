@@ -1617,6 +1617,10 @@ def translation_columns_check(  # noqa: C901
         base = _base_field_name(col)
         lang = col.split("@", 1)[1]
         info = odoo_fields.get(base, {})
+        # TODO(#255): a field that is BOTH translate and company_dependent is
+        # classified here as a translation (the qualifier is read as a lang). When
+        # per-company import lands, disambiguate by the qualifier format (lang code
+        # vs company id/xmlid) instead of by field-attribute precedence.
         if info.get("translate"):
             if not lang:
                 _show_error_panel(

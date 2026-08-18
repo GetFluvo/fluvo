@@ -63,6 +63,9 @@ class TestLanguageInstaller:
         [
             # Odoo <= 15: single 'lang' Selection.
             (14, {"lang": "de_DE", "overwrite": False}),
+            # 15 is the boundary whose behavior changed (old code wrongly used the
+            # modern 'langs' branch here); it must still use the single 'lang' key.
+            (15, {"lang": "de_DE", "overwrite": False}),
             # Odoo 16+: 'lang_ids' many2many (verified against real Odoo 16 — there
             # is no 'langs' field, which the previous <17 branch wrongly used).
             (16, {"lang_ids": [(6, 0, [42])], "overwrite": False}),

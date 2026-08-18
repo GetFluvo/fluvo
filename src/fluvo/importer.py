@@ -205,6 +205,7 @@ def _run_translation_passes(
                     "attempted": 0,
                     "written": 0,
                     "failed": 0,
+                    "unaccounted": 0,
                     "fail_file": "",
                 }
             )
@@ -245,6 +246,16 @@ def _run_translation_passes(
                 f"{failed} '{lang}' translation row(s) failed to write; see "
                 f"{fail_file}."
             )
+        # Reconcile each language pass the same way the base import does: every
+        # attempted row must be accounted for as written or failed, never dropped.
+        unaccounted = attempted - written - failed
+        if unaccounted:
+            log.warning(
+                f"Translation reconciliation ('{lang}'): {unaccounted} of "
+                f"{attempted} row(s) are unaccounted for "
+                f"(written={written}, failed={failed}). This can indicate rows "
+                f"silently skipped by Odoo (e.g. duplicate ids)."
+            )
         summaries.append(
             {
                 "lang": lang,
@@ -252,6 +263,7 @@ def _run_translation_passes(
                 "attempted": attempted,
                 "written": written,
                 "failed": failed,
+                "unaccounted": unaccounted,
                 "fail_file": fail_file if failed else "",
             }
         )
@@ -776,6 +788,22 @@ def run_import(  # noqa: C901
     company_ctx = import_plan.get("company_context") or {}
     company_suffix = f"\n{company_ctx['line']}" if company_ctx.get("line") else ""
 
+    # A clean base import whose per-language translation passes failed must not
+    # read as an unqualified success: mirror the base partial-import treatment
+    # (yellow banner + pointer to the fail file). Exit stays 0, consistent with
+    # the documented partial-import policy — a partial write is not a hard error.
+    translations_failed = any(s.get("failed") for s in translation_summaries)
+    if translations_failed:
+        failed_langs = ", ".join(
+            s["lang"] for s in translation_summaries if s.get("failed")
+        )
+        company_suffix += (
+            f"\n[yellow]Warning:[/yellow] some translations failed to write "
+            f"({failed_langs}); see the [bold]*_translations_fail.csv[/bold] "
+            f"file(s) above."
+        )
+    banner_border = "yellow" if translations_failed else "green"
+
     if is_truly_successful:
         if final_deferred:  # It was a two-pass import
             summary = (
@@ -783,20 +811,31 @@ def run_import(  # noqa: C901
                 f"Created: {stats.get('created_records', 0)}, "
                 f"Updated: {stats.get('updated_relations', 0)}"
             )
-            title = f"[bold green]Import Complete for [cyan]{model}[/cyan][/bold green]"
+            head = "Import Complete" + (
+                " (with translation failures)" if translations_failed else ""
+            )
+            title = (
+                f"[bold {banner_border}]{head} for "
+                f"[cyan]{model}[/cyan][/bold {banner_border}]"
+            )
             Console().print(
                 Panel(
                     summary + company_suffix,
                     title=title,
+                    border_style=banner_border,
                     expand=False,
                 )
             )
         else:  # Single pass
+            head = "Import Complete" + (
+                " (with translation failures)" if translations_failed else ""
+            )
             Console().print(
                 Panel(
                     f"Import for [cyan]{model}[/cyan] finished successfully."
                     + company_suffix,
-                    title="[bold green]Import Complete[/bold green]",
+                    title=f"[bold {banner_border}]{head}[/bold {banner_border}]",
+                    border_style=banner_border,
                 )
             )
     else:

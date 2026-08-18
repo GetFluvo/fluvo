@@ -175,6 +175,38 @@ def test_translation_passes_skip_when_all_empty(
     assert summaries[0]["attempted"] == 0
 
 
+def test_translation_passes_track_unaccounted(tmp_path: Path, monkeypatch: Any) -> None:
+    """Rows neither written nor failed are surfaced as unaccounted (reconciliation)."""
+
+    def fake(**kwargs: Any) -> tuple[bool, dict[str, Any]]:
+        df = pl.read_csv(kwargs["file_csv"], separator=kwargs.get("separator", ";"))
+        # Report fewer created than attempted, with no fail file: the difference
+        # must show up as unaccounted, not vanish.
+        return True, {"created_records": df.height - 1, "total_records": df.height}
+
+    monkeypatch.setattr("fluvo.importer.import_threaded.import_data", fake)
+
+    summaries = importer._run_translation_passes(
+        config="c.conf",
+        model="res.partner",
+        translations={"nl_NL": ["name"]},
+        source_df=_source(),
+        id_map={"p1": 1, "p2": 2, "p3": 3},
+        id_column="id",
+        base_context={},
+        max_conn=1,
+        batch_size=10,
+        separator=",",
+        encoding="utf-8",
+        output_dir=tmp_path,
+    )
+    s = summaries[0]
+    assert s["attempted"] == 2  # p1, p3 (p2's nl_NL cell is blank)
+    assert s["written"] == 1
+    assert s["failed"] == 0
+    assert s["unaccounted"] == 1
+
+
 def test_render_translation_summary_smoke() -> None:
     """The summary renderer runs for both clean and failed passes."""
     importer._render_translation_summary(
