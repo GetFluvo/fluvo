@@ -1,6 +1,7 @@
 """Test cases for the __main__ module."""
 
 import logging
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1988,6 +1989,73 @@ def test_flow_file_invalid_exits_nonzero(runner: CliRunner) -> None:
             f.write("version: 1\n")  # no `flows:` -> FlowError
         result = runner.invoke(__main__.cli, ["--flow-file", "flows.yml"])
         assert result.exit_code != 0
+
+
+def test_command_option_specs_and_build_argv() -> None:
+    """Options are introspected and turned into argv (value, flag, multiple)."""
+    specs = __main__._command_option_specs(__main__.cli.commands["import"])
+    assert specs["model"][0] == "--model" and specs["model"][1] is False
+    assert specs["auto_defer"][1] is True  # a flag
+
+    argv = __main__._build_step_argv({"model": "res.partner", "worker": 4}, specs)
+    assert argv[argv.index("--model") + 1] == "res.partner"
+    assert argv[argv.index("--worker") + 1] == "4"
+    # A truthy flag is emitted without a value; a falsy flag is omitted.
+    assert __main__._build_step_argv({"auto_defer": True}, specs) == ["--auto-defer"]
+    assert __main__._build_step_argv({"auto_defer": False}, specs) == []
+    # An unknown key is ignored defensively.
+    assert __main__._build_step_argv({"nope": 1}, specs) == []
+
+
+def test_run_flow_step_success_and_failure() -> None:
+    """_run_flow_step maps a command's exit into a StepOutcome."""
+    cmd = __main__.cli.commands["import"]
+    with patch.object(cmd, "main", return_value=None) as mock_main:
+        ok = __main__._run_flow_step("import", {"model": "res.partner"})
+    assert ok.ok is True
+    mock_main.assert_called_once()
+
+    with patch.object(cmd, "main", side_effect=SystemExit(1)):
+        bad = __main__._run_flow_step("import", {"model": "res.partner"})
+    assert bad.ok is False
+
+
+def test_run_flow_step_reports_fail_file(tmp_path: "Path") -> None:
+    """A step that produced a fail file has it reported in the outcome."""
+    src = tmp_path / "res_partner.csv"
+    src.write_text("id\n1\n")
+    fail = tmp_path / "res_partner_fail.csv"
+    fail.write_text("id;_ERROR_REASON\n1;boom\n2;bad\n")
+
+    cmd = __main__.cli.commands["import"]
+    with patch.object(cmd, "main", return_value=None):
+        outcome = __main__._run_flow_step(
+            "import",
+            {"model": "res.partner", "file": str(src), "connection_file": ""},
+        )
+    assert outcome.fail_file == str(fail)
+    assert outcome.fail_rows == 2
+
+
+def test_render_flow_summary_lists_fail_files(
+    capsys: "pytest.CaptureFixture[str]",
+) -> None:
+    """The summary lists every fail file together and shows the failure verdict."""
+    from fluvo.lib.flow_runner import StepOutcome, StepResult
+
+    results = [
+        StepResult(
+            "a",
+            "a1",
+            "import",
+            StepOutcome(ok=True, fail_file="x_fail.csv", fail_rows=3),
+        ),
+        StepResult("a", "a2", "write", StepOutcome(ok=False, error="boom")),
+    ]
+    __main__._render_flow_summary(results, aborted=True)
+    out = unstyle(capsys.readouterr().out)
+    assert "x_fail.csv" in out
+    assert "failed" in out.lower()
 
 
 # --- Import command: protocol, context, company XML-id resolution ---
