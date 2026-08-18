@@ -55,7 +55,7 @@ Request features on the [Issue Tracker].
 
 ## How to set up your development environment
 
-You need Python 3.9+ and the following tools:
+You need Python 3.10+ and the following tools:
 
 - [uv]
 - [Nox]
