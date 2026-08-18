@@ -205,6 +205,7 @@ ignore = [
     "Q001",
     "Q002",
     "Q003",
+    "UP038",  # `isinstance(x, X | Y)` is slower than the tuple form; ruff deprecated its fix
     "W191",
 ]
 exclude = [

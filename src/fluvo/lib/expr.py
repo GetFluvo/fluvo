@@ -24,7 +24,7 @@ Performance Note:
     execution engine instead of row-by-row Python iteration.
 """
 
-from typing import Any, Optional, Union
+from typing import Any
 
 import polars as pl
 
@@ -123,8 +123,8 @@ def concat_all(separator: str, *fields: str) -> pl.Expr:
 
 def cond(
     field: str,
-    true_value: Union[str, pl.Expr],
-    false_value: Union[str, pl.Expr],
+    true_value: str | pl.Expr,
+    false_value: str | pl.Expr,
 ) -> pl.Expr:
     """Returns a Polars expression that applies conditional logic.
 
@@ -156,8 +156,8 @@ def cond(
 
 def bool_val(
     field: str,
-    true_values: Optional[list[str]] = None,
-    false_values: Optional[list[str]] = None,
+    true_values: list[str] | None = None,
+    false_values: list[str] | None = None,
     default: bool = False,
 ) -> pl.Expr:
     """Returns a Polars expression that converts a field to boolean "1" or "0".
@@ -204,7 +204,7 @@ def bool_val(
 
 def num(
     field: str,
-    default: Optional[Union[int, float]] = None,
+    default: int | float | None = None,
     decimal_separator: str = ",",
 ) -> pl.Expr:
     """Returns a Polars expression that converts a field to a number.

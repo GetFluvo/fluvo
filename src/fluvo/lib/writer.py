@@ -3,12 +3,12 @@
 import csv
 import re
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 from .internal.ui import _show_error_panel
 
 
-def _get_env_from_config(config: Union[str, dict[str, Any], None]) -> Optional[str]:
+def _get_env_from_config(config: str | dict[str, Any] | None) -> str | None:
     """Extracts the environment name from a config file path.
 
     Supports patterns like:
@@ -48,7 +48,7 @@ def write_relational_failures_to_csv(
     field: str,
     original_filename: str,
     failed_records: list[dict[str, Any]],
-    config: Union[str, dict[str, Any], None] = None,
+    config: str | dict[str, Any] | None = None,
 ) -> None:
     """Writes failed relational link records to a dedicated CSV file.
 

@@ -6,7 +6,7 @@ actually writing to Odoo, catching issues early.
 
 import csv
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -103,7 +103,7 @@ def validate_csv_data(  # noqa: C901
     connection: Any,
     separator: str = ";",
     encoding: str = "utf-8",
-    ignore: Optional[list[str]] = None,
+    ignore: list[str] | None = None,
 ) -> ValidationResult:
     """Validate CSV data without importing.
 

@@ -1,7 +1,6 @@
 """Tests for the create-missing-variants workflow (#188)."""
 
 from pathlib import Path
-from typing import Optional
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
@@ -17,7 +16,7 @@ CFG_DICT = "fluvo.lib.actions.variant_manager.conf_lib.get_connection_from_dict"
 
 
 def _mock_conn(
-    orphan_ids: list[int], create_side_effect: Optional[Exception] = None
+    orphan_ids: list[int], create_side_effect: Exception | None = None
 ) -> tuple[MagicMock, MagicMock, MagicMock]:
     """Build a mock connection whose product.template.search returns orphan_ids."""
     conn = MagicMock()

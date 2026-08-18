@@ -2,7 +2,6 @@
 
 import importlib
 import sys
-from typing import Optional
 from unittest.mock import MagicMock, call, mock_open, patch
 
 import httpx
@@ -142,8 +141,8 @@ class TestRPCThreadWrite:
     def test_wait_fallback_without_progress(
         self,
         mock_super_wait: MagicMock,
-        progress: Optional[Progress],
-        task_id: Optional[TaskID],
+        progress: Progress | None,
+        task_id: TaskID | None,
     ) -> None:
         """Tests that wait() calls super().wait() if progress or task_id is missing."""
         rpc_thread = RPCThreadWrite(

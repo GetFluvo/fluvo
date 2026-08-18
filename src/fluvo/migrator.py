@@ -5,8 +5,8 @@ migration of data from one Odoo instance to another.
 """
 
 import os
-from collections.abc import Mapping
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Mapping
+from typing import Any
 
 import polars as pl
 
@@ -21,8 +21,8 @@ def run_migration(
     config_import: str,
     model: str,
     domain: str = "[]",
-    fields: Optional[list[str]] = None,
-    mapping: Optional[Mapping[str, Callable[..., Any]]] = None,
+    fields: list[str] | None = None,
+    mapping: Mapping[str, Callable[..., Any]] | None = None,
     export_worker: int = 1,
     export_batch_size: int = 100,
     import_worker: int = 1,
@@ -74,7 +74,7 @@ def run_migration(
     log.info("Transforming data in memory...")
     df = pl.DataFrame(data, schema=header, orient="row")
 
-    final_mapping: Mapping[str, Union[Callable[..., Any], pl.Expr]]
+    final_mapping: Mapping[str, Callable[..., Any] | pl.Expr]
     if not mapping:
         log.info("No mapping provided, using 1-to-1 mapping.")
         # Create a temporary processor just to generate the o2o map

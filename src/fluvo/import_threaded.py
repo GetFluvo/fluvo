@@ -12,7 +12,7 @@ import time
 import traceback
 from collections.abc import Generator, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed  # noqa
-from typing import Any, Optional, TextIO, Union
+from typing import Any, TextIO
 
 from rich.console import Console
 from rich.progress import (
@@ -435,8 +435,8 @@ def _filter_ignored_columns(
 
 
 def _setup_fail_file(
-    fail_file: Optional[str], header: list[str], separator: str, encoding: str
-) -> tuple[Optional[Any], Optional[TextIO]]:
+    fail_file: str | None, header: list[str], separator: str, encoding: str
+) -> tuple[Any | None, TextIO | None]:
     """Opens the fail file and returns the writer and file handle."""
     if not fail_file:
         return None, None
@@ -567,7 +567,7 @@ def _prepare_pass_2_data(  # noqa: C901
     from .lib.internal.tools import to_xmlid
 
     # Cache for external ID lookups to avoid repeated RPC calls
-    external_id_cache: dict[str, Optional[int]] = {}
+    external_id_cache: dict[str, int | None] = {}
 
     processed = 0
     found_in_idmap = 0
@@ -775,7 +775,7 @@ def _prepare_pass_2_data(  # noqa: C901
 def _resolve_external_id_for_pass2(
     ir_model_data_proxy: Any,
     xml_id: str,
-) -> Optional[int]:
+) -> int | None:
     """Resolve an XML ID to a database ID for Pass 2 updates.
 
     This is used for non-self-referencing deferred fields like responsible_id
@@ -917,7 +917,7 @@ def _recursive_create_batches(  # noqa: C901
 
 def _create_batches(
     data: list[list[Any]],
-    split_by_cols: Optional[list[str]],
+    split_by_cols: list[str] | None,
     header: list[str],
     batch_size: int,
     o2m: bool,
@@ -940,8 +940,8 @@ class RPCThreadImport(RpcThread):
         max_connection: int,
         progress: Progress,
         task_id: TaskID,
-        writer: Optional[Any] = None,
-        fail_handle: Optional[TextIO] = None,
+        writer: Any | None = None,
+        fail_handle: TextIO | None = None,
     ) -> None:
         super().__init__(max_connection)
         (
@@ -1754,8 +1754,8 @@ def _execute_load_batch(  # noqa: C901
 
     # Pre-calculate ignore filter indices ONCE before the loop (optimization).
     # These values don't change during batch processing, so calculate upfront.
-    indices_to_keep: Optional[list[int]] = None
-    filtered_header: Optional[list[str]] = None
+    indices_to_keep: list[int] | None = None
+    filtered_header: list[str] | None = None
     max_index_needed = 0
 
     if ignore_list:
@@ -1943,7 +1943,10 @@ def _execute_load_batch(  # noqa: C901
                     if sanitized_load_lines:
                         log.debug("First few lines being sent:")
                         for i, line in enumerate(sanitized_load_lines[:3]):
-                            log.debug(f"  Line {i}: {dict(zip(load_header, line))}")
+                            log.debug(
+                                f"  Line {i}: "
+                                f"{dict(zip(load_header, line, strict=False))}"
+                            )
                 else:
                     log.warning(
                         f"Partial record creation: {len(created_ids)}/"
@@ -1991,7 +1994,10 @@ def _execute_load_batch(  # noqa: C901
                     if sanitized_load_lines:
                         log.debug("First few lines being sent:")
                         for i, line in enumerate(sanitized_load_lines[:3]):
-                            log.debug(f"  Line {i}: {dict(zip(load_header, line))}")
+                            log.debug(
+                                f"  Line {i}: "
+                                f"{dict(zip(load_header, line, strict=False))}"
+                            )
                 else:
                     log.warning(
                         f"Partial record creation: {len(created_ids)}/"
@@ -2427,7 +2433,7 @@ def _run_threaded_pass(  # noqa: C901
     batch_count = 0
     throttle_ctrl = thread_state.get("throttle_controller")
     original_batch_size = thread_state.get("original_batch_size", 0)
-    last_logged_batch_size: Optional[int] = None
+    last_logged_batch_size: int | None = None
 
     for num, data in batches:
         if rpc_thread.abort_flag:
@@ -2601,15 +2607,15 @@ def _orchestrate_pass_1(
     deferred_fields: list[str],
     ignore: list[str],
     context: dict[str, Any],
-    fail_writer: Optional[Any],
-    fail_handle: Optional[TextIO],
+    fail_writer: Any | None,
+    fail_handle: TextIO | None,
     max_connection: int,
     batch_size: int,
     batch_delay: float,
     o2m: bool,
-    split_by_cols: Optional[list[str]],
+    split_by_cols: list[str] | None,
     force_create: bool = False,
-    throttle_controller: Optional[throttle_lib.ThrottleController] = None,
+    throttle_controller: throttle_lib.ThrottleController | None = None,
 ) -> dict[str, Any]:
     """Orchestrates the multi-threaded Pass 1 (load/create).
 
@@ -2708,7 +2714,7 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
     unique_id_field: str,
     ignore: list[str],
     context: dict[str, Any],
-    fail_file: Optional[str],
+    fail_file: str | None,
     max_connection: int,
     batch_size: int,
     batch_delay: float,
@@ -2752,8 +2758,8 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
     # The fail file is opened lazily once the streamed header is known (below);
     # the streaming loop writes failures explicitly, so the thread pool does not
     # need the writer.
-    fail_writer: Optional[Any] = None
-    fail_handle: Optional[TextIO] = None
+    fail_writer: Any | None = None
+    fail_handle: TextIO | None = None
     rpc_pass_1 = RPCThreadImport(max_connection, progress, TaskID(0), None, None)
 
     # Calculate number of batches for progress display
@@ -2770,8 +2776,8 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
     combined_id_map: dict[str, int] = {}
     combined_failed_lines: list[list[Any]] = []
     aborted = False
-    header: Optional[list[str]] = None
-    unique_id_field_index: Optional[int] = None
+    header: list[str] | None = None
+    unique_id_field_index: int | None = None
 
     try:
         batch_generator = _stream_csv_batches(
@@ -2881,11 +2887,11 @@ def _orchestrate_pass_2(  # noqa: C901
     id_map: dict[str, int],
     deferred_fields: list[str],
     context: dict[str, Any],
-    fail_writer: Optional[Any],
-    fail_handle: Optional[TextIO],
+    fail_writer: Any | None,
+    fail_handle: TextIO | None,
     max_connection: int,
     batch_size: int,
-    throttle_controller: Optional[throttle_lib.ThrottleController] = None,
+    throttle_controller: throttle_lib.ThrottleController | None = None,
     max_batch_bytes: int = DEFAULT_MAX_BATCH_BYTES,
 ) -> tuple[bool, int]:
     """Orchestrates the multi-threaded Pass 2 (write).
@@ -3099,23 +3105,23 @@ def _orchestrate_pass_2(  # noqa: C901
 
 
 def import_data(  # noqa: C901
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     model: str,
     unique_id_field: str,
     file_csv: str,
-    deferred_fields: Optional[list[str]] = None,
-    context: Optional[dict[str, Any]] = None,
-    fail_file: Optional[str] = None,
+    deferred_fields: list[str] | None = None,
+    context: dict[str, Any] | None = None,
+    fail_file: str | None = None,
     encoding: str = "utf-8",
     separator: str = ";",
-    ignore: Optional[list[str]] = None,
+    ignore: list[str] | None = None,
     max_connection: int = 1,
     batch_size: int = 200,
     batch_delay: float = 0.0,
     skip: int = 0,
     force_create: bool = False,
     o2m: bool = False,
-    split_by_cols: Optional[list[str]] = None,
+    split_by_cols: list[str] | None = None,
     stream: bool = False,
     resume: bool = True,
     enable_checkpoint: bool = True,
@@ -3123,7 +3129,7 @@ def import_data(  # noqa: C901
     skip_existing: bool = False,
     adaptive_throttle: bool = True,
     max_batch_bytes: int = DEFAULT_MAX_BATCH_BYTES,
-    resolve_relations: Optional[list[dict[str, Any]]] = None,
+    resolve_relations: list[dict[str, Any]] | None = None,
     auto_clean: bool = False,
 ) -> tuple[bool, dict[str, int]]:
     """Orchestrates a robust, multi-threaded, two-pass import process.
@@ -3215,7 +3221,7 @@ def import_data(  # noqa: C901
     )
 
     # --- Checkpoint: Check for resumable session ---
-    checkpoint: Optional[ckpt.CheckpointData] = None
+    checkpoint: ckpt.CheckpointData | None = None
     session_id = ""
     if enable_checkpoint or resume:
         session_id = ckpt.generate_session_id(file_csv, config, model)

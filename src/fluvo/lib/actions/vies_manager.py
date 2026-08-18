@@ -64,9 +64,10 @@ For high-performance VAT validation, consider using a Rust-based validator:
 import json
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any
 
 from ...lib import conf_lib
 from ...logging_config import log
@@ -146,7 +147,7 @@ VAT_PATTERNS: dict[str, str] = {
 
 
 # Type for custom VAT validator (e.g., Rust-based)
-VatValidator = Callable[[str], tuple[bool, Optional[str]]]
+VatValidator = Callable[[str], tuple[bool, str | None]]
 
 
 @dataclass
@@ -194,8 +195,8 @@ ViesSettings = VatValidationSettings
 
 
 def _get_backup_file_path(
-    config: Union[str, dict[str, Any]],
-    backup_dir: Optional[Path] = None,
+    config: str | dict[str, Any],
+    backup_dir: Path | None = None,
 ) -> Path:
     """Get the backup file path for VAT settings.
 
@@ -263,7 +264,7 @@ def _save_settings_to_backup(
 
 def _load_settings_from_backup(
     backup_path: Path,
-) -> Optional[VatValidationSettings]:
+) -> VatValidationSettings | None:
     """Load VAT settings from a backup file.
 
     Args:
@@ -333,7 +334,7 @@ def _is_retriable_error(error: Exception) -> bool:
     return any(pattern in error_str for pattern in retriable_patterns)
 
 
-def validate_vat_format(vat: str) -> tuple[bool, Optional[str]]:
+def validate_vat_format(vat: str) -> tuple[bool, str | None]:
     """Validate VAT number format locally (no network call).
 
     This is a fast, regex-based validation that checks the format
@@ -381,7 +382,7 @@ def validate_vat_format(vat: str) -> tuple[bool, Optional[str]]:
         return False, f"Invalid VAT format for {country_code}: {vat}"
 
 
-def validate_vat_checksum(vat: str) -> tuple[bool, Optional[str]]:
+def validate_vat_checksum(vat: str) -> tuple[bool, str | None]:
     """Validate VAT number checksum for countries that use one.
 
     This performs the mathematical checksum validation used by
@@ -440,10 +441,10 @@ def validate_vat_checksum(vat: str) -> tuple[bool, Optional[str]]:
 
 
 # Global custom validator - can be set to a Rust-based function
-_custom_vat_validator: Optional[VatValidator] = None
+_custom_vat_validator: VatValidator | None = None
 
 
-def set_custom_vat_validator(validator: Optional[VatValidator]) -> None:
+def set_custom_vat_validator(validator: VatValidator | None) -> None:
     """Set a custom VAT validator function.
 
     This allows replacing the default Python validation with a
@@ -477,7 +478,7 @@ def validate_vat_local(
     vat: str,
     check_format: bool = True,
     check_checksum: bool = True,
-) -> tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
     """Validate a VAT number locally without network calls.
 
     Uses either the custom validator (if set) or the built-in
@@ -522,10 +523,10 @@ class ViesValidationResult:
 
 
 def get_vat_validation_settings(  # noqa: C901
-    config: Union[str, dict[str, Any]],
-    company_ids: Optional[list[int]] = None,
+    config: str | dict[str, Any],
+    company_ids: list[int] | None = None,
     include_stdnum: bool = True,
-) -> Optional[VatValidationSettings]:
+) -> VatValidationSettings | None:
     """Get current VAT validation settings for all or specified companies.
 
     Args:
@@ -601,13 +602,13 @@ get_vies_settings = get_vat_validation_settings
 
 
 def disable_vat_validation(  # noqa: C901
-    config: Union[str, dict[str, Any]],
-    company_ids: Optional[list[int]] = None,
+    config: str | dict[str, Any],
+    company_ids: list[int] | None = None,
     disable_vies: bool = True,
     disable_stdnum: bool = True,
     save_settings: bool = True,
-    backup_dir: Optional[Path] = None,
-) -> Optional[VatValidationSettings]:
+    backup_dir: Path | None = None,
+) -> VatValidationSettings | None:
     """Disable VAT validation (VIES and/or stdnum) for all or specified companies.
 
     Uses file-based backup to preserve original settings across runs. If a previous
@@ -719,10 +720,10 @@ def disable_vat_validation(  # noqa: C901
 
 # Backwards compatibility
 def disable_vies_check(
-    config: Union[str, dict[str, Any]],
-    company_ids: Optional[list[int]] = None,
+    config: str | dict[str, Any],
+    company_ids: list[int] | None = None,
     save_settings: bool = True,
-) -> Optional[VatValidationSettings]:
+) -> VatValidationSettings | None:
     """Disable VIES check for all or specified companies (legacy function)."""
     return disable_vat_validation(
         config,
@@ -734,9 +735,9 @@ def disable_vies_check(
 
 
 def restore_vat_validation_settings(  # noqa: C901
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     settings: VatValidationSettings,
-    backup_dir: Optional[Path] = None,
+    backup_dir: Path | None = None,
     max_retries: int = RESTORE_MAX_RETRIES,
     initial_delay: float = RESTORE_INITIAL_DELAY_SECONDS,
     max_delay: float = RESTORE_MAX_DELAY_SECONDS,
@@ -776,7 +777,7 @@ def restore_vat_validation_settings(  # noqa: C901
         attempt += 1
         success = True
         retriable_error_occurred = False
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         try:
             if isinstance(config, dict):
@@ -894,12 +895,12 @@ restore_vies_settings = restore_vat_validation_settings
 
 
 def run_vies_validation(  # noqa: C901
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     batch_size: int = 50,
     delay_between_batches: float = 1.0,
-    notify_user_ids: Optional[list[int]] = None,
-    domain: Optional[list[Any]] = None,
-    max_records: Optional[int] = None,
+    notify_user_ids: list[int] | None = None,
+    domain: list[Any] | None = None,
+    max_records: int | None = None,
 ) -> ViesValidationResult:
     """Batch validate VAT numbers against VIES and notify on failures.
 
@@ -1147,14 +1148,14 @@ def _send_vies_notifications(
 
 
 def run_import_with_vat_validation_disabled(
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     import_func: Any,
     import_kwargs: dict[str, Any],
-    company_ids: Optional[list[int]] = None,
+    company_ids: list[int] | None = None,
     disable_vies: bool = True,
     disable_stdnum: bool = True,
     validate_vat_locally: bool = False,
-    backup_dir: Optional[Path] = None,
+    backup_dir: Path | None = None,
 ) -> Any:
     """Run an import function with VAT validation temporarily disabled.
 
@@ -1235,8 +1236,8 @@ run_import_with_vies_disabled = run_import_with_vat_validation_disabled
 
 
 def restore_vat_settings_from_backup(
-    config: Union[str, dict[str, Any]],
-    backup_dir: Optional[Path] = None,
+    config: str | dict[str, Any],
+    backup_dir: Path | None = None,
 ) -> bool:
     """Manually restore VAT settings from backup file.
 
@@ -1274,8 +1275,8 @@ def restore_vat_settings_from_backup(
 
 
 def check_vat_settings_backup_status(
-    config: Union[str, dict[str, Any]],
-    backup_dir: Optional[Path] = None,
+    config: str | dict[str, Any],
+    backup_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Check if a VAT settings backup file exists and return its status.
 

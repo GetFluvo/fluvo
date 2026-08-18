@@ -8,7 +8,8 @@ import ast
 import csv
 import json
 import re
-from typing import Any, Callable, Optional, Union, cast
+from collections.abc import Callable
+from typing import Any, cast
 
 import polars as pl
 from polars.exceptions import ColumnNotFoundError
@@ -81,7 +82,7 @@ def register_check(func: Callable[..., bool]) -> Callable[..., bool]:
 
 @register_check
 def connection_check(
-    preflight_mode: "PreflightMode", config: Union[str, dict[str, Any]], **kwargs: Any
+    preflight_mode: "PreflightMode", config: str | dict[str, Any], **kwargs: Any
 ) -> bool:
     """Pre-flight check to verify connection to Odoo."""
     log.info("Running pre-flight check: Verifying Odoo connection...")
@@ -101,7 +102,7 @@ def connection_check(
         return False
 
 
-def _preflight_connection(config: Union[str, dict[str, Any]]) -> Any:
+def _preflight_connection(config: str | dict[str, Any]) -> Any:
     """Open an Odoo connection from a config path or dict.
 
     Args:
@@ -154,7 +155,7 @@ def _count_data_rows(filename: str, separator: str, encoding: str) -> int:
         return 0
 
 
-def _fmt_company(company_id: int, names: dict[int, Optional[str]]) -> str:
+def _fmt_company(company_id: int, names: dict[int, str | None]) -> str:
     """Format a company as ``id "Name"`` (or just the id if the name is unknown).
 
     Args:
@@ -169,8 +170,8 @@ def _fmt_company(company_id: int, names: dict[int, Optional[str]]) -> str:
 
 
 def _resolve_company_names(
-    config: Union[str, dict[str, Any]], ids: list[int]
-) -> dict[int, Optional[str]]:
+    config: str | dict[str, Any], ids: list[int]
+) -> dict[int, str | None]:
     """Resolve ``res.company`` display names for the given ids (best-effort).
 
     Args:
@@ -192,8 +193,8 @@ def _resolve_company_names(
 
 
 def _resolve_default_company(
-    config: Union[str, dict[str, Any]],
-) -> tuple[Optional[int], Optional[str]]:
+    config: str | dict[str, Any],
+) -> tuple[int | None, str | None]:
     """Resolve the connecting user's default company as ``(id, name)``.
 
     Args:
@@ -218,7 +219,7 @@ def _resolve_default_company(
     return None, None
 
 
-def _count_companies(config: Union[str, dict[str, Any]]) -> Optional[int]:
+def _count_companies(config: str | dict[str, Any]) -> int | None:
     """Count the companies in the target database (best-effort).
 
     Args:
@@ -242,7 +243,7 @@ def company_context_check(
     preflight_mode: "PreflightMode",
     model: str,
     filename: str,
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     import_plan: dict[str, Any],
     **kwargs: Any,
 ) -> bool:
@@ -404,7 +405,7 @@ def self_referencing_check(
         return True
 
 
-def _get_installed_languages(config: Union[str, dict[str, Any]]) -> Optional[set[str]]:
+def _get_installed_languages(config: str | dict[str, Any]) -> set[str] | None:
     """Connects to Odoo and returns the set of installed language codes."""
     try:
         if isinstance(config, dict):
@@ -432,7 +433,7 @@ def _get_installed_languages(config: Union[str, dict[str, Any]]) -> Optional[set
         return None
 
 
-def _get_required_languages(filename: str, separator: str) -> Optional[list[str]]:
+def _get_required_languages(filename: str, separator: str) -> list[str] | None:
     """Extracts the list of required languages from the source file."""
     try:
         lang_series = (
@@ -459,7 +460,7 @@ def _get_required_languages(filename: str, separator: str) -> Optional[list[str]
 
 
 def _handle_missing_languages(
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     missing_languages: set[str],
     headless: bool,
 ) -> bool:
@@ -503,7 +504,7 @@ def language_check(
     preflight_mode: PreflightMode,
     model: str,
     filename: str,
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     headless: bool,
     **kwargs: Any,
 ) -> bool:
@@ -567,9 +568,7 @@ def _extract_odoo_error_message(error: Exception) -> str:
     return first_line[:300]
 
 
-def _get_odoo_fields(
-    config: Union[str, dict[str, Any]], model: str
-) -> Optional[dict[str, Any]]:
+def _get_odoo_fields(config: str | dict[str, Any], model: str) -> dict[str, Any] | None:
     """Fetches the field schema for a given model from Odoo.
 
     Args:
@@ -619,7 +618,7 @@ def _get_odoo_fields(
         return None
 
 
-def _get_csv_header(filename: str, separator: str) -> Optional[list[str]]:
+def _get_csv_header(filename: str, separator: str) -> list[str] | None:
     """Reads the header from a CSV file.
 
     Args:
@@ -754,7 +753,7 @@ def _detect_groupby_column(
     header: list[str],
     odoo_fields: dict[str, Any],
     model: str,
-) -> Optional[str]:
+) -> str | None:
     """Pick a many2one column to group by, to reduce concurrent-write contention.
 
     Records that write to the same related record (e.g. a shared company/category)
@@ -777,7 +776,7 @@ def _detect_groupby_column(
     n_rows = df.height
     if n_rows < 2:
         return None
-    best: Optional[str] = None
+    best: str | None = None
     best_n_unique = 0
     for field_name in header:
         # Strip any relational suffix: handles 'x_id/id', 'x_id/.id' and 'x_id'.
@@ -938,7 +937,7 @@ def deferral_and_strategy_check(
     preflight_mode: "PreflightMode",
     model: str,
     filename: str,
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     import_plan: dict[str, Any],
     **kwargs: Any,
 ) -> bool:
@@ -1129,7 +1128,7 @@ def _extract_references_from_csv(  # noqa: C901
     odoo_fields: dict[str, Any],
     separator: str = ";",
     encoding: str = "utf-8",
-    ignore: Optional[list[str]] = None,
+    ignore: list[str] | None = None,
 ) -> dict[str, dict[str, set[str]]]:
     """Extract all unique references from relational columns in CSV.
 
@@ -1321,7 +1320,7 @@ def reference_check(  # noqa: C901
     preflight_mode: "PreflightMode",
     model: str,
     filename: str,
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     **kwargs: Any,
 ) -> bool:
     """Pre-flight check to verify all relational references exist."""
@@ -1415,7 +1414,7 @@ def reference_check(  # noqa: C901
     return True
 
 
-def _parse_structured(value: str) -> Optional[Any]:
+def _parse_structured(value: str) -> Any | None:
     """Return the parsed dict/list if a string is a dict/list literal, else None.
 
     Recognises both Python-repr dicts/lists (what ``str({...})`` produces, e.g. a
@@ -1487,7 +1486,7 @@ def structured_value_check(  # noqa: C901
     preflight_mode: "PreflightMode",
     model: str,
     filename: str,
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     **kwargs: Any,
 ) -> bool:
     """Reject dict/list values written to plain-text fields (#274).

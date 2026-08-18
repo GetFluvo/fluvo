@@ -1,8 +1,9 @@
 """Test the core Processor class and its subclasses."""
 
 import inspect
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional, cast
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import polars as pl
@@ -274,7 +275,7 @@ def test_processor_val_postprocess_type_error_fallback() -> None:
 
     # This postprocess function will fail if called with two arguments (the state dict)
     # but will succeed if called with just one (the value).
-    def fallback_postprocess(val: str, state: Optional[dict[str, Any]] = None) -> str:
+    def fallback_postprocess(val: str, state: dict[str, Any] | None = None) -> str:
         if state is not None:
             raise TypeError(
                 "This function should have been called with only one argument"

@@ -32,8 +32,9 @@ password.
 
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, cast
+from typing import Any, cast
 
 import yaml
 
@@ -269,7 +270,7 @@ def _parse_step(
     flow_on_error: str,
     resolved_vars: dict[str, str],
     seen_ids: set[str],
-    known_options: Optional[dict[str, set[str]]],
+    known_options: dict[str, set[str]] | None,
 ) -> Step:
     """Validate one raw step mapping into a :class:`Step`.
 
@@ -349,7 +350,7 @@ def _parse_flow(
     raw: Any,
     index: int,
     resolved_vars: dict[str, str],
-    known_options: Optional[dict[str, set[str]]],
+    known_options: dict[str, set[str]] | None,
 ) -> Flow:
     """Validate one raw flow mapping into a :class:`Flow`.
 
@@ -406,8 +407,8 @@ def _parse_flow(
 def parse_flow_file(
     path: str,
     *,
-    cli_vars: Optional[dict[str, str]] = None,
-    known_options: Optional[dict[str, set[str]]] = None,
+    cli_vars: dict[str, str] | None = None,
+    known_options: dict[str, set[str]] | None = None,
 ) -> FlowFile:
     """Parse and validate a ``flows.yml`` into a resolved :class:`FlowFile`.
 
@@ -488,7 +489,7 @@ def parse_flow_file(
     return FlowFile(version=SUPPORTED_VERSION, vars=resolved_vars, flows=flows)
 
 
-def select_flows(flow_file: FlowFile, names: Optional[list[str]]) -> list[Flow]:
+def select_flows(flow_file: FlowFile, names: list[str] | None) -> list[Flow]:
     """Return the flows to run, in file order.
 
     Args:

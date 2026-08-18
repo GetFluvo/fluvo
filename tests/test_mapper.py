@@ -4,7 +4,8 @@ import base64
 import inspect
 import logging
 import os
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import MagicMock, call, patch
 
 import httpx

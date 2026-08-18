@@ -16,8 +16,9 @@ Failure semantics (agreed on #251):
 - The whole run exits non-zero if **any** step failed, even under ``continue``.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any
 
 from .flow import Flow
 
@@ -34,9 +35,9 @@ class StepOutcome:
     """
 
     ok: bool
-    fail_file: Optional[str] = None
+    fail_file: str | None = None
     fail_rows: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass

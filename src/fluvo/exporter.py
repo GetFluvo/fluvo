@@ -1,7 +1,7 @@
 """This module contains the high-level logic for exporting data from Odoo."""
 
 import ast
-from typing import Any, Optional, Union
+from typing import Any
 
 import polars as pl
 from rich.console import Console
@@ -30,20 +30,20 @@ def _show_success_panel(message: str) -> None:
 
 
 def run_export(  # noqa: D417
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     model: str,
     fields: str,
-    output: Optional[str],
+    output: str | None,
     domain: str = "[]",
     worker: int = 1,
     batch_size: int = 1000,
-    context: Union[str, dict[str, Any]] = "{}",
+    context: str | dict[str, Any] = "{}",
     separator: str = ";",
     encoding: str = "utf-8",
     technical_names: bool = False,
     streaming: bool = False,
-    resume_session: Optional[str] = None,
-    sanitize_newlines: Optional[str] = None,
+    resume_session: str | None = None,
+    sanitize_newlines: str | None = None,
 ) -> None:
     """Orchestrates the data export process.
 
@@ -151,7 +151,7 @@ def run_export(  # noqa: D417
 
 
 def run_export_for_migration(
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     model: str,
     fields: list[str],
     domain: str = "[]",
@@ -160,7 +160,7 @@ def run_export_for_migration(
     context: str = "{'tracking_disable' : True}",
     encoding: str = "utf-8",
     technical_names: bool = False,
-) -> tuple[Optional[list[str]], Optional[list[list[Any]]]]:
+) -> tuple[list[str] | None, list[list[Any]] | None]:
     """Migration exporter.
 
     Orchestrates the data export process, returning the data in memory.

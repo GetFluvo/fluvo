@@ -2,7 +2,7 @@
 
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -190,7 +190,7 @@ class TestCustomVatValidator:
     def test_set_custom_validator(self) -> None:
         """Test setting a custom validator."""
 
-        def custom_validator(vat: str) -> tuple[bool, Optional[str]]:
+        def custom_validator(vat: str) -> tuple[bool, str | None]:
             if vat.startswith("VALID"):
                 return True, None
             return False, "Invalid"
@@ -209,7 +209,7 @@ class TestCustomVatValidator:
     def test_clear_custom_validator(self) -> None:
         """Test clearing the custom validator."""
 
-        def custom_validator(vat: str) -> tuple[bool, Optional[str]]:
+        def custom_validator(vat: str) -> tuple[bool, str | None]:
             return False, "Always invalid"
 
         set_custom_vat_validator(custom_validator)

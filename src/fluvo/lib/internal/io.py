@@ -7,7 +7,7 @@ including writing CSV data and generating shell scripts.
 import csv
 import os
 import shlex
-from typing import Any, Optional
+from typing import Any
 
 from ...logging_config import log
 
@@ -94,9 +94,9 @@ def _build_export_command(filename: str, model: str, **kwargs: Any) -> list[str]
 
 
 def write_file(
-    filename: Optional[str] = None,
-    header: Optional[list[str]] = None,
-    data: Optional[list[list[Any]]] = None,
+    filename: str | None = None,
+    header: list[str] | None = None,
+    data: list[list[Any]] | None = None,
     fail: bool = False,
     model: str = "auto",
     launchfile: str = "import_auto.sh",
