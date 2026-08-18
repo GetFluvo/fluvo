@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import os
 from collections.abc import Iterator
+from typing import Any
 from urllib.parse import urlparse
 
 import pytest
@@ -229,3 +230,52 @@ def product_module(odoo_endpoint: dict[str, object], target_db: str) -> str:
     _runtime.restart_service("odoo")
     _runtime.wait_http_ready(str(odoo_endpoint["host"]), int(odoo_endpoint["port"]))
     return "product"
+
+
+# --- Installed languages (for the multi-language import tests, #254) ---
+@pytest.fixture(scope="session")
+def translated_languages(rpc: Any) -> list[str]:
+    """Ensure a couple of extra languages are installed and active on the target DB.
+
+    Uses fluvo's own language installer (so this doubles as coverage of it) and
+    waits for the languages to become active. Skips the dependent test if they
+    cannot be activated (e.g. a locked-down external Odoo).
+
+    Args:
+        rpc: A connection to the target database.
+
+    Returns:
+        list[str]: The language codes that are active and usable for translations.
+    """
+    from fluvo.lib import odoo_lib
+    from fluvo.lib.actions import language_installer
+
+    langs = ["nl_NL", "fr_FR"]
+    try:
+        version = odoo_lib.get_odoo_version(rpc)
+        lang_model = rpc.get_model("res.lang")
+        wizard = rpc.get_model("base.language.install")
+        # Odoo 16+ takes the 'lang_ids' m2m (the whole e2e matrix is >= 16); older
+        # versions used a single 'lang' Selection. Call lang_install with the wizard
+        # id positionally (RPC style) — not via browse(), which the client omits.
+        key = "lang_ids" if version >= 16 else "lang"
+        for code in langs:
+            ids = lang_model.search(
+                [("code", "=", code)], context={"active_test": False}
+            )
+            if not ids:
+                pytest.skip(f"Language {code} is not available in this Odoo image")
+            vals = (
+                {key: [(6, 0, ids)], "overwrite": False}
+                if version >= 16
+                else {key: code, "overwrite": False}
+            )
+            wizard_id = wizard.create(vals)
+            wizard.lang_install([wizard_id])
+        if not language_installer._wait_for_languages_to_be_active(
+            rpc, langs, timeout=240
+        ):
+            pytest.skip(f"Could not activate languages {langs} on the target DB")
+    except Exception as exc:  # pragma: no cover - environment-dependent
+        pytest.skip(f"Language installation unavailable: {exc}")
+    return langs
