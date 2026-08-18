@@ -279,3 +279,34 @@ def translated_languages(rpc: Any) -> list[str]:
     except Exception as exc:  # pragma: no cover - environment-dependent
         pytest.skip(f"Language installation unavailable: {exc}")
     return langs
+
+
+# --- Second company (for the per-company import tests, #255 part 2) ---
+@pytest.fixture(scope="session")
+def second_company(rpc: Any, product_module: str) -> int:
+    """Ensure a second res.company exists and the admin user may use it.
+
+    Depends on ``product_module`` so 'product' (which defines the company-dependent
+    ``standard_price``) is installed and the registry has been reloaded first.
+
+    Args:
+        rpc: A connection to the target database.
+        product_module: The installed product module fixture.
+
+    Returns:
+        int: The database id of the second company.
+    """
+    companies = rpc.get_model("res.company")
+    users = rpc.get_model("res.users")
+    try:
+        existing = companies.search([("name", "=", "Fluvo E2E Co2")])
+        cid = (
+            int(existing[0])
+            if existing
+            else int(companies.create({"name": "Fluvo E2E Co2"}))
+        )
+        # Grant the connecting user access to the new company.
+        users.write([rpc.user_id], {"company_ids": [(4, cid)]})
+    except Exception as exc:  # pragma: no cover - environment-dependent
+        pytest.skip(f"Could not set up a second company: {exc}")
+    return cid
