@@ -372,6 +372,7 @@ dependencies = [
     { name = "polars", version = "1.41.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "pyarrow", version = "21.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "pyarrow", version = "24.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "pyyaml" },
     { name = "rich" },
 ]
 
@@ -471,6 +472,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=6.2.5" },
     { name = "pytest-mock", marker = "extra == 'dev'" },
     { name = "pytest-mock", marker = "extra == 'mypy'" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich" },
     { name = "ruff", marker = "extra == 'lint'", specifier = ">=0.5.5" },
     { name = "shibuya", marker = "extra == 'docs'", specifier = ">=2025.5.30" },

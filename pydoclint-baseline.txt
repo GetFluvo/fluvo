@@ -227,6 +227,15 @@ src/fluvo/lib/expr.py
     DOC203: Function `date` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
     DOC203: Function `datetime` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.Expr']; docstring return section types: ['']
 --------------------
+src/fluvo/lib/flow.py
+    DOC502: Function `_interpolate` has a "Raises" section in the docstring, but there are not "raise" statements in the body
+    DOC502: Function `_resolve_vars` has a "Raises" section in the docstring, but there are not "raise" statements in the body
+    DOC502: Function `_parse_vars` has a "Raises" section in the docstring, but there are not "raise" statements in the body
+    DOC502: Function `_interp_with_value` has a "Raises" section in the docstring, but there are not "raise" statements in the body
+    DOC502: Function `_parse_step` has a "Raises" section in the docstring, but there are not "raise" statements in the body
+    DOC502: Function `_parse_flow` has a "Raises" section in the docstring, but there are not "raise" statements in the body
+    DOC502: Function `select_flows` has a "Raises" section in the docstring, but there are not "raise" statements in the body
+--------------------
 src/fluvo/lib/geonames.py
     DOC203: Function `get_cache_dir` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Path']; docstring return section types: ['']
     DOC203: Function `_get_cached_file` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Path | None']; docstring return section types: ['']

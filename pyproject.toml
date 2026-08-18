@@ -31,6 +31,7 @@ dependencies = [
     "rich",
     "polars",
     "pyarrow",
+    "pyyaml >=6.0",
 ]
 
 
@@ -53,6 +54,7 @@ requires = [
     "rich",
     "polars",
     "pyarrow",
+    "pyyaml >=6.0",
 ]
 build-backend = "setuptools.build_meta"
 
