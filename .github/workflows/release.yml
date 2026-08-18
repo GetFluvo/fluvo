@@ -29,7 +29,7 @@ jobs:
           fetch-depth: 0
 
       - name: Build compiled (mypyc) wheels
-        uses: pypa/cibuildwheel@v4.1.1
+        uses: pypa/cibuildwheel@v4.2.0
         # All build settings live in [tool.cibuildwheel] in pyproject.toml.
 
       - uses: actions/upload-artifact@v7
