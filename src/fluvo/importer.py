@@ -99,6 +99,31 @@ def _get_env_from_config(
     return env_name if env_name else None
 
 
+def expected_fail_file(
+    config: Union[str, dict[str, Any]], model: str, filename: str
+) -> str:
+    """Return the fail-file path a normal (non-``--fail``) import would write.
+
+    Mirrors the path logic in :func:`run_import` exactly, so the flow runner can
+    report where a step's failed rows landed without guessing.
+
+    Args:
+        config: Connection config path or dict (used to derive the env directory).
+        model: The target Odoo model.
+        filename: The source CSV path.
+
+    Returns:
+        str: The absolute path of the fail file this import would write.
+    """
+    env_name = _get_env_from_config(config)
+    input_file_dir = Path(filename).resolve().parent
+    if env_name and input_file_dir.name != env_name:
+        env_output_dir = input_file_dir / env_name
+    else:
+        env_output_dir = input_file_dir
+    return str(env_output_dir / _get_fail_filename(model, False))
+
+
 def _run_preflight_checks(
     preflight_mode: PreflightMode, import_plan: dict[str, Any], **kwargs: Any
 ) -> bool:

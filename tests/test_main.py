@@ -27,7 +27,7 @@ def test_project_mode_with_explicit_flow_file(
             f.write("flow: content")
         result = runner.invoke(__main__.cli, ["--flow-file", "test_flow.yml"])
         assert result.exit_code == 0
-        mock_run_flow.assert_called_once_with("test_flow.yml", None)
+        mock_run_flow.assert_called_once_with("test_flow.yml", None, {})
 
 
 @patch("fluvo.__main__.run_project_flow")
@@ -40,7 +40,7 @@ def test_project_mode_with_default_flow_file(
             f.write("default flow")
         result = runner.invoke(__main__.cli)
         assert result.exit_code == 0
-        mock_run_flow.assert_called_once_with("flows.yml", None)
+        mock_run_flow.assert_called_once_with("flows.yml", None, {})
 
 
 def test_shows_help_when_no_command_or_flow_file(runner: CliRunner) -> None:
@@ -1891,32 +1891,101 @@ def test_update_move_dates_exception(mock_get_conn: MagicMock) -> None:
 # --- run_project_flow Tests ---
 
 
-def test_run_project_flow_not_implemented_raises() -> None:
-    """The unimplemented flow runner aborts non-zero instead of silently succeeding.
-
-    Interim behaviour for #251: `--flow-file` must never exit 0 having done
-    nothing (the worst failure mode for a migration tool). run_project_flow raises
-    SystemExit with a non-zero code until the real runner lands.
-    """
-    from fluvo.__main__ import run_project_flow
-
-    for name in ("my_flow", None):
-        with pytest.raises(SystemExit) as exc_info:
-            run_project_flow("flows.yml", name)
-        assert exc_info.value.code != 0
+_TWO_FLOWS = """
+version: 1
+flows:
+  - name: a
+    steps: [{run: import, with: {model: res.partner}}]
+  - name: b
+    steps: [{run: write, with: {model: res.partner}}]
+"""
 
 
-def test_flow_file_flag_exits_nonzero(runner: CliRunner) -> None:
-    """`fluvo --flow-file <existing>` exits non-zero (not a silent success) (#251).
+@patch("fluvo.__main__._run_flow_step")
+def test_flow_runner_success_exits_zero(
+    mock_step: MagicMock, runner: CliRunner
+) -> None:
+    """A flow whose steps all succeed exits 0 (#251 executor)."""
+    from fluvo.lib.flow_runner import StepOutcome
 
-    The exit code is the contract that matters: a validated-but-unrun flow file
-    must not look like success. (The error text goes to a Rich stderr panel, which
-    wraps under CI's 80-col width, so we don't assert on its wording here — the
-    unit test above pins the message path.)
-    """
+    mock_step.return_value = StepOutcome(ok=True)
     with runner.isolated_filesystem():
         with open("flows.yml", "w") as f:
-            f.write("version: 1\n")
+            f.write(_TWO_FLOWS)
+        result = runner.invoke(__main__.cli, ["--flow-file", "flows.yml"])
+        assert result.exit_code == 0
+        assert mock_step.call_count == 2  # both flows' steps ran
+
+
+@patch("fluvo.__main__._run_flow_step")
+def test_flow_runner_failed_step_exits_nonzero(
+    mock_step: MagicMock, runner: CliRunner
+) -> None:
+    """Any failed step makes the whole run exit non-zero (#251)."""
+    from fluvo.lib.flow_runner import StepOutcome
+
+    mock_step.return_value = StepOutcome(ok=False, error="boom")
+    with runner.isolated_filesystem():
+        with open("flows.yml", "w") as f:
+            f.write(_TWO_FLOWS)
+        result = runner.invoke(__main__.cli, ["--flow-file", "flows.yml"])
+        assert result.exit_code != 0
+
+
+@patch("fluvo.__main__._run_flow_step")
+def test_flow_runner_run_selects_one_flow(
+    mock_step: MagicMock, runner: CliRunner
+) -> None:
+    """--run executes only the named flow(s)."""
+    from fluvo.lib.flow_runner import StepOutcome
+
+    mock_step.return_value = StepOutcome(ok=True)
+    with runner.isolated_filesystem():
+        with open("flows.yml", "w") as f:
+            f.write(_TWO_FLOWS)
+        result = runner.invoke(__main__.cli, ["--flow-file", "flows.yml", "--run", "b"])
+        assert result.exit_code == 0
+        assert mock_step.call_count == 1
+        assert mock_step.call_args[0][0] == "write"
+
+
+@patch("fluvo.__main__._run_flow_step")
+def test_flow_var_override_reaches_step(
+    mock_step: MagicMock, runner: CliRunner
+) -> None:
+    """--var overrides a flow variable and is interpolated into the step."""
+    from fluvo.lib.flow_runner import StepOutcome
+
+    mock_step.return_value = StepOutcome(ok=True)
+    flow = """
+version: 1
+vars:
+  conn: default.conf
+flows:
+  - name: a
+    steps:
+      - run: import
+        with:
+          connection_file: "{{ vars.conn }}"
+          model: res.partner
+"""
+    with runner.isolated_filesystem():
+        with open("flows.yml", "w") as f:
+            f.write(flow)
+        result = runner.invoke(
+            __main__.cli, ["--flow-file", "flows.yml", "--var", "conn=prod.conf"]
+        )
+        assert result.exit_code == 0
+        # _run_flow_step(command, with_) — check the interpolated override landed.
+        with_ = mock_step.call_args[0][1]
+        assert with_["connection_file"] == "prod.conf"
+
+
+def test_flow_file_invalid_exits_nonzero(runner: CliRunner) -> None:
+    """An invalid flow file aborts non-zero rather than silently succeeding (#251)."""
+    with runner.isolated_filesystem():
+        with open("flows.yml", "w") as f:
+            f.write("version: 1\n")  # no `flows:` -> FlowError
         result = runner.invoke(__main__.cli, ["--flow-file", "flows.yml"])
         assert result.exit_code != 0
 
