@@ -28,7 +28,9 @@ def test_run_update_module_list(mock_get_connection: MagicMock) -> None:
     # 3. Assertions
     assert result is True
     mock_module_obj.update_list.assert_called_once()
-    mock_module_obj.clear_caches.assert_called_once()
+    # clear_caches() is intentionally NOT called — removed in Odoo 19 and
+    # unnecessary elsewhere (#236, #237).
+    mock_module_obj.clear_caches.assert_not_called()
     mock_module_obj.search_count.assert_called_once_with([])
 
 
@@ -287,27 +289,6 @@ def test_run_module_uninstallation_connection_error(
     run_module_uninstallation(config="bad.conf", modules=["any_module"])
     mock_log_error.assert_called_once()
     assert "Failed to connect to Odoo" in mock_log_error.call_args[0][0]
-
-
-@patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")
-def test_run_update_module_list_survives_removed_clear_caches(
-    mock_get_connection: MagicMock,
-) -> None:
-    """Odoo 19 removed clear_caches() (404); update-list must still succeed (#236)."""
-    mock_module_obj = MagicMock()
-    mock_module_obj.clear_caches.side_effect = Exception(
-        "404 Not Found: method 'ir.module.module.clear_caches' does not exist"
-    )
-    mock_module_obj.search_count.return_value = 42
-    mock_connection = MagicMock()
-    mock_connection.get_model.return_value = mock_module_obj
-    mock_get_connection.return_value = mock_connection
-
-    result = run_update_module_list(config="dummy.conf")
-
-    assert result is True
-    mock_module_obj.update_list.assert_called_once()
-    mock_module_obj.search_count.assert_called_once_with([])
 
 
 @patch("fluvo.lib.actions.module_manager.conf_lib.get_connection_from_config")

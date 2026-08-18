@@ -31,15 +31,11 @@ def run_update_module_list(config: str) -> bool:
         # This call triggers the server-side scan of the addons path.
         module_obj.update_list()
 
-        # Best-effort cache clear. `clear_caches()` was removed from the ORM's RPC
-        # surface in Odoo 19 (it 404s / NotFound), and it is unnecessary anyway:
-        # update_list() commits server-side and the search_count() below is a fresh
-        # read that already reflects the new state. Guard it so older Odoo still gets
-        # the hint while Odoo 19+ no longer breaks the whole workflow (#236).
-        try:
-            module_obj.clear_caches()
-        except Exception as e:  # pragma: no cover - version-dependent, non-fatal
-            log.debug(f"clear_caches() unavailable (expected on Odoo 19+): {e}")
+        # No cache-clear RPC on purpose. ir.module.module.clear_caches() was removed
+        # from the ORM's RPC surface in Odoo 19 (it 404s), and it is unnecessary on
+        # every version anyway: update_list() commits server-side and the
+        # search_count() below is a fresh read that already reflects the new state.
+        # Dropping the call is version-safe and avoids a wasted round-trip (#236, #237).
 
         # Perform a search to ensure the client syncs with the server state.
         # This acts as a "wait" signal.
