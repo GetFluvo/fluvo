@@ -388,6 +388,7 @@ dependencies = [
     { name = "polars", version = "1.41.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "pyarrow", version = "21.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "pyarrow", version = "25.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "pyyaml" },
     { name = "rich" },
 ]
 
@@ -422,6 +423,8 @@ lint = [
 mypy = [
     { name = "mypy" },
     { name = "pytest-mock" },
+    { name = "types-pyyaml", version = "6.0.12.20250915", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "types-pyyaml", version = "6.0.12.20260815", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
 typeguard = [
     { name = "typeguard" },
@@ -461,6 +464,8 @@ lint = [
 mypy = [
     { name = "mypy" },
     { name = "pytest-mock" },
+    { name = "types-pyyaml", version = "6.0.12.20250915", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "types-pyyaml", version = "6.0.12.20260815", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
 typeguard = [
     { name = "typeguard" },
@@ -489,6 +494,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=6.2.5" },
     { name = "pytest-mock", marker = "extra == 'dev'" },
     { name = "pytest-mock", marker = "extra == 'mypy'" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich" },
     { name = "ruff", marker = "extra == 'lint'", specifier = ">=0.5.5" },
     { name = "shibuya", marker = "extra == 'docs'", specifier = ">=2025.5.30" },
@@ -498,6 +504,7 @@ requires-dist = [
     { name = "sphinx-copybutton", marker = "extra == 'docs'" },
     { name = "sphinx-mermaid", marker = "extra == 'docs'" },
     { name = "typeguard", marker = "extra == 'typeguard'", specifier = ">=2.13.3" },
+    { name = "types-pyyaml", marker = "extra == 'mypy'", specifier = ">=6.0" },
     { name = "xdoctest", extras = ["colors"], marker = "extra == 'xdoctest'", specifier = ">=0.15.10" },
 ]
 provides-extras = ["dev", "lint", "docs", "mypy", "typeguard", "xdoctest"]
@@ -529,6 +536,7 @@ lint = [
 mypy = [
     { name = "mypy", specifier = ">=0.930" },
     { name = "pytest-mock" },
+    { name = "types-pyyaml", specifier = ">=6.0" },
 ]
 typeguard = [{ name = "typeguard", specifier = ">=2.13.3" }]
 xdoctest = [{ name = "xdoctest", extras = ["colors"], specifier = ">=0.15.10" }]
@@ -1862,6 +1870,31 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c7/68/71c1a15b5f65f40e91b65da23b8224dad41349894535a97f63a52e462196/typeguard-4.4.4.tar.gz", hash = "sha256:3a7fd2dffb705d4d0efaed4306a704c89b9dee850b688f060a8b1615a79e5f74", size = 75203, upload-time = "2025-06-18T09:56:07.624Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1b/a9/e3aee762739c1d7528da1c3e06d518503f8b6c439c35549b53735ba52ead/typeguard-4.4.4-py3-none-any.whl", hash = "sha256:b5f562281b6bfa1f5492470464730ef001646128b180769880468bd84b68b09e", size = 34874, upload-time = "2025-06-18T09:56:05.999Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20250915"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.10'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7e/69/3c51b36d04da19b92f9e815be12753125bd8bc247ba0470a982e6979e71c/types_pyyaml-6.0.12.20250915.tar.gz", hash = "sha256:0f8b54a528c303f0e6f7165687dd33fafa81c807fcac23f632b63aa624ced1d3", size = 17522, upload-time = "2025-09-15T03:01:00.728Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bd/e0/1eed384f02555dde685fff1a1ac805c1c7dcb6dd019c916fe659b1c1f9ec/types_pyyaml-6.0.12.20250915-py3-none-any.whl", hash = "sha256:e7d4d9e064e89a3b3cae120b4990cd370874d2bf12fa5f46c97018dd5d3c9ab6", size = 20338, upload-time = "2025-09-15T03:00:59.218Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20260815"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.11'",
+    "python_full_version == '3.10.*'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9f/72/b56089aeee6c496d969bac42376bedb6e3eeab4682e1018fa3137122f94b/types_pyyaml-6.0.12.20260815.tar.gz", hash = "sha256:28764110c9cf35846e733da32d8d734df7473c5dde9ef67c3b7332ec0e819858", size = 18545, upload-time = "2026-08-15T02:41:51.532Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/08/52/eefeba09be4ef2a1eb989eb92934561e8e502a6ee3c32654996e4be7e399/types_pyyaml-6.0.12.20260815-py3-none-any.whl", hash = "sha256:6f332212b7e191f3afd5016a713c510b6340593b7ebec573c7d5d20aa5386d3b", size = 21148, upload-time = "2026-08-15T02:41:50.555Z" },
 ]
 
 [[package]]

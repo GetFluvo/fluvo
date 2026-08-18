@@ -31,6 +31,7 @@ dependencies = [
     "rich",
     "polars",
     "pyarrow",
+    "pyyaml >=6.0",
 ]
 
 
@@ -53,6 +54,7 @@ requires = [
     "rich",
     "polars",
     "pyarrow",
+    "pyyaml >=6.0",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -78,7 +80,7 @@ docs = [
     "sphinx_copybutton",
     "pygments <2.20",  # shibuya passes int linespans; pygments 2.20 escapes it -> crash
 ]
-mypy = ["mypy >=0.930", "pytest-mock"]
+mypy = ["mypy >=0.930", "pytest-mock", "types-pyyaml >=6.0"]
 typeguard = ["typeguard >=2.13.3"]
 xdoctest = ["xdoctest[colors] >=0.15.10"]
 
@@ -104,7 +106,7 @@ docs = [
     "sphinx_copybutton",
     "pygments <2.20",  # shibuya passes int linespans; pygments 2.20 escapes it -> crash
 ]
-mypy = ["mypy >=0.930", "pytest-mock"]
+mypy = ["mypy >=0.930", "pytest-mock", "types-pyyaml >=6.0"]
 typeguard = ["typeguard >=2.13.3"]
 xdoctest = ["xdoctest[colors] >=0.15.10"]
 
