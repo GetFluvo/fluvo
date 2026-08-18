@@ -163,6 +163,9 @@ def mypy(session: nox.Session) -> None:
     session.install("mypy")
     session.install("pytest")
     session.install("httpx")
+    # mypy runs from this session's venv, so its stub packages must be installed
+    # here (the earlier `uv sync --group mypy` populates .venv, not this venv).
+    session.install("types-PyYAML")
     session.install("-e", ".")
     session.run("mypy", *args)
     if not session.posargs:
