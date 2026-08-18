@@ -665,8 +665,7 @@ def _validate_header(  # noqa: C901
     missing_fields = [
         field
         for field in csv_header
-        if (_base_field_name(field) not in odoo_field_names)
-        or (field.endswith("/.id"))
+        if (_base_field_name(field) not in odoo_field_names) or (field.endswith("/.id"))
     ]
 
     if missing_fields:

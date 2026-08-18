@@ -1398,7 +1398,11 @@ class TestTranslationColumnsCheck:
         filename = self._write(tmp_path, "id,standard_price@2")
         plan: dict[str, Any] = {}
         ok = preflight.translation_columns_check(
-            PreflightMode.NORMAL, "product.template", filename, "c.conf", plan,
+            PreflightMode.NORMAL,
+            "product.template",
+            filename,
+            "c.conf",
+            plan,
             separator=",",
         )
         assert ok is False
