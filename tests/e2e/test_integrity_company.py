@@ -38,8 +38,16 @@ def _seed_variants(
 ) -> list[int]:
     """Seed ``n`` templates and give each auto-variant the external id ``prefix_vI``.
 
+    Args:
+        conn_config: Connection config dict.
+        rpc: A connection for ground-truth queries and id registration.
+        tmp_path: Temp directory for the seed CSV.
+        prefix: Namespacing marker for the external ids.
+        n: Number of templates (and variants) to seed.
+
     Returns:
-        The variant database ids, index-aligned (variant ``i`` -> ``prefix_vI``).
+        list[int]: The variant database ids, index-aligned (variant ``i`` ->
+        ``prefix_vI``).
     """
     rows = [{"id": f"{prefix}_t{i}", "name": f"{prefix} Product {i}"} for i in range(n)]
     csv_path = G.write_csv(str(tmp_path / f"{prefix}_tmpl.csv"), ["id", "name"], rows)
