@@ -1281,3 +1281,151 @@ class TestStructuredValueCheck:
         )
         assert result is True
         err.assert_not_called()
+
+
+class TestTranslationColumnsCheck:
+    """Tests for translation_columns_check (#254, field@lang detection)."""
+
+    def _write(self, tmp_path: Path, header: str) -> str:
+        src = tmp_path / "data.csv"
+        src.write_text(f"{header}\nx1,val\n")
+        return str(src)
+
+    @patch("fluvo.lib.preflight._get_installed_languages")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    def test_detects_and_records_plan(
+        self,
+        mock_fields: MagicMock,
+        mock_langs: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """A field@lang column on a translatable field is recorded in the plan."""
+        mock_fields.return_value = {
+            "id": {"type": "char"},
+            "name": {"type": "char", "translate": True},
+        }
+        mock_langs.return_value = {"nl_NL", "en_US"}
+        filename = self._write(tmp_path, "id,name@nl_NL")
+        plan: dict[str, Any] = {}
+        ok = preflight.translation_columns_check(
+            PreflightMode.NORMAL, "res.partner", filename, "c.conf", plan, separator=","
+        )
+        assert ok is True
+        assert plan["translations"] == {"nl_NL": ["name"]}
+        assert plan["translation_columns"] == ["name@nl_NL"]
+
+    @patch("fluvo.lib.preflight._get_installed_languages")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    def test_no_at_columns_is_noop(
+        self,
+        mock_fields: MagicMock,
+        mock_langs: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Without any @ column the check passes and records nothing."""
+        filename = self._write(tmp_path, "id,name")
+        plan: dict[str, Any] = {}
+        ok = preflight.translation_columns_check(
+            PreflightMode.NORMAL, "res.partner", filename, "c.conf", plan, separator=","
+        )
+        assert ok is True
+        assert "translations" not in plan
+        mock_fields.assert_not_called()
+        mock_langs.assert_not_called()
+
+    @patch("fluvo.lib.preflight._show_error_panel")
+    @patch("fluvo.lib.preflight._get_installed_languages")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    def test_uninstalled_language_aborts(
+        self,
+        mock_fields: MagicMock,
+        mock_langs: MagicMock,
+        mock_panel: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """A field@lang for a language that isn't installed fails the check."""
+        mock_fields.return_value = {
+            "id": {"type": "char"},
+            "name": {"type": "char", "translate": True},
+        }
+        mock_langs.return_value = {"en_US"}
+        filename = self._write(tmp_path, "id,name@fr_FR")
+        plan: dict[str, Any] = {}
+        ok = preflight.translation_columns_check(
+            PreflightMode.NORMAL, "res.partner", filename, "c.conf", plan, separator=","
+        )
+        assert ok is False
+        mock_panel.assert_called_once()
+
+    @patch("fluvo.lib.preflight._show_error_panel")
+    @patch("fluvo.lib.preflight._get_installed_languages")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    def test_non_translatable_at_column_aborts(
+        self,
+        mock_fields: MagicMock,
+        mock_langs: MagicMock,
+        mock_panel: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """An @ qualifier on a non-translatable, non-company field is rejected."""
+        mock_fields.return_value = {
+            "id": {"type": "char"},
+            "ref": {"type": "char"},
+        }
+        filename = self._write(tmp_path, "id,ref@nl_NL")
+        plan: dict[str, Any] = {}
+        ok = preflight.translation_columns_check(
+            PreflightMode.NORMAL, "res.partner", filename, "c.conf", plan, separator=","
+        )
+        assert ok is False
+        mock_panel.assert_called_once()
+
+    @patch("fluvo.lib.preflight._show_error_panel")
+    @patch("fluvo.lib.preflight._get_installed_languages")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    def test_company_dependent_at_column_not_supported(
+        self,
+        mock_fields: MagicMock,
+        mock_langs: MagicMock,
+        mock_panel: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """A field@company on a company-dependent field is refused (see #255)."""
+        mock_fields.return_value = {
+            "id": {"type": "char"},
+            "standard_price": {"type": "float", "company_dependent": True},
+        }
+        filename = self._write(tmp_path, "id,standard_price@2")
+        plan: dict[str, Any] = {}
+        ok = preflight.translation_columns_check(
+            PreflightMode.NORMAL,
+            "product.template",
+            filename,
+            "c.conf",
+            plan,
+            separator=",",
+        )
+        assert ok is False
+        mock_panel.assert_called_once()
+
+    @patch("fluvo.lib.preflight._get_installed_languages")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    def test_installed_langs_unverifiable_still_records(
+        self,
+        mock_fields: MagicMock,
+        mock_langs: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """If the installed-language list can't be fetched, detection still proceeds."""
+        mock_fields.return_value = {
+            "id": {"type": "char"},
+            "name": {"type": "char", "translate": True},
+        }
+        mock_langs.return_value = None  # connection couldn't fetch languages
+        filename = self._write(tmp_path, "id,name@nl_NL")
+        plan: dict[str, Any] = {}
+        ok = preflight.translation_columns_check(
+            PreflightMode.NORMAL, "res.partner", filename, "c.conf", plan, separator=","
+        )
+        assert ok is True
+        assert plan["translations"] == {"nl_NL": ["name"]}

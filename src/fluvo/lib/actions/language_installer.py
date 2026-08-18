@@ -39,65 +39,6 @@ def _wait_for_languages_to_be_active(
     return False
 
 
-def _install_languages_modern(
-    connection: Any, languages: list[str], version: int
-) -> None:
-    """Installs languages using the wizard method for Odoo 15+."""
-    log.info(f"Using modern installation wizard (Odoo {version}).")
-    wizard_obj = connection.get_model("base.language.install")
-    lang_model = connection.get_model("res.lang")
-
-    # Use `active_test: False` to find inactive language records.
-    lang_ids = lang_model.search(
-        [("code", "in", languages)], context={"active_test": False}
-    )
-    if not lang_ids:
-        log.warning(
-            f"None of the specified languages could be found in Odoo: {languages}"
-        )
-        return
-
-    # Odoo 17 and newer use 'lang_ids'; older versions (15, 16) use 'langs'.
-    key = "lang_ids" if version >= 17 else "langs"
-    wizard_data = {key: [(6, 0, lang_ids)]}
-
-    try:
-        wizard_id = wizard_obj.create(wizard_data)
-        log.info(f"Created installation wizard with ID: {wizard_id}")
-        wizard_obj.browse(wizard_id).lang_install()
-    except Exception as e:
-        # Handle the edge case where a version might have an unexpected key
-        log.error(f"Failed to create language wizard with key '{key}': {e}")
-        if key == "lang_ids":
-            try:
-                log.debug("Attempting fallback with 'langs' key for wizard.")
-                fallback_data = {"langs": [(6, 0, lang_ids)]}
-                wizard_id = wizard_obj.create(fallback_data)
-                log.info(f"Created installation wizard with ID: {wizard_id}")
-                wizard_obj.browse(wizard_id).lang_install()
-            except Exception as fallback_e:
-                log.error(f"Fallback attempt also failed: {fallback_e}")
-                raise fallback_e
-        else:
-            raise e
-
-
-def _install_languages_legacy(connection: Any, languages: list[str]) -> None:
-    """Installs languages using the method for Odoo <=14."""
-    log.info("Using per-language wizard installation method (Odoo <=14).")
-    wizard_obj = connection.get_model("base.language.install")
-
-    for lang_code in languages:
-        try:
-            log.info(f"Creating install wizard for language: {lang_code}")
-            wizard_id = wizard_obj.create({"lang": lang_code, "overwrite": False})
-            wizard_obj.browse(wizard_id).lang_install()
-            log.info(f"Successfully triggered installation for '{lang_code}'.")
-        except Exception as e:
-            log.error(f"Failed to install language '{lang_code}': {e}")
-            raise
-
-
 def run_language_installation(config: str, languages: list[str]) -> bool:
     """Installs a list of languages into the Odoo database.
 
@@ -118,12 +59,14 @@ def run_language_installation(config: str, languages: list[str]) -> bool:
         for lang_code in languages:
             log.info(f"Preparing to install language: {lang_code}...")
             try:
-                wizard_vals = {}
-                # FIX: Add the version-switching logic
-                if odoo_version < 15:
+                wizard_vals: dict[str, Any] = {}
+                # base.language.install changed shape across versions: Odoo <= 15
+                # uses a single 'lang' Selection; Odoo 16+ uses a 'lang_ids'
+                # many2many (verified against a real Odoo 16 — the wizard has no
+                # 'langs' field, so the old <17 'langs' branch failed on 16).
+                if odoo_version < 16:
                     wizard_vals = {"lang": lang_code, "overwrite": False}
                 else:
-                    # Logic for modern versions (15+)
                     lang_model = connection.get_model("res.lang")
                     lang_ids = lang_model.search(
                         [("code", "=", lang_code)],
@@ -133,17 +76,10 @@ def run_language_installation(config: str, languages: list[str]) -> bool:
                         log.error(f"Language code '{lang_code}' not found in Odoo.")
                         all_success = False
                         continue
-
-                    if odoo_version < 17:
-                        wizard_vals = {
-                            "langs": [(6, 0, lang_ids)],
-                            "overwrite": False,
-                        }
-                    else:  # Odoo 17+
-                        wizard_vals = {
-                            "lang_ids": [(6, 0, lang_ids)],
-                            "overwrite": False,
-                        }
+                    wizard_vals = {
+                        "lang_ids": [(6, 0, lang_ids)],
+                        "overwrite": False,
+                    }
 
                 wizard_id = installer_model.create(wizard_vals)
                 installer_model.lang_install([wizard_id])

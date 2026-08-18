@@ -640,6 +640,23 @@ def _get_csv_header(filename: str, separator: str) -> list[str] | None:
         return None
 
 
+def _base_field_name(column: str) -> str:
+    """Return the underlying Odoo field name for a source column.
+
+    Strips the two suffix conventions Fluvo layers on top of a field name: the
+    relational ``/id`` / ``/.id`` (e.g. ``parent_id/id``) and the per-key ``@``
+    qualifier used for translations (``name@nl_NL``, #254) and company-dependent
+    values (``standard_price@2``, #255).
+
+    Args:
+        column: The source CSV column name.
+
+    Returns:
+        str: The base Odoo field name.
+    """
+    return column.split("/", 1)[0].split("@", 1)[0]
+
+
 def _validate_header(  # noqa: C901
     csv_header: list[str], odoo_fields: dict[str, Any], model: str
 ) -> bool:
@@ -648,7 +665,7 @@ def _validate_header(  # noqa: C901
     missing_fields = [
         field
         for field in csv_header
-        if (field.split("/")[0] not in odoo_field_names) or (field.endswith("/.id"))
+        if (_base_field_name(field) not in odoo_field_names) or (field.endswith("/.id"))
     ]
 
     if missing_fields:
@@ -1548,4 +1565,112 @@ def structured_value_check(  # noqa: C901
         log.warning(f"Could not scan for structured values: {e}")
         return True
 
+    return True
+
+
+@register_check
+def translation_columns_check(  # noqa: C901
+    preflight_mode: "PreflightMode",
+    model: str,
+    filename: str,
+    config: str | dict[str, Any],
+    import_plan: dict[str, Any],
+    **kwargs: Any,
+) -> bool:
+    """Detect and validate ``field@lang`` translation columns (#254).
+
+    Multi-language import is done as extra passes: the base pass writes the plain
+    ``field`` values, then one pass per language writes the ``field@lang`` columns
+    with ``context={'lang': ...}`` (translated fields are a jsonb column keyed by
+    language, so the passes merge). This check finds those columns, confirms the
+    field is actually translatable and the language is installed, and records the
+    plan in ``import_plan`` so the importer can run the passes and exclude the
+    columns from the base create.
+
+    Args:
+        preflight_mode: The current pre-flight mode.
+        model: The target Odoo model.
+        filename: Path to the source CSV.
+        config: Connection config path or dict.
+        import_plan: Shared plan; ``translations`` (lang -> fields) and
+            ``translation_columns`` are stored here.
+        **kwargs: separator.
+
+    Returns:
+        bool: ``False`` on an invalid ``@`` column or an uninstalled language;
+        ``True`` otherwise.
+    """
+    separator = kwargs.get("separator", ";")
+    header = _get_csv_header(filename, separator)
+    if not header:
+        return True
+    at_columns = [c for c in header if "@" in c]
+    if not at_columns:
+        return True
+    odoo_fields = _get_odoo_fields(config, model)
+    if not odoo_fields:
+        return True
+
+    translations: dict[str, list[str]] = {}
+    translation_columns: list[str] = []
+    for col in at_columns:
+        base = _base_field_name(col)
+        lang = col.split("@", 1)[1]
+        info = odoo_fields.get(base, {})
+        # TODO(#255): a field that is BOTH translate and company_dependent is
+        # classified here as a translation (the qualifier is read as a lang). When
+        # per-company import lands, disambiguate by the qualifier format (lang code
+        # vs company id/xmlid) instead of by field-attribute precedence.
+        if info.get("translate"):
+            if not lang:
+                _show_error_panel(
+                    "Invalid translation column",
+                    f"Column '{col}' is missing a language after '@' "
+                    f"(expected e.g. '{base}@nl_NL').",
+                )
+                return False
+            translations.setdefault(lang, []).append(base)
+            translation_columns.append(col)
+        elif info.get("company_dependent"):
+            _show_error_panel(
+                "Not supported yet",
+                f"Column '{col}' targets a company-dependent field. Per-company "
+                "import ('field@company') is not available yet — see "
+                "https://github.com/GetFluvo/fluvo/issues/255.",
+            )
+            return False
+        else:
+            _show_error_panel(
+                "Invalid '@' column",
+                f"Column '{col}' uses the '@' qualifier, but '{base}' is not a "
+                "translatable field. The 'field@lang' convention is only for "
+                "translated fields — see "
+                "https://github.com/GetFluvo/fluvo/issues/254.",
+            )
+            return False
+
+    if not translations:
+        return True
+
+    installed = _get_installed_languages(config)
+    if installed is not None:
+        missing = sorted(lang for lang in translations if lang not in installed)
+        if missing:
+            _show_error_panel(
+                "Language not installed",
+                f"These languages are used in field@lang columns but are not "
+                f"installed on the database: {missing}\n\n"
+                "Install them first (in Odoo, or with fluvo's language installer), "
+                "then re-run.",
+            )
+            return False
+
+    import_plan["translations"] = {
+        lang: sorted(set(fields)) for lang, fields in translations.items()
+    }
+    import_plan["translation_columns"] = translation_columns
+    log.info(
+        f"Detected translation columns for {sorted(translations)}: "
+        f"{import_plan['translations']}"
+    )
     return True
