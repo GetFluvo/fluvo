@@ -6,6 +6,7 @@ generated CSV, language context and reconciliation can be inspected without a
 live Odoo.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,9 @@ import polars as pl
 from fluvo import importer
 
 
-def _capture(calls: list[dict[str, Any]], *, fail_rows: int = 0):
+def _capture(
+    calls: list[dict[str, Any]], *, fail_rows: int = 0
+) -> Callable[..., tuple[bool, dict[str, Any]]]:
     """Return an import_data stand-in that records its args and reads the CSV."""
 
     def fake_import_data(**kwargs: Any) -> tuple[bool, dict[str, Any]]:
@@ -56,7 +59,7 @@ def test_translation_passes_build_per_language_csv(
 ) -> None:
     """Each language gets one update pass with the field@lang column renamed."""
     calls: list[dict[str, Any]] = []
-    monkeypatch.setattr(importer.import_threaded, "import_data", _capture(calls))
+    monkeypatch.setattr("fluvo.importer.import_threaded.import_data", _capture(calls))
 
     summaries = importer._run_translation_passes(
         config="c.conf",
@@ -98,7 +101,7 @@ def test_translation_passes_scope_to_imported_ids(
 ) -> None:
     """Rows whose external id was never imported are excluded from the pass."""
     calls: list[dict[str, Any]] = []
-    monkeypatch.setattr(importer.import_threaded, "import_data", _capture(calls))
+    monkeypatch.setattr("fluvo.importer.import_threaded.import_data", _capture(calls))
 
     importer._run_translation_passes(
         config="c.conf",
@@ -118,13 +121,11 @@ def test_translation_passes_scope_to_imported_ids(
     assert {r["id"] for r in calls[0]["rows"]} == {"p1"}
 
 
-def test_translation_passes_report_failures(
-    tmp_path: Path, monkeypatch: Any
-) -> None:
+def test_translation_passes_report_failures(tmp_path: Path, monkeypatch: Any) -> None:
     """A fail file left by the engine is reflected in the summary."""
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(
-        importer.import_threaded, "import_data", _capture(calls, fail_rows=1)
+        "fluvo.importer.import_threaded.import_data", _capture(calls, fail_rows=1)
     )
 
     summaries = importer._run_translation_passes(
@@ -153,7 +154,7 @@ def test_translation_passes_skip_when_all_empty(
 ) -> None:
     """A language whose column is entirely blank issues no write pass."""
     calls: list[dict[str, Any]] = []
-    monkeypatch.setattr(importer.import_threaded, "import_data", _capture(calls))
+    monkeypatch.setattr("fluvo.importer.import_threaded.import_data", _capture(calls))
 
     df = pl.DataFrame({"id": ["p1"], "name": ["A"], "name@de_DE": [""]})
     summaries = importer._run_translation_passes(

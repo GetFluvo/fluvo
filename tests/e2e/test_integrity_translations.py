@@ -29,8 +29,14 @@ def _rows(
     Each language's value is a distinct, recognisable string so a read-back under
     that language proves the right translation landed (and not the base value).
 
+    Args:
+        n: Number of category rows to generate.
+        prefix: Namespacing marker carried in every value (for querying/cleanup).
+        langs: Language codes to emit a ``name@<lang>`` column for.
+
     Returns:
-        The rows and the CSV header (``id, name, name@<lang>...``).
+        tuple[list[dict[str, str]], list[str]]: The rows and the CSV header
+        (``id, name, name@<lang>...``).
     """
     rows = []
     for i in range(n):
