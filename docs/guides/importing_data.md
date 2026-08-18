@@ -167,6 +167,21 @@ To handle relational data and updates by database ID, the tool uses special colu
   * Blank translation cells are skipped (the `name@fr_FR` for `product_b` above writes nothing), and only records that were actually imported are updated — a translation is never written to a record that failed its base import.
   * Any translation rows that fail are written to a per-language fail file (`<model>_<lang>_translations_fail.csv`) and reported in the summary, so partial translation failures are never hidden.
 
+* **`@<company>` Suffix (for company-dependent fields)**: Some fields (e.g. a product's cost, `standard_price`) store a separate value per company. To set them per company in one file, append `@` and the company reference — a database id or an external id:
+
+  ```csv
+  id,name,standard_price@1,standard_price@base.company_de
+  product_a,Widget,10.00,12.50
+  product_b,Gadget,20.00,
+  ```
+
+  How it works and what to expect:
+
+  * Each `field@company` column is written in its own pass with that company set in the Odoo context, so each company's value lands independently. The passes match on the external id and never create, so only already-imported records are touched.
+  * A pre-flight check validates every `@<company>` column *before* any data is written: the base field must be company-dependent, and each referenced company must resolve to an existing `res.company` (by database id or external id). An unknown company or a non-company-dependent field aborts the import.
+  * The `@<company>` columns only set the per-company **values**; the base record itself still lands under one company. On a multi-company database you must still choose that company (`--company-id`, `--all-companies`, or `--allow-default-company`) — see the company guard above.
+  * Blank cells are skipped, and any rows that fail are written to a per-company fail file (`<model>_company_<id>_fail.csv`) and reported in the summary.
+
 ### Field Formatting Rules
 
 Odoo's `load` method expects data for certain field types to be in a specific format.

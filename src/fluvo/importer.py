@@ -297,6 +297,186 @@ def _render_translation_summary(summaries: list[dict[str, Any]]) -> None:
     )
 
 
+def _run_company_passes(
+    config: str | dict[str, Any],
+    model: str,
+    company_column_map: dict[str, int],
+    source_df: "pl.DataFrame",
+    id_map: dict[str, int],
+    id_column: str,
+    base_context: dict[str, Any],
+    max_conn: int,
+    batch_size: int,
+    separator: str,
+    encoding: str,
+    output_dir: Path,
+) -> list[dict[str, Any]]:
+    """Write ``field@company`` columns as one update pass per company (#255 part 2).
+
+    Company-dependent fields hold a separate value per company. For each company,
+    a temporary CSV with the external id plus the renamed ``field@company`` ->
+    ``field`` columns is imported with the company set in the context and
+    ``force_create=False``, so only already-imported records are updated. Rows
+    absent from ``id_map`` and rows whose values are all blank are dropped.
+
+    Args:
+        config: Connection config path or dict.
+        model: The target Odoo model.
+        company_column_map: Mapping of source ``field@company`` column to the
+            resolved company database id.
+        source_df: The original source rows (all columns read as strings).
+        id_map: External-id -> database-id map of records imported in Pass 1.
+        id_column: The column holding the external id (the unique id field).
+        base_context: The import's context; the company keys are merged onto a copy.
+        max_conn: Worker connection count.
+        batch_size: Load batch size.
+        separator: Field delimiter for the temp CSV.
+        encoding: Encoding for the temp CSV.
+        output_dir: Directory for per-company fail files.
+
+    Returns:
+        list[dict[str, Any]]: One reconciliation summary per company with keys
+        ``company``, ``fields``, ``attempted``, ``written``, ``failed``,
+        ``unaccounted`` and ``fail_file``.
+    """
+    summaries: list[dict[str, Any]] = []
+    if id_column not in source_df.columns:
+        log.warning(
+            f"Company passes need the id column '{id_column}', which is not in "
+            f"the source; skipping company fields."
+        )
+        return summaries
+
+    # Group the source columns by their target company.
+    by_company: dict[int, list[str]] = {}
+    for col, cid in company_column_map.items():
+        by_company.setdefault(cid, []).append(col)
+
+    model_us = model.replace(".", "_")
+    imported_ids = set(id_map)
+    for cid in sorted(by_company):
+        present_cols = [c for c in by_company[cid] if c in source_df.columns]
+        if not present_cols:
+            continue
+        rename_map = {c: preflight._base_field_name(c) for c in present_cols}
+
+        sub = source_df.select([id_column, *present_cols]).filter(
+            pl.col(id_column).is_in(list(imported_ids))
+        )
+        keep = pl.lit(value=False)  # polars boolean expr seed
+        for col in present_cols:
+            keep = keep | (
+                pl.col(col).is_not_null() & (pl.col(col).str.strip_chars() != "")
+            )
+        sub = sub.filter(keep).rename(rename_map)
+
+        fields = sorted(rename_map[c] for c in present_cols)
+        attempted = sub.height
+        if attempted == 0:
+            summaries.append(
+                {
+                    "company": cid,
+                    "fields": fields,
+                    "attempted": 0,
+                    "written": 0,
+                    "failed": 0,
+                    "unaccounted": 0,
+                    "fail_file": "",
+                }
+            )
+            continue
+
+        fail_file = str(output_dir / f"{model_us}_company_{cid}_fail.csv")
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=f"_company_{cid}.csv",
+            delete=False,
+            encoding=encoding,
+            newline="",
+        ) as tmp:
+            tmp_path = tmp.name
+        try:
+            sub.write_csv(tmp_path, separator=separator)
+            # Set the target company every way Odoo reads it across versions: the
+            # env company (``company_id`` / ``allowed_company_ids``) for 17+ and
+            # ``force_company`` for <=16. Unknown keys are ignored by the server.
+            company_context = {
+                **base_context,
+                "company_id": cid,
+                "allowed_company_ids": [cid],
+                "force_company": cid,
+            }
+            success, stats = import_threaded.import_data(
+                config=config,
+                model=model,
+                unique_id_field=id_column,
+                file_csv=tmp_path,
+                context=company_context,
+                fail_file=fail_file,
+                encoding=encoding,
+                separator=separator,
+                max_connection=max_conn,
+                batch_size=batch_size,
+                force_create=False,
+            )
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+        failed = max(_count_lines(fail_file) - 1, 0)
+        written = int(stats.get("created_records", 0)) if success else 0
+        if failed:
+            log.warning(
+                f"{failed} company-{cid} row(s) failed to write; see {fail_file}."
+            )
+        unaccounted = attempted - written - failed
+        if unaccounted:
+            log.warning(
+                f"Company reconciliation (company {cid}): {unaccounted} of "
+                f"{attempted} row(s) are unaccounted for "
+                f"(written={written}, failed={failed})."
+            )
+        summaries.append(
+            {
+                "company": cid,
+                "fields": fields,
+                "attempted": attempted,
+                "written": written,
+                "failed": failed,
+                "unaccounted": unaccounted,
+                "fail_file": fail_file if failed else "",
+            }
+        )
+    return summaries
+
+
+def _render_company_summary(summaries: list[dict[str, Any]]) -> None:
+    """Print a per-company reconciliation panel for the company passes (#255 pt2).
+
+    Args:
+        summaries: The summaries returned by :func:`_run_company_passes`.
+    """
+    if not summaries:
+        return
+    lines = []
+    any_failed = False
+    for s in summaries:
+        fields = ", ".join(s["fields"])
+        line = (
+            f"[cyan]company {s['company']}[/cyan] ({fields}): "
+            f"{s['written']} written, {s['attempted']} attempted"
+        )
+        if s["failed"]:
+            any_failed = True
+            line += f", [red]{s['failed']} failed[/red] -> {s['fail_file']}"
+        lines.append(line)
+    border = "yellow" if any_failed else "green"
+    title = "Company fields" + (" (with failures)" if any_failed else "")
+    Console().print(
+        Panel("\n".join(lines), title=f"[bold {border}]{title}[/bold {border}]")
+    )
+
+
 def _run_preflight_checks(
     preflight_mode: PreflightMode, import_plan: dict[str, Any], **kwargs: Any
 ) -> bool:
@@ -469,6 +649,15 @@ def run_import(  # noqa: C901
     if translation_columns:
         ignore = list(ignore or [])
         for col in translation_columns:
+            if col not in ignore:
+                ignore.append(col)
+
+    # Company columns (field@company, #255 part 2) are likewise written in
+    # dedicated per-company passes after Pass 2, so drop them from the base create.
+    company_columns = import_plan.get("company_columns") or []
+    if company_columns:
+        ignore = list(ignore or [])
+        for col in company_columns:
             if col not in ignore:
                 ignore.append(col)
 
@@ -759,12 +948,51 @@ def run_import(  # noqa: C901
                 output_dir=env_output_dir,
             )
 
+    # --- Company passes (#255 part 2): one write-pass per company ---
+    # Company-dependent fields store a separate value per company, so each
+    # field@company column is written with that company set in the context. Runs
+    # after Pass 2 for the same reason as translations: the records must exist,
+    # and it matches on the external id and never creates.
+    company_summaries: list[dict[str, Any]] = []
+    if id_map and import_plan.get("company_fields"):
+        company_source = source_df
+        if company_source is None:
+            try:
+                company_source = pl.read_csv(
+                    filename,
+                    separator=separator,
+                    truncate_ragged_lines=True,
+                    infer_schema_length=0,
+                )
+            except Exception as e:
+                log.warning(
+                    f"Could not read '{filename}' for company passes; "
+                    f"skipping company fields. Error: {e}"
+                )
+                company_source = None
+        if company_source is not None:
+            company_summaries = _run_company_passes(
+                config=config,
+                model=model,
+                company_column_map=import_plan["company_column_map"],
+                source_df=company_source,
+                id_map=id_map,
+                id_column=final_uid_field,
+                base_context=parsed_context,
+                max_conn=max_conn,
+                batch_size=batch_size_run,
+                separator=separator,
+                encoding=encoding,
+                output_dir=env_output_dir,
+            )
+
     log.info(
         f"{stats.get('total_records', 0)} records processed. "
         f"Total time: {elapsed:.2f}s."
     )
 
     _render_translation_summary(translation_summaries)
+    _render_company_summary(company_summaries)
 
     # Check for unaccounted records and warn the user
     unaccounted = stats.get("unaccounted_records", 0)
@@ -788,11 +1016,12 @@ def run_import(  # noqa: C901
     company_ctx = import_plan.get("company_context") or {}
     company_suffix = f"\n{company_ctx['line']}" if company_ctx.get("line") else ""
 
-    # A clean base import whose per-language translation passes failed must not
-    # read as an unqualified success: mirror the base partial-import treatment
-    # (yellow banner + pointer to the fail file). Exit stays 0, consistent with
-    # the documented partial-import policy — a partial write is not a hard error.
+    # A clean base import whose secondary (translation / per-company) passes failed
+    # must not read as an unqualified success: mirror the base partial-import
+    # treatment (yellow banner + pointer to the fail file). Exit stays 0, consistent
+    # with the documented partial-import policy — a partial write is not a hard error.
     translations_failed = any(s.get("failed") for s in translation_summaries)
+    company_failed = any(s.get("failed") for s in company_summaries)
     if translations_failed:
         failed_langs = ", ".join(
             s["lang"] for s in translation_summaries if s.get("failed")
@@ -802,7 +1031,22 @@ def run_import(  # noqa: C901
             f"({failed_langs}); see the [bold]*_translations_fail.csv[/bold] "
             f"file(s) above."
         )
-    banner_border = "yellow" if translations_failed else "green"
+    if company_failed:
+        failed_companies = ", ".join(
+            str(s["company"]) for s in company_summaries if s.get("failed")
+        )
+        company_suffix += (
+            f"\n[yellow]Warning:[/yellow] some company-dependent values failed to "
+            f"write (company {failed_companies}); see the "
+            f"[bold]*_company_*_fail.csv[/bold] file(s) above."
+        )
+    secondary_failed = translations_failed or company_failed
+    failure_kinds = ", ".join(
+        k
+        for k, f in (("translation", translations_failed), ("company", company_failed))
+        if f
+    )
+    banner_border = "yellow" if secondary_failed else "green"
 
     if is_truly_successful:
         if final_deferred:  # It was a two-pass import
@@ -812,7 +1056,7 @@ def run_import(  # noqa: C901
                 f"Updated: {stats.get('updated_relations', 0)}"
             )
             head = "Import Complete" + (
-                " (with translation failures)" if translations_failed else ""
+                f" (with {failure_kinds} failures)" if secondary_failed else ""
             )
             title = (
                 f"[bold {banner_border}]{head} for "
@@ -828,7 +1072,7 @@ def run_import(  # noqa: C901
             )
         else:  # Single pass
             head = "Import Complete" + (
-                " (with translation failures)" if translations_failed else ""
+                f" (with {failure_kinds} failures)" if secondary_failed else ""
             )
             Console().print(
                 Panel(

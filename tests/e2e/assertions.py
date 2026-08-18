@@ -76,6 +76,7 @@ def run_full_import(
     separator: str = ",",
     groupby: Optional[list[str]] = None,
     no_preflight_checks: bool = False,
+    allow_default_company: bool = False,
 ) -> Optional[dict[str, int]]:
     """Drive the full CLI-equivalent import (preflight + deferral planning).
 
@@ -106,6 +107,7 @@ def run_full_import(
         groupby=groupby,
         no_checkpoint=True,
         resume=False,
+        allow_default_company=allow_default_company,
     )
 
 

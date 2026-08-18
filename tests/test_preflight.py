@@ -2,7 +2,7 @@
 
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1380,17 +1380,19 @@ class TestTranslationColumnsCheck:
         assert ok is False
         mock_panel.assert_called_once()
 
-    @patch("fluvo.lib.preflight._show_error_panel")
     @patch("fluvo.lib.preflight._get_installed_languages")
     @patch("fluvo.lib.preflight._get_odoo_fields")
-    def test_company_dependent_at_column_not_supported(
+    def test_company_dependent_at_column_is_left_to_company_check(
         self,
         mock_fields: MagicMock,
         mock_langs: MagicMock,
-        mock_panel: MagicMock,
         tmp_path: Path,
     ) -> None:
-        """A field@company on a company-dependent field is refused (see #255)."""
+        """A field@company on a company-dependent field is ignored here (#255 pt2).
+
+        Ownership moved to company_columns_check: the translation check must skip
+        it (not reject it) and record no translations.
+        """
         mock_fields.return_value = {
             "id": {"type": "char"},
             "standard_price": {"type": "float", "company_dependent": True},
@@ -1405,8 +1407,8 @@ class TestTranslationColumnsCheck:
             plan,
             separator=",",
         )
-        assert ok is False
-        mock_panel.assert_called_once()
+        assert ok is True
+        assert "translations" not in plan
 
     @patch("fluvo.lib.preflight._get_installed_languages")
     @patch("fluvo.lib.preflight._get_odoo_fields")
@@ -1429,3 +1431,144 @@ class TestTranslationColumnsCheck:
         )
         assert ok is True
         assert plan["translations"] == {"nl_NL": ["name"]}
+
+
+class TestCompanyColumnsCheck:
+    """Tests for company_columns_check (#255 part 2, field@company detection)."""
+
+    def _write(self, tmp_path: Path, header: str) -> str:
+        src = tmp_path / "data.csv"
+        src.write_text(f"{header}\nx1,val\n")
+        return str(src)
+
+    def _conn(self, *, company_ids: set[int], xmlids: dict[str, int]) -> MagicMock:
+        """A fake connection resolving res.company reads + ir.model.data lookups."""
+        conn = MagicMock()
+
+        def get_model(name: str) -> MagicMock:
+            m = MagicMock()
+            if name == "res.company":
+
+                def read(ids, fields=None, context=None):  # type: ignore[no-untyped-def]
+                    cid = ids[0] if isinstance(ids, list) else ids
+                    if cid in company_ids:
+                        return [{"id": cid, "name": f"Company {cid}"}]
+                    return []
+
+                m.read.side_effect = read
+            elif name == "ir.model.data":
+
+                def search_read(domain, fields=None, context=None):  # type: ignore[no-untyped-def]
+                    crit = {f: v for (f, _op, v) in domain}
+                    key = f"{crit.get('module')}.{crit.get('name')}"
+                    rid = xmlids.get(key)
+                    return [{"res_id": rid}] if rid else []
+
+                m.search_read.side_effect = search_read
+            return m
+
+        conn.get_model.side_effect = get_model
+        return conn
+
+    FIELDS: ClassVar[dict[str, dict[str, Any]]] = {
+        "id": {"type": "char"},
+        "name": {"type": "char", "translate": True},
+        "standard_price": {"type": "float", "company_dependent": True},
+        "ref": {"type": "char"},
+    }
+
+    @patch("fluvo.lib.preflight._preflight_connection")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    def test_detects_company_columns_by_db_id(
+        self, mock_fields: MagicMock, mock_conn: MagicMock, tmp_path: Path
+    ) -> None:
+        """A field@<db id> on a company-dependent field is recorded in the plan."""
+        mock_fields.return_value = self.FIELDS
+        mock_conn.return_value = self._conn(company_ids={1, 2}, xmlids={})
+        filename = self._write(tmp_path, "id,standard_price@1,standard_price@2")
+        plan: dict[str, Any] = {}
+        ok = preflight.company_columns_check(
+            PreflightMode.NORMAL,
+            "product.template",
+            filename,
+            "c.conf",
+            plan,
+            separator=",",
+        )
+        assert ok is True
+        assert plan["company_fields"] == {1: ["standard_price"], 2: ["standard_price"]}
+        assert plan["company_column_map"] == {
+            "standard_price@1": 1,
+            "standard_price@2": 2,
+        }
+
+    @patch("fluvo.lib.preflight._preflight_connection")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    def test_resolves_company_xmlid(
+        self, mock_fields: MagicMock, mock_conn: MagicMock, tmp_path: Path
+    ) -> None:
+        """A field@<module.name> external id resolves to the company db id."""
+        mock_fields.return_value = self.FIELDS
+        mock_conn.return_value = self._conn(
+            company_ids={5}, xmlids={"base.company_de": 5}
+        )
+        filename = self._write(tmp_path, "id,standard_price@base.company_de")
+        plan: dict[str, Any] = {}
+        ok = preflight.company_columns_check(
+            PreflightMode.NORMAL,
+            "product.template",
+            filename,
+            "c.conf",
+            plan,
+            separator=",",
+        )
+        assert ok is True
+        assert plan["company_fields"] == {5: ["standard_price"]}
+
+    @patch("fluvo.lib.preflight._show_error_panel")
+    @patch("fluvo.lib.preflight._preflight_connection")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    def test_unknown_company_aborts(
+        self,
+        mock_fields: MagicMock,
+        mock_conn: MagicMock,
+        mock_panel: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """A company reference that resolves to nothing fails the check."""
+        mock_fields.return_value = self.FIELDS
+        mock_conn.return_value = self._conn(company_ids={1}, xmlids={})
+        filename = self._write(tmp_path, "id,standard_price@99")
+        plan: dict[str, Any] = {}
+        ok = preflight.company_columns_check(
+            PreflightMode.NORMAL,
+            "product.template",
+            filename,
+            "c.conf",
+            plan,
+            separator=",",
+        )
+        assert ok is False
+        mock_panel.assert_called_once()
+
+    @patch("fluvo.lib.preflight._preflight_connection")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    def test_translatable_at_column_is_left_to_translation_check(
+        self, mock_fields: MagicMock, mock_conn: MagicMock, tmp_path: Path
+    ) -> None:
+        """A field@lang on a translatable field is ignored here (owned elsewhere)."""
+        mock_fields.return_value = self.FIELDS
+        mock_conn.return_value = self._conn(company_ids={1}, xmlids={})
+        filename = self._write(tmp_path, "id,name@nl_NL")
+        plan: dict[str, Any] = {}
+        ok = preflight.company_columns_check(
+            PreflightMode.NORMAL,
+            "res.partner",
+            filename,
+            "c.conf",
+            plan,
+            separator=",",
+        )
+        assert ok is True
+        assert "company_fields" not in plan
+        mock_conn.assert_not_called()  # no company resolution needed
