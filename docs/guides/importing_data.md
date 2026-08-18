@@ -152,6 +152,21 @@ To handle relational data and updates by database ID, the tool uses special colu
 
 * **`.id` Field Name (for Database IDs)**: To update a record using its existing database ID (an integer, not an external ID), use the special field name `.id`. When you use this, you should also provide an empty `id` column to tell Odoo you are updating, not creating a new record.
 
+* **`@<lang>` Suffix (for translations)**: To import a translation of a translatable field, append `@` and the language code (e.g. `name@nl_NL`, `description@fr_FR`). You can mix the untranslated column and any number of translated columns in the same file:
+
+  ```csv
+  id,name,name@nl_NL,name@fr_FR
+  product_a,Chair,Stoel,Chaise
+  product_b,Table,Tafel,
+  ```
+
+  How it works and what to expect:
+
+  * The base column (`name`) is written during the normal create/update pass. Each `name@<lang>` column is then written in its own pass with the Odoo context set to that language, so the passes merge into the field's per-language storage instead of overwriting each other.
+  * A pre-flight check validates every `@<lang>` column *before* any data is written: the base field must be translatable, and the language must be installed and active on the target database (install it first, e.g. via Odoo's *Settings → Translations*). An unknown language or a non-translatable field aborts the import rather than silently dropping the values.
+  * Blank translation cells are skipped (the `name@fr_FR` for `product_b` above writes nothing), and only records that were actually imported are updated — a translation is never written to a record that failed its base import.
+  * Any translation rows that fail are written to a per-language fail file (`<model>_<lang>_translations_fail.csv`) and reported in the summary, so partial translation failures are never hidden.
+
 ### Field Formatting Rules
 
 Odoo's `load` method expects data for certain field types to be in a specific format.

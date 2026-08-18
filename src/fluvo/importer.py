@@ -122,6 +122,169 @@ def expected_fail_file(config: str | dict[str, Any], model: str, filename: str) 
     return str(env_output_dir / _get_fail_filename(model, False))
 
 
+def _run_translation_passes(
+    config: str | dict[str, Any],
+    model: str,
+    translations: dict[str, list[str]],
+    source_df: "pl.DataFrame",
+    id_map: dict[str, int],
+    id_column: str,
+    base_context: dict[str, Any],
+    max_conn: int,
+    batch_size: int,
+    separator: str,
+    encoding: str,
+    output_dir: Path,
+) -> list[dict[str, Any]]:
+    """Write ``field@lang`` columns as one update pass per language (#254).
+
+    For each language, a temporary CSV holding the external id plus the renamed
+    ``field@lang`` -> ``field`` columns is imported with ``context={'lang': ...}``
+    and ``force_create=False``, so only already-imported records are updated. Rows
+    absent from ``id_map`` (never imported) and rows whose translation values are
+    all blank are dropped, so no empty writes are issued.
+
+    Args:
+        config: Connection config path or dict.
+        model: The target Odoo model.
+        translations: Mapping of language code to the base field names to translate.
+        source_df: The original source rows (all columns read as strings).
+        id_map: External-id -> database-id map of records imported in Pass 1.
+        id_column: The column holding the external id (the unique id field).
+        base_context: The import's context; the language is merged onto a copy.
+        max_conn: Worker connection count.
+        batch_size: Load batch size.
+        separator: Field delimiter for the temp CSV.
+        encoding: Encoding for the temp CSV.
+        output_dir: Directory for per-language fail files.
+
+    Returns:
+        list[dict[str, Any]]: One reconciliation summary per language with keys
+        ``lang``, ``fields``, ``attempted``, ``written``, ``failed`` and
+        ``fail_file``.
+    """
+    summaries: list[dict[str, Any]] = []
+    if id_column not in source_df.columns:
+        log.warning(
+            f"Translation passes need the id column '{id_column}', which is not in "
+            f"the source; skipping translations."
+        )
+        return summaries
+
+    model_us = model.replace(".", "_")
+    imported_ids = set(id_map)
+    for lang in sorted(translations):
+        present_cols = [
+            f"{field}@{lang}"
+            for field in translations[lang]
+            if f"{field}@{lang}" in source_df.columns
+        ]
+        if not present_cols:
+            continue
+
+        sub = source_df.select([id_column, *present_cols]).filter(
+            pl.col(id_column).is_in(list(imported_ids))
+        )
+        # Drop rows with no translation value at all (nothing to write).
+        keep = pl.lit(value=False)  # polars boolean expr seed
+        for col in present_cols:
+            keep = keep | (
+                pl.col(col).is_not_null() & (pl.col(col).str.strip_chars() != "")
+            )
+        sub = sub.filter(keep)
+
+        rename_map = {f"{field}@{lang}": field for field in translations[lang]}
+        sub = sub.rename({c: rename_map[c] for c in present_cols})
+
+        attempted = sub.height
+        if attempted == 0:
+            summaries.append(
+                {
+                    "lang": lang,
+                    "fields": [rename_map[c] for c in present_cols],
+                    "attempted": 0,
+                    "written": 0,
+                    "failed": 0,
+                    "fail_file": "",
+                }
+            )
+            continue
+
+        fail_file = str(output_dir / f"{model_us}_{lang}_translations_fail.csv")
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=f"_{lang}.csv",
+            delete=False,
+            encoding=encoding,
+            newline="",
+        ) as tmp:
+            tmp_path = tmp.name
+        try:
+            sub.write_csv(tmp_path, separator=separator)
+            success, stats = import_threaded.import_data(
+                config=config,
+                model=model,
+                unique_id_field=id_column,
+                file_csv=tmp_path,
+                context={**base_context, "lang": lang},
+                fail_file=fail_file,
+                encoding=encoding,
+                separator=separator,
+                max_connection=max_conn,
+                batch_size=batch_size,
+                force_create=False,
+            )
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+        failed = max(_count_lines(fail_file) - 1, 0)
+        written = int(stats.get("created_records", 0)) if success else 0
+        if failed:
+            log.warning(
+                f"{failed} '{lang}' translation row(s) failed to write; see "
+                f"{fail_file}."
+            )
+        summaries.append(
+            {
+                "lang": lang,
+                "fields": [rename_map[c] for c in present_cols],
+                "attempted": attempted,
+                "written": written,
+                "failed": failed,
+                "fail_file": fail_file if failed else "",
+            }
+        )
+    return summaries
+
+
+def _render_translation_summary(summaries: list[dict[str, Any]]) -> None:
+    """Print a per-language reconciliation panel for the translation passes (#254).
+
+    Args:
+        summaries: The summaries returned by :func:`_run_translation_passes`.
+    """
+    if not summaries:
+        return
+    lines = []
+    any_failed = False
+    for s in summaries:
+        fields = ", ".join(s["fields"])
+        line = (
+            f"[cyan]{s['lang']}[/cyan] ({fields}): "
+            f"{s['written']} written, {s['attempted']} attempted"
+        )
+        if s["failed"]:
+            any_failed = True
+            line += f", [red]{s['failed']} failed[/red] -> {s['fail_file']}"
+        lines.append(line)
+    border = "yellow" if any_failed else "green"
+    title = "Translations" + (" (with failures)" if any_failed else "")
+    Console().print(
+        Panel("\n".join(lines), title=f"[bold {border}]{title}[/bold {border}]")
+    )
+
+
 def _run_preflight_checks(
     preflight_mode: PreflightMode, import_plan: dict[str, Any], **kwargs: Any
 ) -> bool:
@@ -286,6 +449,16 @@ def run_import(  # noqa: C901
             allow_default_company=allow_default_company,
         ):
             return None
+
+    # Translation columns (field@lang, #254) are written in dedicated per-language
+    # passes after Pass 2, not in the base create — so drop them from the base pass.
+    # Leaving them in would send 'name@nl_NL' to load(), which Odoo rejects.
+    translation_columns = import_plan.get("translation_columns") or []
+    if translation_columns:
+        ignore = list(ignore or [])
+        for col in translation_columns:
+            if col not in ignore:
+                ignore.append(col)
 
     # Apply an auto-detected groupby column when the user enabled --auto-groupby
     # and did not pass an explicit --groupby (deadlock avoidance).
@@ -536,10 +709,50 @@ def run_import(  # noqa: C901
                         )
                 progress.update(task_id, advance=1)
 
+    # --- Translation passes (#254): one write-pass per language ---
+    # Translated fields are a jsonb column keyed by language, so each field@lang
+    # column is written in a separate pass with context={'lang': ...}. This runs
+    # after Pass 2 so the records exist; it matches on the external id and never
+    # creates, so it only touches records that were actually imported.
+    translation_summaries: list[dict[str, Any]] = []
+    if id_map and import_plan.get("translations"):
+        translation_source = source_df
+        if translation_source is None:
+            try:
+                translation_source = pl.read_csv(
+                    filename,
+                    separator=separator,
+                    truncate_ragged_lines=True,
+                    infer_schema_length=0,
+                )
+            except Exception as e:
+                log.warning(
+                    f"Could not read '{filename}' for translation passes; "
+                    f"skipping translations. Error: {e}"
+                )
+                translation_source = None
+        if translation_source is not None:
+            translation_summaries = _run_translation_passes(
+                config=config,
+                model=model,
+                translations=import_plan["translations"],
+                source_df=translation_source,
+                id_map=id_map,
+                id_column=final_uid_field,
+                base_context=parsed_context,
+                max_conn=max_conn,
+                batch_size=batch_size_run,
+                separator=separator,
+                encoding=encoding,
+                output_dir=env_output_dir,
+            )
+
     log.info(
         f"{stats.get('total_records', 0)} records processed. "
         f"Total time: {elapsed:.2f}s."
     )
+
+    _render_translation_summary(translation_summaries)
 
     # Check for unaccounted records and warn the user
     unaccounted = stats.get("unaccounted_records", 0)
