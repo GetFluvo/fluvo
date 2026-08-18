@@ -1632,13 +1632,9 @@ def translation_columns_check(  # noqa: C901
             translations.setdefault(lang, []).append(base)
             translation_columns.append(col)
         elif info.get("company_dependent"):
-            _show_error_panel(
-                "Not supported yet",
-                f"Column '{col}' targets a company-dependent field. Per-company "
-                "import ('field@company') is not available yet — see "
-                "https://github.com/GetFluvo/fluvo/issues/255.",
-            )
-            return False
+            # 'field@company' on a company-dependent field is owned by
+            # company_columns_check (#255 part 2), not this translation check.
+            continue
         else:
             _show_error_panel(
                 "Invalid '@' column",
@@ -1672,5 +1668,157 @@ def translation_columns_check(  # noqa: C901
     log.info(
         f"Detected translation columns for {sorted(translations)}: "
         f"{import_plan['translations']}"
+    )
+    return True
+
+
+def _resolve_company_ref(conn: Any, ref: str) -> tuple[int | None, str | None]:
+    """Resolve a company reference to ``(company_id, name)``.
+
+    The reference is either a database id (all digits) or an external id
+    (``module.name`` pointing at a ``res.company`` record).
+
+    Args:
+        conn: An open Odoo connection.
+        ref: The company reference from a ``field@company`` column.
+
+    Returns:
+        tuple[int | None, str | None]: The resolved company id and name, or
+        ``(None, None)`` if it does not resolve to an existing company.
+    """
+    company_model = conn.get_model("res.company")
+    company_id: int | None = None
+    if ref.isdigit():
+        company_id = int(ref)
+    elif "." in ref:
+        module, _, name = ref.partition(".")
+        rows = conn.get_model("ir.model.data").search_read(
+            [
+                ("module", "=", module),
+                ("name", "=", name),
+                ("model", "=", "res.company"),
+            ],
+            ["res_id"],
+        )
+        if rows:
+            company_id = int(rows[0]["res_id"])
+    if company_id is None:
+        return None, None
+    recs = company_model.read([company_id], ["name"])
+    if isinstance(recs, dict):
+        recs = [recs]
+    if not recs:
+        return None, None
+    return company_id, recs[0].get("name")
+
+
+@register_check
+def company_columns_check(  # noqa: C901
+    preflight_mode: "PreflightMode",
+    model: str,
+    filename: str,
+    config: str | dict[str, Any],
+    import_plan: dict[str, Any],
+    **kwargs: Any,
+) -> bool:
+    """Detect and validate ``field@company`` per-company columns (#255 part 2).
+
+    Company-dependent fields store a separate value per company. This check finds
+    ``field@company`` columns (the qualifier is a company database id or external
+    id), confirms the base field is actually company-dependent and each referenced
+    company exists, and records the plan so the importer can write one pass per
+    company. Translation columns (``field@lang`` on a translatable field) are owned
+    by :func:`translation_columns_check`; a field that is both is treated as a
+    translation.
+
+    Args:
+        preflight_mode: The current pre-flight mode.
+        model: The target Odoo model.
+        filename: Path to the source CSV.
+        config: Connection config path or dict.
+        import_plan: Shared plan; ``company_fields`` (company id -> fields),
+            ``company_columns`` and ``company_column_map`` (column -> company id)
+            are stored here.
+        **kwargs: separator.
+
+    Returns:
+        bool: ``False`` on an invalid ``@`` column or an unknown company;
+        ``True`` otherwise.
+    """
+    separator = kwargs.get("separator", ";")
+    header = _get_csv_header(filename, separator)
+    if not header:
+        return True
+    at_columns = [c for c in header if "@" in c]
+    if not at_columns:
+        return True
+    odoo_fields = _get_odoo_fields(config, model)
+    if not odoo_fields:
+        return True
+
+    company_cols: dict[str, list[str]] = {}
+    columns: list[str] = []
+    for col in at_columns:
+        base = _base_field_name(col)
+        ref = col.split("@", 1)[1]
+        info = odoo_fields.get(base, {})
+        if info.get("translate"):
+            continue  # a translation column (owned by translation_columns_check)
+        if not info.get("company_dependent"):
+            continue  # not company-dependent; translation_columns_check reports it
+        if not ref:
+            _show_error_panel(
+                "Invalid company column",
+                f"Column '{col}' is missing a company after '@' "
+                f"(expected e.g. '{base}@2' or '{base}@base.company_xyz').",
+            )
+            return False
+        company_cols.setdefault(ref, []).append(base)
+        columns.append(col)
+
+    if not company_cols:
+        return True
+
+    try:
+        conn = _preflight_connection(config)
+    except Exception as e:
+        _show_error_panel(
+            "Odoo Connection Error",
+            f"Could not connect to resolve the companies in field@company "
+            f"columns.\nError: {e}",
+        )
+        return False
+
+    resolved: dict[str, int] = {}
+    unknown: list[str] = []
+    for ref in company_cols:
+        company_id, _name = _resolve_company_ref(conn, ref)
+        if company_id is None:
+            unknown.append(ref)
+        else:
+            resolved[ref] = company_id
+    if unknown:
+        _show_error_panel(
+            "Company not found",
+            f"These company references in field@company columns do not resolve to "
+            f"an existing res.company: {sorted(unknown)}\n\n"
+            "Use the company's database id (e.g. '2') or its external id "
+            "(e.g. 'base.company_xyz').",
+        )
+        return False
+
+    company_fields: dict[int, list[str]] = {}
+    for ref, fields in company_cols.items():
+        company_fields.setdefault(resolved[ref], []).extend(fields)
+    import_plan["company_fields"] = {
+        cid: sorted(set(fs)) for cid, fs in company_fields.items()
+    }
+    import_plan["company_columns"] = columns
+    import_plan["company_column_map"] = {
+        col: resolved[col.split("@", 1)[1]] for col in columns
+    }
+    log.info(
+        f"Detected company columns for companies "
+        f"{sorted(import_plan['company_fields'])}: {import_plan['company_fields']}"
     )
     return True
