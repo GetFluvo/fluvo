@@ -28,7 +28,7 @@ def test_project_mode_with_explicit_flow_file(
             f.write("flow: content")
         result = runner.invoke(__main__.cli, ["--flow-file", "test_flow.yml"])
         assert result.exit_code == 0
-        mock_run_flow.assert_called_once_with("test_flow.yml", None, {})
+        mock_run_flow.assert_called_once_with("test_flow.yml", None, {}, dry_run=False)
 
 
 @patch("fluvo.__main__.run_project_flow")
@@ -41,7 +41,7 @@ def test_project_mode_with_default_flow_file(
             f.write("default flow")
         result = runner.invoke(__main__.cli)
         assert result.exit_code == 0
-        mock_run_flow.assert_called_once_with("flows.yml", None, {})
+        mock_run_flow.assert_called_once_with("flows.yml", None, {}, dry_run=False)
 
 
 def test_shows_help_when_no_command_or_flow_file(runner: CliRunner) -> None:
