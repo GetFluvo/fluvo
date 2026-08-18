@@ -4,7 +4,9 @@ These checks are run before the main import process to catch common,
 systemic errors early (e.g., missing languages, incorrect configuration).
 """
 
+import ast
 import csv
+import json
 import re
 from typing import Any, Callable, Optional, Union, cast
 
@@ -1410,4 +1412,141 @@ def reference_check(  # noqa: C901
         "Continuing with import despite missing references. "
         "Some records may fail to import."
     )
+    return True
+
+
+def _parse_structured(value: str) -> Optional[Any]:
+    """Return the parsed dict/list if a string is a dict/list literal, else None.
+
+    Recognises both Python-repr dicts/lists (what ``str({...})`` produces, e.g. a
+    mapper that returned a dict) and JSON objects/arrays (a raw source column that
+    already holds a dict-shaped string). The cheap prefix test keeps this from
+    parsing every ordinary cell.
+
+    Args:
+        value: The raw cell value.
+
+    Returns:
+        Optional[Any]: The parsed ``dict``/``list``, or ``None`` if the value is
+            not a structured literal.
+    """
+    stripped = value.strip()
+    if not stripped or stripped[0] not in "{[":
+        return None
+    for parse in (ast.literal_eval, json.loads):
+        try:
+            parsed = parse(stripped)
+        except (ValueError, SyntaxError, TypeError):
+            continue
+        if isinstance(parsed, (dict, list)):
+            return parsed
+    return None
+
+
+def _reject_structured_value(
+    column: str, translated: bool, row_number: int, value: str
+) -> bool:
+    """Show the #274 error panel for a structured value and return ``False``.
+
+    Args:
+        column: The offending source column.
+        translated: Whether the target field is a translated field.
+        row_number: The 1-based CSV row number (including the header row).
+        value: The offending cell value.
+
+    Returns:
+        bool: Always ``False`` (abort the import).
+    """
+    shown = value if len(value) <= 120 else value[:117] + "..."
+    if translated:
+        message = (
+            f"Column '[bold]{column}[/bold]' maps to a [bold]translated[/bold] "
+            f"field, but row {row_number} contains a dict/list value:\n\n"
+            f"  {shown}\n\n"
+            "Fluvo cannot write multiple languages in one pass — a dict written to "
+            "a translated field is silently stringified by Odoo (stored as its "
+            "literal text), so this is rejected here instead of corrupting the "
+            "record.\n\n"
+            "Put the base-language value in this column and load the other "
+            "languages in a separate pass. See "
+            "https://github.com/GetFluvo/fluvo/issues/254."
+        )
+    else:
+        message = (
+            f"Column '[bold]{column}[/bold]' (row {row_number}) contains a dict/list "
+            f"value where a plain text field is expected:\n\n  {shown}\n\n"
+            "Odoo would silently store the literal text of the structure. Provide a "
+            "plain string value instead."
+        )
+    _show_error_panel("Invalid structured value", message)
+    return False
+
+
+@register_check
+def structured_value_check(  # noqa: C901
+    preflight_mode: "PreflightMode",
+    model: str,
+    filename: str,
+    config: Union[str, dict[str, Any]],
+    **kwargs: Any,
+) -> bool:
+    """Reject dict/list values written to plain-text fields (#274).
+
+    A dict such as ``{'en_US': 'Chair', 'nl_NL': 'Stoel'}`` written to a ``char``,
+    ``text`` or ``html`` field is not rejected by Odoo — it is stringified and
+    stored as literal text, so the import succeeds, reconciliation passes, and the
+    record is silently corrupt. This is exactly the failure class Fluvo exists to
+    prevent, so we fail fast, naming the field, the row, and the value. Translated
+    fields get a targeted message because the intent (multi-language) is guessable
+    — but the fix is a separate per-language pass (#254), never accepting the dict.
+
+    Args:
+        preflight_mode: The current pre-flight mode.
+        model: The target Odoo model.
+        filename: Path to the source CSV.
+        config: Connection config path or dict.
+        **kwargs: separator, encoding, ignore.
+
+    Returns:
+        bool: ``False`` on the first offending cell (abort); ``True`` otherwise.
+    """
+    separator = kwargs.get("separator", ";")
+    encoding = kwargs.get("encoding", "utf-8")
+    ignore = kwargs.get("ignore", []) or []
+
+    header = _get_csv_header(filename, separator)
+    if not header:
+        return True  # header problems are reported by other checks
+    odoo_fields = _get_odoo_fields(config, model)
+    if not odoo_fields:
+        return True  # connection / field errors are reported by other checks
+
+    string_types = {"char", "text", "html"}
+    targets: dict[int, tuple[str, bool]] = {}
+    for index, column in enumerate(header):
+        if column in ignore:
+            continue
+        info = odoo_fields.get(column.split("/")[0])
+        if info and info.get("type") in string_types:
+            targets[index] = (column, bool(info.get("translate")))
+
+    if not targets:
+        return True
+
+    try:
+        with open(filename, encoding=encoding, newline="") as handle:
+            reader = csv.reader(handle, delimiter=separator)
+            next(reader, None)  # header row
+            for row_number, row in enumerate(reader, start=2):
+                for index, (column, translated) in targets.items():
+                    if index >= len(row):
+                        continue
+                    if _parse_structured(row[index]) is not None:
+                        return _reject_structured_value(
+                            column, translated, row_number, row[index]
+                        )
+    except Exception as e:  # pragma: no cover - scanning is best-effort
+        log.warning(f"Could not scan for structured values: {e}")
+        return True
+
     return True

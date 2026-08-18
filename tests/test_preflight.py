@@ -1165,3 +1165,119 @@ class TestGetOdooFieldsModelNotFound:
 
         assert result is None
         assert mock_panel.call_args[0][0] == "Odoo Connection Error"
+
+
+class TestStructuredValueCheck:
+    """Reject dict/list values written to plain-text fields (#274)."""
+
+    def _run(
+        self,
+        tmp_path: "Path",
+        fields: dict[str, Any],
+        header: list[str],
+        rows: list[list[str]],
+        **kwargs: Any,
+    ) -> tuple[bool, MagicMock]:
+        """Write a CSV, stub fields_get, and run structured_value_check."""
+        csv_path = tmp_path / "data.csv"
+        lines = [";".join(header)] + [";".join(r) for r in rows]
+        csv_path.write_text("\n".join(lines) + "\n")
+        with (
+            patch("fluvo.lib.preflight._get_odoo_fields", return_value=fields),
+            patch("fluvo.lib.preflight._show_error_panel") as err,
+        ):
+            result = preflight.structured_value_check(
+                preflight_mode=PreflightMode.NORMAL,
+                model="product.template",
+                filename=str(csv_path),
+                config="conn.conf",
+                separator=";",
+                encoding="utf-8",
+                **kwargs,
+            )
+        return result, err
+
+    def test_dict_on_translated_field_is_rejected(self, tmp_path: "Path") -> None:
+        """A dict on a translated field aborts and points at #254."""
+        result, err = self._run(
+            tmp_path,
+            {"name": {"type": "char", "translate": True}},
+            ["id", "name"],
+            [["p1", "{'en_US': 'Chair', 'nl_NL': 'Stoel'}"]],
+        )
+        assert result is False
+        err.assert_called_once()
+        title, body = err.call_args[0][0], err.call_args[0][1]
+        assert title == "Invalid structured value"
+        assert "translated" in body
+        assert "254" in body
+        assert "name" in body
+
+    def test_dict_on_plain_char_is_rejected(self, tmp_path: "Path") -> None:
+        """A dict on a non-translated char is also rejected (plain message)."""
+        result, err = self._run(
+            tmp_path,
+            {"name": {"type": "char", "translate": False}},
+            ["id", "name"],
+            [["p1", "{'a': 1}"]],
+        )
+        assert result is False
+        err.assert_called_once()
+        assert "plain text" in err.call_args[0][1]
+        assert "254" not in err.call_args[0][1]
+
+    def test_list_on_char_is_rejected(self, tmp_path: "Path") -> None:
+        """A list value on a char field is rejected."""
+        result, err = self._run(
+            tmp_path,
+            {"name": {"type": "char"}},
+            ["id", "name"],
+            [["p1", "['a', 'b']"]],
+        )
+        assert result is False
+        err.assert_called_once()
+
+    def test_json_object_string_is_rejected(self, tmp_path: "Path") -> None:
+        """A raw JSON-object string in the column is rejected too."""
+        result, err = self._run(
+            tmp_path,
+            {"description": {"type": "text", "translate": True}},
+            ["id", "description"],
+            [["p1", '{"en_US": "Chair"}']],
+        )
+        assert result is False
+        err.assert_called_once()
+
+    def test_plain_strings_pass(self, tmp_path: "Path") -> None:
+        """Ordinary text values are not flagged (no false positives)."""
+        result, err = self._run(
+            tmp_path,
+            {"name": {"type": "char", "translate": True}},
+            ["id", "name"],
+            [["p1", "Chair"], ["p2", "Bureaustoel, zwart"]],
+        )
+        assert result is True
+        err.assert_not_called()
+
+    def test_non_string_fields_are_ignored(self, tmp_path: "Path") -> None:
+        """Columns that aren't char/text/html are not scanned."""
+        result, err = self._run(
+            tmp_path,
+            {"list_price": {"type": "float"}},
+            ["id", "list_price"],
+            [["p1", "{'x': 1}"]],
+        )
+        assert result is True
+        err.assert_not_called()
+
+    def test_ignored_column_is_skipped(self, tmp_path: "Path") -> None:
+        """A column in the ignore list is not scanned."""
+        result, err = self._run(
+            tmp_path,
+            {"name": {"type": "char", "translate": True}},
+            ["id", "name"],
+            [["p1", "{'en_US': 'Chair'}"]],
+            ignore=["name"],
+        )
+        assert result is True
+        err.assert_not_called()
