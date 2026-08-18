@@ -1,6 +1,7 @@
 """Test cases for the __main__ module."""
 
 import logging
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -27,7 +28,7 @@ def test_project_mode_with_explicit_flow_file(
             f.write("flow: content")
         result = runner.invoke(__main__.cli, ["--flow-file", "test_flow.yml"])
         assert result.exit_code == 0
-        mock_run_flow.assert_called_once_with("test_flow.yml", None)
+        mock_run_flow.assert_called_once_with("test_flow.yml", None, {})
 
 
 @patch("fluvo.__main__.run_project_flow")
@@ -40,7 +41,7 @@ def test_project_mode_with_default_flow_file(
             f.write("default flow")
         result = runner.invoke(__main__.cli)
         assert result.exit_code == 0
-        mock_run_flow.assert_called_once_with("flows.yml", None)
+        mock_run_flow.assert_called_once_with("flows.yml", None, {})
 
 
 def test_shows_help_when_no_command_or_flow_file(runner: CliRunner) -> None:
@@ -1891,34 +1892,170 @@ def test_update_move_dates_exception(mock_get_conn: MagicMock) -> None:
 # --- run_project_flow Tests ---
 
 
-def test_run_project_flow_not_implemented_raises() -> None:
-    """The unimplemented flow runner aborts non-zero instead of silently succeeding.
-
-    Interim behaviour for #251: `--flow-file` must never exit 0 having done
-    nothing (the worst failure mode for a migration tool). run_project_flow raises
-    SystemExit with a non-zero code until the real runner lands.
-    """
-    from fluvo.__main__ import run_project_flow
-
-    for name in ("my_flow", None):
-        with pytest.raises(SystemExit) as exc_info:
-            run_project_flow("flows.yml", name)
-        assert exc_info.value.code != 0
+_TWO_FLOWS = """
+version: 1
+flows:
+  - name: a
+    steps: [{run: import, with: {model: res.partner}}]
+  - name: b
+    steps: [{run: write, with: {model: res.partner}}]
+"""
 
 
-def test_flow_file_flag_exits_nonzero(runner: CliRunner) -> None:
-    """`fluvo --flow-file <existing>` exits non-zero (not a silent success) (#251).
+@patch("fluvo.__main__._run_flow_step")
+def test_flow_runner_success_exits_zero(
+    mock_step: MagicMock, runner: CliRunner
+) -> None:
+    """A flow whose steps all succeed exits 0 (#251 executor)."""
+    from fluvo.lib.flow_runner import StepOutcome
 
-    The exit code is the contract that matters: a validated-but-unrun flow file
-    must not look like success. (The error text goes to a Rich stderr panel, which
-    wraps under CI's 80-col width, so we don't assert on its wording here — the
-    unit test above pins the message path.)
-    """
+    mock_step.return_value = StepOutcome(ok=True)
     with runner.isolated_filesystem():
         with open("flows.yml", "w") as f:
-            f.write("version: 1\n")
+            f.write(_TWO_FLOWS)
+        result = runner.invoke(__main__.cli, ["--flow-file", "flows.yml"])
+        assert result.exit_code == 0
+        assert mock_step.call_count == 2  # both flows' steps ran
+
+
+@patch("fluvo.__main__._run_flow_step")
+def test_flow_runner_failed_step_exits_nonzero(
+    mock_step: MagicMock, runner: CliRunner
+) -> None:
+    """Any failed step makes the whole run exit non-zero (#251)."""
+    from fluvo.lib.flow_runner import StepOutcome
+
+    mock_step.return_value = StepOutcome(ok=False, error="boom")
+    with runner.isolated_filesystem():
+        with open("flows.yml", "w") as f:
+            f.write(_TWO_FLOWS)
         result = runner.invoke(__main__.cli, ["--flow-file", "flows.yml"])
         assert result.exit_code != 0
+
+
+@patch("fluvo.__main__._run_flow_step")
+def test_flow_runner_run_selects_one_flow(
+    mock_step: MagicMock, runner: CliRunner
+) -> None:
+    """--run executes only the named flow(s)."""
+    from fluvo.lib.flow_runner import StepOutcome
+
+    mock_step.return_value = StepOutcome(ok=True)
+    with runner.isolated_filesystem():
+        with open("flows.yml", "w") as f:
+            f.write(_TWO_FLOWS)
+        result = runner.invoke(__main__.cli, ["--flow-file", "flows.yml", "--run", "b"])
+        assert result.exit_code == 0
+        assert mock_step.call_count == 1
+        assert mock_step.call_args[0][0] == "write"
+
+
+@patch("fluvo.__main__._run_flow_step")
+def test_flow_var_override_reaches_step(
+    mock_step: MagicMock, runner: CliRunner
+) -> None:
+    """--var overrides a flow variable and is interpolated into the step."""
+    from fluvo.lib.flow_runner import StepOutcome
+
+    mock_step.return_value = StepOutcome(ok=True)
+    flow = """
+version: 1
+vars:
+  conn: default.conf
+flows:
+  - name: a
+    steps:
+      - run: import
+        with:
+          connection_file: "{{ vars.conn }}"
+          model: res.partner
+"""
+    with runner.isolated_filesystem():
+        with open("flows.yml", "w") as f:
+            f.write(flow)
+        result = runner.invoke(
+            __main__.cli, ["--flow-file", "flows.yml", "--var", "conn=prod.conf"]
+        )
+        assert result.exit_code == 0
+        # _run_flow_step(command, with_) — check the interpolated override landed.
+        with_ = mock_step.call_args[0][1]
+        assert with_["connection_file"] == "prod.conf"
+
+
+def test_flow_file_invalid_exits_nonzero(runner: CliRunner) -> None:
+    """An invalid flow file aborts non-zero rather than silently succeeding (#251)."""
+    with runner.isolated_filesystem():
+        with open("flows.yml", "w") as f:
+            f.write("version: 1\n")  # no `flows:` -> FlowError
+        result = runner.invoke(__main__.cli, ["--flow-file", "flows.yml"])
+        assert result.exit_code != 0
+
+
+def test_command_option_specs_and_build_argv() -> None:
+    """Options are introspected and turned into argv (value, flag, multiple)."""
+    specs = __main__._command_option_specs(__main__.cli.commands["import"])
+    assert specs["model"][0] == "--model" and specs["model"][1] is False
+    assert specs["auto_defer"][1] is True  # a flag
+
+    argv = __main__._build_step_argv({"model": "res.partner", "worker": 4}, specs)
+    assert argv[argv.index("--model") + 1] == "res.partner"
+    assert argv[argv.index("--worker") + 1] == "4"
+    # A truthy flag is emitted without a value; a falsy flag is omitted.
+    assert __main__._build_step_argv({"auto_defer": True}, specs) == ["--auto-defer"]
+    assert __main__._build_step_argv({"auto_defer": False}, specs) == []
+    # An unknown key is ignored defensively.
+    assert __main__._build_step_argv({"nope": 1}, specs) == []
+
+
+def test_run_flow_step_success_and_failure() -> None:
+    """_run_flow_step maps a command's exit into a StepOutcome."""
+    cmd = __main__.cli.commands["import"]
+    with patch.object(cmd, "main", return_value=None) as mock_main:
+        ok = __main__._run_flow_step("import", {"model": "res.partner"})
+    assert ok.ok is True
+    mock_main.assert_called_once()
+
+    with patch.object(cmd, "main", side_effect=SystemExit(1)):
+        bad = __main__._run_flow_step("import", {"model": "res.partner"})
+    assert bad.ok is False
+
+
+def test_run_flow_step_reports_fail_file(tmp_path: "Path") -> None:
+    """A step that produced a fail file has it reported in the outcome."""
+    src = tmp_path / "res_partner.csv"
+    src.write_text("id\n1\n")
+    fail = tmp_path / "res_partner_fail.csv"
+    fail.write_text("id;_ERROR_REASON\n1;boom\n2;bad\n")
+
+    cmd = __main__.cli.commands["import"]
+    with patch.object(cmd, "main", return_value=None):
+        outcome = __main__._run_flow_step(
+            "import",
+            {"model": "res.partner", "file": str(src), "connection_file": ""},
+        )
+    assert outcome.fail_file == str(fail)
+    assert outcome.fail_rows == 2
+
+
+def test_render_flow_summary_lists_fail_files(
+    capsys: "pytest.CaptureFixture[str]",
+) -> None:
+    """The summary lists every fail file together and shows the failure verdict."""
+    from fluvo.lib.flow_runner import StepOutcome, StepResult
+
+    results = [
+        StepResult(
+            "a",
+            "a1",
+            "import",
+            StepOutcome(ok=True, fail_file="x_fail.csv", fail_rows=3),
+        ),
+        StepResult("a", "a2", "write", StepOutcome(ok=False, error="boom")),
+    ]
+    __main__._render_flow_summary(results, aborted=True)
+    out = unstyle(capsys.readouterr().out)
+    assert "x_fail.csv" in out
+    assert "failed" in out.lower()
 
 
 # --- Import command: protocol, context, company XML-id resolution ---

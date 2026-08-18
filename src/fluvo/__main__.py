@@ -1,6 +1,7 @@
 """Command-line interface for fluvo."""
 
 import ast
+import os
 from importlib.metadata import version as get_version
 from pathlib import Path
 from typing import Any, Optional
@@ -9,7 +10,7 @@ import click
 
 from .converter import run_path_to_image, run_url_to_image
 from .exporter import run_export
-from .importer import _infer_model_from_filename, run_import
+from .importer import _infer_model_from_filename, expected_fail_file, run_import
 from .lib import cache
 from .lib.actions.language_installer import run_language_installation
 from .lib.actions.module_manager import (
@@ -24,6 +25,7 @@ from .lib.actions.vies_manager import (
     restore_vat_validation_settings,
     run_vies_validation,
 )
+from .lib.flow_runner import StepOutcome, StepResult
 from .lib.validation import display_validation_results, validate_csv_data
 from .logging_config import log, setup_logging
 from .migrator import run_migration
@@ -391,36 +393,195 @@ def _update_inventory_move_dates(
         )
 
 
-def run_project_flow(flow_file: str, flow_name: Optional[str]) -> None:
-    """Abort: the declarative flow runner is not implemented yet (see #251).
-
-    ``--flow-file`` is still advertised on the CLI, but the runner that would
-    execute a ``flows.yml`` does not exist. The previous placeholder validated the
-    file, printed two log lines, and returned normally — a run that exits 0 having
-    done nothing, which is the worst failure mode for a migration tool and
-    contradicts the reconciliation-first contract. Until the real runner lands,
-    fail loudly with a non-zero exit so automation never mistakes it for success.
+def _command_option_specs(command: click.Command) -> dict[str, tuple[str, bool, bool]]:
+    """Map each option of a command to ``(long flag, is_flag, multiple)``.
 
     Args:
-        flow_file: Path to the flow file the user asked to run (reported, not run).
-        flow_name: Specific flow name from ``--run``, if any (reported, not run).
+        command: The Click command to introspect.
+
+    Returns:
+        dict[str, tuple[str, bool, bool]]: Param name -> its primary ``--long``
+        option, whether it is a boolean flag, and whether it is repeatable.
+    """
+    specs: dict[str, tuple[str, bool, bool]] = {}
+    for param in command.params:
+        if isinstance(param, click.Option) and param.name:
+            long_opt = next(
+                (o for o in param.opts if o.startswith("--")),
+                param.opts[0] if param.opts else "",
+            )
+            if long_opt:
+                specs[param.name] = (
+                    long_opt,
+                    bool(param.is_flag),
+                    bool(param.multiple),
+                )
+    return specs
+
+
+def _build_step_argv(
+    with_: dict[str, Any], specs: dict[str, tuple[str, bool, bool]]
+) -> list[str]:
+    """Turn a step's ``with`` mapping into CLI argv for its command.
+
+    Args:
+        with_: The step's options (keys are the command's flags, underscored).
+        specs: Option specs from :func:`_command_option_specs`.
+
+    Returns:
+        list[str]: The argv to pass to the command.
+    """
+    argv: list[str] = []
+    for key, value in with_.items():
+        spec = specs.get(key)
+        if spec is None:
+            continue  # validated in preflight; ignore defensively
+        long_opt, is_flag, multiple = spec
+        if is_flag:
+            if value is True or str(value).strip().lower() in ("true", "1", "yes"):
+                argv.append(long_opt)
+        elif multiple:
+            for item in value if isinstance(value, list) else [value]:
+                argv.extend([long_opt, str(item)])
+        else:
+            argv.extend([long_opt, str(value)])
+    return argv
+
+
+def _run_flow_step(command: str, with_: dict[str, Any]) -> StepOutcome:
+    """Execute one flow step by invoking its fluvo command (one code path).
+
+    Args:
+        command: The command name (import/export/write/migrate).
+        with_: The step's resolved options.
+
+    Returns:
+        StepOutcome: Whether the step succeeded and any fail file it produced.
+    """
+    cmd = cli.commands[command]
+    argv = _build_step_argv(with_, _command_option_specs(cmd))
+    ok = True
+    error: Optional[str] = None
+    try:
+        cmd.main(argv, standalone_mode=False, prog_name=f"fluvo {command}")
+    except SystemExit as exc:
+        ok = exc.code in (0, None)
+        error = None if ok else f"exited with code {exc.code}"
+    except click.exceptions.Exit as exc:
+        ok = exc.exit_code == 0
+    except click.exceptions.Abort:
+        ok, error = False, "aborted"
+    except click.ClickException as exc:
+        exc.show()
+        ok, error = False, exc.format_message()
+    except Exception as exc:  # unexpected: surface it, don't crash the whole run
+        log.error(f"Step '{command}' raised an unexpected error: {exc}")
+        ok, error = False, str(exc)
+
+    fail_file: Optional[str] = None
+    fail_rows = 0
+    if command == "import" and with_.get("model") and with_.get("file"):
+        try:
+            path = expected_fail_file(
+                with_.get("connection_file", ""), with_["model"], with_["file"]
+            )
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as handle:
+                    rows = sum(1 for _ in handle) - 1
+                if rows > 0:
+                    fail_file, fail_rows = path, rows
+        except Exception as exc:  # pragma: no cover - reporting is best-effort
+            log.debug(f"Could not inspect fail file for step '{command}': {exc}")
+
+    return StepOutcome(ok=ok, fail_file=fail_file, fail_rows=fail_rows, error=error)
+
+
+def _render_flow_summary(results: list[StepResult], aborted: bool) -> None:
+    """Print the per-step and whole-run summary, listing fail files together.
+
+    Args:
+        results: The step results from the run.
+        aborted: Whether an ``on_error: abort`` stopped the run early.
+    """
+    from rich.console import Console
+    from rich.panel import Panel
+
+    lines = []
+    for result in results:
+        mark = "[green]ok[/green]" if result.outcome.ok else "[red]FAILED[/red]"
+        extra = (
+            f"  ([red]{result.outcome.fail_rows}[/red] failed rows)"
+            if result.outcome.fail_rows
+            else ""
+        )
+        lines.append(
+            f"  {mark}  {result.flow}:{result.step_id} ({result.command}){extra}"
+        )
+    body = "\n".join(lines) if lines else "  (no steps ran)"
+
+    with_fail_files = [r for r in results if r.outcome.fail_file]
+    if with_fail_files:
+        body += "\n\n[bold yellow]Fail files written:[/bold yellow]"
+        for result in with_fail_files:
+            body += (
+                f"\n  {result.flow}:{result.step_id} -> "
+                f"{result.outcome.fail_file} ({result.outcome.fail_rows} rows)"
+            )
+
+    failed = [r for r in results if not r.outcome.ok]
+    if failed:
+        title = "[bold red]Flow run failed[/bold red]"
+        border = "red"
+        body += f"\n\n[bold red]{len(failed)} step(s) failed.[/bold red]"
+        if aborted:
+            body += " Run aborted at the first failure (on_error: abort)."
+    else:
+        title = "[bold green]Flow run complete[/bold green]"
+        border = "green"
+
+    Console().print(Panel(body, title=title, border_style=border, expand=False))
+
+
+def run_project_flow(
+    flow_file: str,
+    flow_names: Optional[list[str]],
+    cli_vars: dict[str, str],
+) -> None:
+    """Parse, validate, and execute a ``flows.yml`` (#251).
+
+    Args:
+        flow_file: Path to the flow file.
+        flow_names: Flow names to run (from ``--run``), or ``None`` for all.
+        cli_vars: Variable overrides from ``--var``.
 
     Raises:
-        SystemExit: always, with code 1 — the flow runner is not implemented.
+        SystemExit: with code 1 if the file is invalid or any step failed.
     """
+    from .lib.flow import FlowError, parse_flow_file, select_flows
+    from .lib.flow_runner import any_failed, run_flows
     from .lib.internal.ui import _show_error_panel
 
-    target = f"flow '{flow_name}' from {flow_file}" if flow_name else flow_file
-    _show_error_panel(
-        "Flow runner not implemented",
-        f"Cannot run {target}: the declarative flow runner (flows.yml) is not "
-        "implemented yet, so [bold]nothing was executed[/bold].\n\n"
-        "Run your steps individually for now with [bold]fluvo import[/bold], "
-        "[bold]export[/bold], [bold]write[/bold], or [bold]migrate[/bold].\n\n"
-        "Track the flow runner at "
-        "https://github.com/GetFluvo/fluvo/issues/251.",
+    commands = ("import", "export", "write", "migrate")
+    known_options = {
+        name: set(_command_option_specs(cli.commands[name])) for name in commands
+    }
+    try:
+        parsed = parse_flow_file(
+            flow_file, cli_vars=cli_vars, known_options=known_options
+        )
+        flows = select_flows(parsed, flow_names)
+    except FlowError as exc:
+        _show_error_panel("Invalid flow file", str(exc))
+        raise SystemExit(1) from exc
+
+    log.info(
+        f"Running {len(flows)} flow(s) from '{flow_file}': "
+        f"{', '.join(f.name for f in flows)}"
     )
-    raise SystemExit(1)
+    results, aborted = run_flows(flows, _run_flow_step)
+    _render_flow_summary(results, aborted)
+    if any_failed(results):
+        raise SystemExit(1)
 
 
 @click.group(
@@ -445,7 +606,16 @@ def run_project_flow(flow_file: str, flow_name: Optional[str]) -> None:
 @click.option(
     "--run",
     "flow_name",
-    help="Name of a specific flow to run from the flow file.",
+    help="Run only these flows from the file (comma-separated names); "
+    "default runs every flow in file order.",
+)
+@click.option(
+    "--var",
+    "cli_vars",
+    multiple=True,
+    metavar="NAME=VALUE",
+    help="Override a flow variable (repeatable). Highest precedence: "
+    "--var > env.* > the file's vars block.",
 )
 @click.pass_context
 def cli(
@@ -454,6 +624,7 @@ def cli(
     log_file: Optional[str],
     flow_file: Optional[str],
     flow_name: Optional[str],
+    cli_vars: tuple[str, ...],
 ) -> None:
     """Fluvo: A tool for importing, exporting, and processing data."""
     setup_logging(verbose, log_file)
@@ -474,7 +645,23 @@ def cli(
             click.echo(ctx.get_help())
             return
 
-    run_project_flow(effective_flow_file, flow_name)
+    from .lib.internal.ui import _show_error_panel
+
+    parsed_vars: dict[str, str] = {}
+    for item in cli_vars:
+        if "=" not in item:
+            _show_error_panel(
+                "Invalid --var",
+                f"--var must be NAME=VALUE, got '{item}'.",
+            )
+            raise SystemExit(1)
+        name, value = item.split("=", 1)
+        parsed_vars[name.strip()] = value
+
+    flow_names = (
+        [n.strip() for n in flow_name.split(",") if n.strip()] if flow_name else None
+    )
+    run_project_flow(effective_flow_file, flow_names, parsed_vars)
 
 
 # --- Module Management Command Group ---
