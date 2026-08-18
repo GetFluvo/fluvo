@@ -5,7 +5,8 @@ RPC calls to Odoo in parallel with proper connection pool management.
 """
 
 import concurrent.futures
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from ...logging_config import log
 
@@ -51,7 +52,7 @@ class RpcThread:
         self,
         fun: Callable[..., Any],
         args: list[Any],
-        kwargs: Optional[dict[str, Any]] = None,
+        kwargs: dict[str, Any] | None = None,
     ) -> Any:
         """Submits a function to be executed by a worker thread in the pool.
 

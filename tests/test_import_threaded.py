@@ -1,7 +1,7 @@
 """Tests for the refactored, low-level, multi-threaded import logic."""
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1483,7 +1483,7 @@ class TestLoadBatchWithBinaryFallback:
         def mock_load(
             header: list[str],
             lines: list[list[Any]],
-            context: Optional[dict[str, Any]] = None,
+            context: dict[str, Any] | None = None,
         ) -> dict[str, Any]:
             # Check if the bad record (rec5) is in the batch
             has_bad = any("rec5" in str(line) for line in lines)
@@ -1543,7 +1543,7 @@ class TestLoadBatchWithBinaryFallback:
         def mock_load(
             header: list[str],
             lines: list[list[Any]],
-            context: Optional[dict[str, Any]] = None,
+            context: dict[str, Any] | None = None,
         ) -> dict[str, Any]:
             has_bad = any(line[0] in bad_records for line in lines)
             if has_bad and len(lines) == 1:
@@ -1622,7 +1622,7 @@ class TestLoadBatchWithBinaryFallback:
         def mock_load(
             header: list[str],
             lines: list[list[Any]],
-            context: Optional[dict[str, Any]] = None,
+            context: dict[str, Any] | None = None,
         ) -> dict[str, Any]:
             call_count[0] += 1
             if call_count[0] == 1 and len(lines) == 4:

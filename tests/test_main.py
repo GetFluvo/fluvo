@@ -976,15 +976,11 @@ def test_execute_post_action_returns_true_on_timeout(mock_get_conn: MagicMock) -
 
     Server may have completed the operation even though we timed out.
     """
-    import socket
-
     from fluvo.__main__ import _execute_post_action
 
     mock_conn = MagicMock()
     mock_model = MagicMock()
-    mock_model.action_apply_inventory.side_effect = socket.timeout(
-        "Connection timed out"
-    )
+    mock_model.action_apply_inventory.side_effect = TimeoutError("Connection timed out")
     mock_conn.get_model.return_value = mock_model
     mock_get_conn.return_value = mock_conn
 

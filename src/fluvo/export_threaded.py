@@ -11,7 +11,7 @@ import shutil
 import sys
 from pathlib import Path
 from time import time
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
 
 import httpx
 import polars as pl
@@ -58,7 +58,7 @@ class RPCThreadExport(RpcThread):
         model: Any,
         header: list[str],
         fields_info: dict[str, dict[str, Any]],
-        context: Optional[dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
         technical_names: bool = False,
         is_hybrid: bool = False,
     ) -> None:
@@ -201,7 +201,7 @@ class RPCThreadExport(RpcThread):
         return processed_data
 
     def _execute_batch_with_retry(
-        self, ids_to_export: list[int], num: Union[int, str], e: Exception
+        self, ids_to_export: list[int], num: int | str, e: Exception
     ) -> tuple[list[dict[str, Any]], list[int]]:
         """Splits the batch and recursively retries on network errors."""
         if len(ids_to_export) > 1:
@@ -229,7 +229,7 @@ class RPCThreadExport(RpcThread):
             return [], []
 
     def _execute_batch(
-        self, ids_to_export: list[int], num: Union[int, str]
+        self, ids_to_export: list[int], num: int | str
     ) -> tuple[list[dict[str, Any]], list[int]]:
         """Executes the export for a single batch of IDs.
 
@@ -258,7 +258,7 @@ class RPCThreadExport(RpcThread):
                     ids_to_export, self.header, context=self.context
                 ).get("datas", [])
                 return [
-                    dict(zip(self.header, row)) for row in exported_data
+                    dict(zip(self.header, row, strict=False)) for row in exported_data
                 ], ids_to_export
 
             for field in self.header:
@@ -346,11 +346,11 @@ class RPCThreadExport(RpcThread):
 
 
 def _initialize_export(  # noqa: C901
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     model_name: str,
     header: list[str],
     technical_names: bool,
-) -> tuple[Optional[Any], Optional[Any], Optional[dict[str, dict[str, Any]]]]:
+) -> tuple[Any | None, Any | None, dict[str, dict[str, Any]] | None]:
     """Connects to Odoo and fetches field metadata, including relations."""
     log.debug("Starting metadata initialization.")
     try:
@@ -431,7 +431,7 @@ def _clean_and_transform_batch(  # noqa: C901
     df: pl.DataFrame,
     field_types: dict[str, str],
     polars_schema: dict[str, pl.DataType],
-    sanitize_newlines: Optional[str] = None,
+    sanitize_newlines: str | None = None,
 ) -> pl.DataFrame:
     """Runs a multi-stage cleaning and transformation pipeline on a DataFrame.
 
@@ -569,16 +569,16 @@ def _process_export_batches(  # noqa: C901, D417
     rpc_thread: "RPCThreadExport",
     total_ids: int,
     model_name: str,
-    output: Optional[str],
+    output: str | None,
     fields_info: dict[str, dict[str, Any]],
     separator: str,
     streaming: bool,
-    session_dir: Optional[Path],
+    session_dir: Path | None,
     is_resuming: bool,
     encoding: str,
     enrich_main_xml_id: bool = False,
-    sanitize_newlines: Optional[str] = None,
-) -> Optional[pl.DataFrame]:
+    sanitize_newlines: str | None = None,
+) -> pl.DataFrame | None:
     """Processes exported batches.
 
     Uses streaming for large files if requested,
@@ -728,14 +728,14 @@ def _process_export_batches(  # noqa: C901, D417
 
 
 def _determine_export_strategy(
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     model: str,
     header: list[str],
     technical_names: bool,
 ) -> tuple[
-    Optional[Any],
-    Optional[Any],
-    Optional[dict[str, dict[str, Any]]],
+    Any | None,
+    Any | None,
+    dict[str, dict[str, Any]] | None,
     bool,
     bool,
     bool,
@@ -850,7 +850,7 @@ def _resume_existing_session(
 def _create_new_session(
     model_obj: Any,
     domain: list[Any],
-    context: Optional[dict[str, Any]],
+    context: dict[str, Any] | None,
     session_id: str,
     session_dir: Path,
 ) -> tuple[list[int], int]:
@@ -869,21 +869,21 @@ def _create_new_session(
 
 
 def export_data(  # noqa: D417
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     model: str,
     domain: list[Any],
     header: list[str],
-    output: Optional[str],
-    context: Optional[dict[str, Any]] = None,
+    output: str | None,
+    context: dict[str, Any] | None = None,
     max_connection: int = 1,
     batch_size: int = 1000,
     separator: str = ";",
     encoding: str = "utf-8",
     technical_names: bool = False,
     streaming: bool = False,
-    resume_session: Optional[str] = None,
-    sanitize_newlines: Optional[str] = None,
-) -> tuple[bool, Optional[str], int, Optional[pl.DataFrame]]:
+    resume_session: str | None = None,
+    sanitize_newlines: str | None = None,
+) -> tuple[bool, str | None, int, pl.DataFrame | None]:
     """Exports data from an Odoo model, with support for resumable sessions.
 
     Args:

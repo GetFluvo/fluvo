@@ -6,7 +6,7 @@ before the transformation process begins.
 """
 
 import re
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import polars as pl
 
@@ -14,7 +14,7 @@ from ..logging_config import log
 
 
 def id_validity_checker(
-    id_field: str, pattern: str, null_values: Optional[list[str]] = None
+    id_field: str, pattern: str, null_values: list[str] | None = None
 ) -> Callable[[pl.DataFrame], bool]:
     """ID Validity checker.
 

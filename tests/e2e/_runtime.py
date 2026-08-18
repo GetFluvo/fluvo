@@ -9,7 +9,6 @@ default pytest run and only the ``e2e`` nox session pulls it in.
 
 from __future__ import annotations
 
-import socket
 import subprocess
 import time
 import urllib.error
@@ -185,7 +184,7 @@ def wait_http_ready(host: str, port: int, timeout: int = 300) -> None:
             with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310
                 if resp.status < 500:
                     return
-        except (urllib.error.URLError, socket.timeout, ConnectionError) as exc:
+        except (TimeoutError, urllib.error.URLError, ConnectionError) as exc:
             last_err = exc
         time.sleep(3)
     raise TimeoutError(

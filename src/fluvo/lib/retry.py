@@ -9,9 +9,10 @@ for import operations, distinguishing between:
 
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, TypeVar
 
 from ..logging_config import log
 
@@ -229,10 +230,10 @@ def calculate_backoff_delay(
 
 def retry_with_backoff(
     func: Callable[[], T],
-    config: Optional[RetryConfig] = None,
-    stats: Optional[RetryStats] = None,
-    on_retry: Optional[Callable[[int, str, float], None]] = None,
-) -> tuple[Optional[T], Optional[str]]:
+    config: RetryConfig | None = None,
+    stats: RetryStats | None = None,
+    on_retry: Callable[[int, str, float], None] | None = None,
+) -> tuple[T | None, str | None]:
     """Execute a function with exponential backoff retry.
 
     Args:

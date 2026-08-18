@@ -2,7 +2,7 @@
 
 import csv
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from fluvo import import_threaded
@@ -46,7 +46,7 @@ def test_two_tier_failure_handling(mock_get_conn: MagicMock, tmp_path: Path) -> 
     def load_side_effect(
         header: list[str],
         data: list[list[Any]],
-        context: Optional[dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         load_call_count[0] += 1
         # First call is the batch load - simulate failure
@@ -119,7 +119,7 @@ def test_create_fallback_handles_malformed_rows(tmp_path: Path) -> None:
     def load_side_effect(
         header: list[str],
         data: list[list[Any]],
-        context: Optional[dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         load_call_count[0] += 1
         # First call is the batch load - simulate failure
@@ -194,7 +194,7 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
     def load_side_effect(
         header: list[str],
         data: list[list[Any]],
-        context: Optional[dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         load_call_count[0] += 1
         # First call is the batch load - simulate failure to trigger fallback

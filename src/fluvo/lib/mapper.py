@@ -9,7 +9,8 @@ Processor for each row of the source data.
 
 import base64
 import os
-from typing import Any, Callable, Optional, Union, cast
+from collections.abc import Callable
+from typing import Any, cast
 
 import httpx
 
@@ -189,8 +190,8 @@ def cond(field: str, true_mapper: Any, false_mapper: Any) -> MapperFunc:
 
 def bool_val(
     field: str,
-    true_values: Optional[list[str]] = None,
-    false_values: Optional[list[str]] = None,
+    true_values: list[str] | None = None,
+    false_values: list[str] | None = None,
     default: bool = False,
 ) -> MapperFunc:
     """Returns a mapper that converts a field value to a boolean '1' or '0'.
@@ -229,8 +230,8 @@ def bool_val(
 
 
 def num(
-    field: str, default: Optional[Union[int, float]] = None
-) -> Callable[..., Optional[Union[int, float]]]:
+    field: str, default: int | float | None = None
+) -> Callable[..., int | float | None]:
     """Creates a mapper that converts a value to a native integer or float.
 
     This function is a factory that generates a mapper function. The returned
@@ -250,9 +251,7 @@ def num(
             or `float`) or the default.
     """
 
-    def num_fun(
-        line: dict[str, Any], state: dict[str, Any]
-    ) -> Optional[Union[int, float]]:
+    def num_fun(line: dict[str, Any], state: dict[str, Any]) -> int | float | None:
         value = line.get(field)
 
         if value is None or value == "":
@@ -455,7 +454,7 @@ def m2m_id_list(
     prefix: str,
     *args: Any,
     sep: str = ",",
-    const_values: Optional[list[str]] = None,
+    const_values: list[str] | None = None,
 ) -> ListMapperFunc:
     """Returns a mapper for creating a list of M2M external IDs.
 
@@ -501,7 +500,7 @@ def m2m_id_list(
 
 
 def m2m_value_list(
-    *args: Any, sep: str = ",", const_values: Optional[list[str]] = None
+    *args: Any, sep: str = ",", const_values: list[str] | None = None
 ) -> ListMapperFunc:
     """Returns a mapper that creates a Python list of unique raw values.
 
@@ -632,7 +631,7 @@ def binary_url_to_base64(
         or None, depending on the failure mode.
     """
 
-    def _mapper(line: LineDict, state: StateDict) -> Optional[str]:
+    def _mapper(line: LineDict, state: StateDict) -> str | None:
         url = line.get(field)
         if not url:
             # We now handle the case where the value is None or an empty string,
@@ -814,7 +813,7 @@ def split_file_number(file_nb: int) -> Callable[[LineDict, int], int]:
 
 def path_to_image(
     field: str, path: str
-) -> Callable[[dict[str, Any], dict[str, Any]], Optional[str]]:
+) -> Callable[[dict[str, Any], dict[str, Any]], str | None]:
     """Returns a mapper that converts a local file path to a base64 string.
 
     Args:
@@ -822,7 +821,7 @@ def path_to_image(
         path: The base directory where the image files are located.
     """
 
-    def _mapper(row: dict[str, Any], state: dict[str, Any]) -> Optional[str]:
+    def _mapper(row: dict[str, Any], state: dict[str, Any]) -> str | None:
         relative_path = row.get(field)
         if not relative_path:
             return None

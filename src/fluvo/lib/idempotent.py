@@ -5,7 +5,7 @@ them during import, making imports idempotent and more efficient.
 """
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import polars as pl
 
@@ -172,7 +172,7 @@ def find_unchanged_records(
     csv_data: list[dict[str, Any]],
     existing_records: dict[str, dict[str, Any]],
     id_field: str = "id",
-    compare_fields: Optional[list[str]] = None,
+    compare_fields: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], IdempotentStats]:
     """Identify unchanged records that can be skipped.
 
@@ -241,7 +241,7 @@ def _filter_unchanged_pyloop(  # noqa: C901
     header: list[str],
     existing_records: dict[str, dict[str, Any]],
     id_field: str,
-    compare_fields: Optional[list[str]],
+    compare_fields: list[str] | None,
 ) -> tuple[list[list[Any]], IdempotentStats]:
     """Row-by-row fallback (exact reference semantics, incl. error handling)."""
     stats = IdempotentStats()
@@ -298,7 +298,7 @@ def filter_unchanged_rows(
     header: list[str],
     existing_records: dict[str, dict[str, Any]],
     id_field: str = "id",
-    compare_fields: Optional[list[str]] = None,
+    compare_fields: list[str] | None = None,
 ) -> tuple[list[list[Any]], IdempotentStats]:
     """Filter out unchanged rows via a vectorized Polars anti-join.
 

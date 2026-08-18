@@ -7,7 +7,7 @@ the few methods the import pipeline uses (load/write/create/search/read/fields_g
 """
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import patch
 
 from fluvo.import_threaded import import_data
@@ -39,14 +39,15 @@ class _FakeModel:
         self, header: list[str], rows: list[list[Any]], context: Any = None
     ) -> dict[str, Any]:
         if self._s.fail_all or any(
-            dict(zip(header, row)).get("id") in self._s.fail_ids for row in rows
+            dict(zip(header, row, strict=False)).get("id") in self._s.fail_ids
+            for row in rows
         ):
             # Whole batch fails -> the pipeline binary-searches to isolate the bad row.
             return {"ids": [], "messages": [{"message": "boom", "type": "error"}]}
         ids: list[int] = []
         recs = self._s.records.setdefault(self.model_name, {})
         for row in rows:
-            vals = dict(zip(header, row))
+            vals = dict(zip(header, row, strict=False))
             db_id = self._s.next_id()
             recs[db_id] = vals
             xmlid = vals.get("id")
@@ -77,7 +78,7 @@ class _FakeModel:
         self._s.records.setdefault(self.model_name, {})[db_id] = vals
         return db_id
 
-    def fields_get(self, names: Optional[list[str]] = None, *a: Any) -> dict[str, Any]:
+    def fields_get(self, names: list[str] | None = None, *a: Any) -> dict[str, Any]:
         return {n: {"type": "many2one"} for n in (names or [])}
 
     # --- ir.model.data behaviour ---
@@ -127,8 +128,8 @@ def _run(
     tmp_path: Path,
     csv_text: str,
     fail_all: bool = False,
-    fail_ids: Optional[set[str]] = None,
-    seed_imd: Optional[list[dict[str, Any]]] = None,
+    fail_ids: set[str] | None = None,
+    seed_imd: list[dict[str, Any]] | None = None,
     **kwargs: Any,
 ) -> Any:
     """Write a CSV and run import_data against a fresh FakeOdoo (single-threaded)."""

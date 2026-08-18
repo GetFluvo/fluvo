@@ -7,7 +7,7 @@ adjust batch sizes and delays to prevent overloading the Odoo server.
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from ..logging_config import log
 
@@ -78,7 +78,7 @@ class ThrottleStats:
 class ThrottleController:
     """Controller for health-aware throttling."""
 
-    def __init__(self, config: Optional[ThrottleConfig] = None):
+    def __init__(self, config: ThrottleConfig | None = None):
         """Initialize the throttle controller.
 
         Args:

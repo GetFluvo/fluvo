@@ -12,7 +12,7 @@ import re
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
 
 import polars as pl
 from rich.console import Console
@@ -35,7 +35,7 @@ def _count_lines(filepath: str) -> int:
         return 0
 
 
-def _infer_model_from_filename(filename: str) -> Optional[str]:
+def _infer_model_from_filename(filename: str) -> str | None:
     """Tries to guess the Odoo model from a CSV filename."""
     basename = Path(filename).stem
     # Remove common suffixes like _fail, _transformed, etc.
@@ -64,8 +64,8 @@ def _get_fail_filename(model: str, is_fail_run: bool = False) -> str:
 
 
 def _get_env_from_config(
-    config: Optional[Union[str, dict[str, Any]]],
-) -> Optional[str]:
+    config: str | dict[str, Any] | None,
+) -> str | None:
     """Extracts the environment name from a config file path.
 
     Supports patterns like:
@@ -99,9 +99,7 @@ def _get_env_from_config(
     return env_name if env_name else None
 
 
-def expected_fail_file(
-    config: Union[str, dict[str, Any]], model: str, filename: str
-) -> str:
+def expected_fail_file(config: str | dict[str, Any], model: str, filename: str) -> str:
     """Return the fail-file path a normal (non-``--fail``) import would write.
 
     Mirrors the path logic in :func:`run_import` exactly, so the flow runner can
@@ -147,12 +145,12 @@ def _run_preflight_checks(
 
 
 def run_import(  # noqa: C901
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     filename: str,
-    model: Optional[str],
-    deferred_fields: Optional[list[str]],
+    model: str | None,
+    deferred_fields: list[str] | None,
     auto_defer: bool,
-    unique_id_field: Optional[str],
+    unique_id_field: str | None,
     no_preflight_checks: bool,
     headless: bool,
     worker: int,
@@ -160,11 +158,11 @@ def run_import(  # noqa: C901
     skip: int,
     fail: bool,
     separator: str,
-    ignore: Optional[list[str]],
+    ignore: list[str] | None,
     context: Any,  # Accept Any type for robustness
     encoding: str,
     o2m: bool,
-    groupby: Optional[list[str]],
+    groupby: list[str] | None,
     auto_create_refs: bool = False,
     auto_groupby: bool = False,
     set_empty_on_missing: bool = False,
@@ -177,13 +175,13 @@ def run_import(  # noqa: C901
     skip_existing: bool = False,
     adaptive_throttle: bool = True,
     max_batch_bytes: int = 5 * 1024 * 1024,
-    resolve_relations: Optional[list[dict[str, Any]]] = None,
+    resolve_relations: list[dict[str, Any]] | None = None,
     auto_clean: bool = False,
     fix_missing_variants: bool = False,
     allow_xmlid_collisions: bool = False,
     m2m_mode: str = "replace",
     allow_default_company: bool = False,
-) -> Optional[dict[str, int]]:
+) -> dict[str, int] | None:
     """Main entry point for the import command, handling all orchestration.
 
     Returns:
@@ -448,7 +446,7 @@ def run_import(  # noqa: C901
     # "run, then retry the fail file" flow never populated relations at all (#8).
     # source_df is read from the original ``filename``; id_map scopes the writes to
     # the imported subset.
-    source_df: Optional[pl.DataFrame] = None
+    source_df: pl.DataFrame | None = None
     if id_map and import_plan.get("strategies"):
         try:
             source_df = pl.read_csv(
@@ -616,13 +614,13 @@ def run_import(  # noqa: C901
 
 
 def run_import_for_migration(
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     model: str,
     header: list[str],
     data: list[list[Any]],
     worker: int = 1,
     batch_size: int = 10,
-    fail_file: Optional[str] = None,
+    fail_file: str | None = None,
 ) -> tuple[bool, dict[str, int]]:
     """Orchestrates the data import process from in-memory data.
 

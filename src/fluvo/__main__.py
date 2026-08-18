@@ -5,7 +5,7 @@ import os
 import shlex
 from importlib.metadata import version as get_version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -142,7 +142,7 @@ def _run_dry_run_validation(connection_file: str, **kwargs: Any) -> None:
 
 def _execute_post_action(
     config: Any,
-    model: Optional[str],
+    model: str | None,
     action_name: str,
     id_map: dict[str, int],
     context: dict[str, Any],
@@ -226,7 +226,7 @@ def _execute_post_action(
             # Restore original timeout
             socket.setdefaulttimeout(original_timeout)
 
-    except (socket.timeout, TimeoutError, ConnectionError) as e:
+    except (TimeoutError, ConnectionError) as e:
         log.warning(f"Post-action '{action_name}' timed out or connection lost: {e}")
         log.warning(
             "The operation may have completed on the server. "
@@ -465,7 +465,7 @@ def _run_flow_step(command: str, with_: dict[str, Any]) -> StepOutcome:
     cmd = cli.commands[command]
     argv = _build_step_argv(with_, _command_option_specs(cmd))
     ok = True
-    error: Optional[str] = None
+    error: str | None = None
     try:
         cmd.main(argv, standalone_mode=False, prog_name=f"fluvo {command}")
     except SystemExit as exc:
@@ -482,7 +482,7 @@ def _run_flow_step(command: str, with_: dict[str, Any]) -> StepOutcome:
         log.error(f"Step '{command}' raised an unexpected error: {exc}")
         ok, error = False, str(exc)
 
-    fail_file: Optional[str] = None
+    fail_file: str | None = None
     fail_rows = 0
     if command == "import" and with_.get("model") and with_.get("file"):
         try:
@@ -601,7 +601,7 @@ def _render_dry_run(flow_file: "FlowFile", flows: "list[Flow]") -> None:
 
 def run_project_flow(
     flow_file: str,
-    flow_names: Optional[list[str]],
+    flow_names: list[str] | None,
     cli_vars: dict[str, str],
     dry_run: bool = False,
 ) -> None:
@@ -691,9 +691,9 @@ def run_project_flow(
 def cli(
     ctx: click.Context,
     verbose: bool,
-    log_file: Optional[str],
-    flow_file: Optional[str],
-    flow_name: Optional[str],
+    log_file: str | None,
+    flow_file: str | None,
+    flow_name: str | None,
     cli_vars: tuple[str, ...],
     dry_run: bool,
 ) -> None:
@@ -850,7 +850,7 @@ def workflow_group() -> None:
 )
 def create_missing_variants_cmd(
     connection_file: str,
-    domain: Optional[str],
+    domain: str | None,
     batch_size: int,
     dry_run: bool,
 ) -> None:
@@ -860,7 +860,7 @@ def create_missing_variants_cmd(
     API does not, so templates can import with no variants (#188). This finds
     them and creates the missing default variant.
     """
-    parsed_domain: Optional[list[Any]] = None
+    parsed_domain: list[Any] | None = None
     if domain:
         try:
             parsed_domain = ast.literal_eval(domain)
@@ -957,14 +957,14 @@ def vat_group() -> None:
 )
 def vat_get_settings_cmd(
     connection_file: str,
-    company_ids: Optional[str],
+    company_ids: str | None,
     include_stdnum: bool,
 ) -> None:
     """Get current VAT validation settings for all companies."""
     from rich.console import Console
     from rich.table import Table
 
-    company_id_list: Optional[list[int]] = None
+    company_id_list: list[int] | None = None
     if company_ids:
         company_id_list = [int(c.strip()) for c in company_ids.split(",") if c.strip()]
 
@@ -1030,11 +1030,11 @@ def vat_get_settings_cmd(
 )
 def vat_disable_cmd(
     connection_file: str,
-    company_ids: Optional[str],
+    company_ids: str | None,
     vies: bool,
     stdnum: bool,
     save_settings: bool,
-    output: Optional[str],
+    output: str | None,
 ) -> None:
     """Disable VAT validation (VIES and/or stdnum) for companies."""
     import json
@@ -1043,7 +1043,7 @@ def vat_disable_cmd(
 
     console = Console()
 
-    company_id_list: Optional[list[int]] = None
+    company_id_list: list[int] | None = None
     if company_ids:
         company_id_list = [int(c.strip()) for c in company_ids.split(",") if c.strip()]
 
@@ -1092,7 +1092,7 @@ def vat_disable_cmd(
 )
 def vat_restore_cmd(
     connection_file: str,
-    input_file: Optional[str],
+    input_file: str | None,
 ) -> None:
     """Restore VAT validation settings to their original state."""
     import json
@@ -1174,9 +1174,9 @@ def vat_validate_cmd(
     connection_file: str,
     batch_size: int,
     delay: float,
-    notify_users: Optional[str],
-    domain: Optional[str],
-    max_records: Optional[int],
+    notify_users: str | None,
+    domain: str | None,
+    max_records: int | None,
 ) -> None:
     """Validate VAT numbers against VIES in batches with optional notifications."""
     import ast
@@ -1186,11 +1186,11 @@ def vat_validate_cmd(
 
     console = Console()
 
-    notify_user_ids: Optional[list[int]] = None
+    notify_user_ids: list[int] | None = None
     if notify_users:
         notify_user_ids = [int(u.strip()) for u in notify_users.split(",") if u.strip()]
 
-    parsed_domain: Optional[list[Any]] = None
+    parsed_domain: list[Any] | None = None
     if domain:
         try:
             parsed_domain = ast.literal_eval(domain)
@@ -1626,7 +1626,7 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
 
     elif company_id is not None:
         # Resolve company_id (can be database ID or XML ID)
-        resolved_company_id: Optional[int] = None
+        resolved_company_id: int | None = None
 
         if company_id.isdigit():
             # It's a database ID
@@ -1807,7 +1807,7 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
 
     # Handle --sudo flag: temporarily disable record rules for the model
     sudo = kwargs.pop("sudo", False)
-    import_result: Optional[dict[str, int]] = None
+    import_result: dict[str, int] | None = None
     if sudo:
         from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
 

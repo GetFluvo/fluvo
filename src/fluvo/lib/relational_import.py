@@ -2,7 +2,7 @@
 
 import json
 import tempfile
-from typing import Any, Optional, Union
+from typing import Any
 
 import polars as pl
 from rich.progress import Progress, TaskID
@@ -12,8 +12,8 @@ from . import cache, conf_lib, writer
 
 
 def _resolve_related_ids(
-    config: Union[str, dict[str, Any]], related_model: str, external_ids: pl.Series
-) -> Optional[pl.DataFrame]:
+    config: str | dict[str, Any], related_model: str, external_ids: pl.Series
+) -> pl.DataFrame | None:
     """Resolve related ids.
 
     Resolves external IDs for a related model, trying cache first,
@@ -87,7 +87,7 @@ def _resolve_related_ids(
 
 def _resolve_one_relation(
     df: "pl.DataFrame",
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     spec: dict[str, Any],
 ) -> "pl.DataFrame":
     """Resolve a single relation column to xmlid/db-id via a Polars join.
@@ -169,7 +169,7 @@ def _resolve_one_relation(
 def resolve_relations_in_df(
     df: "pl.DataFrame",
     specs: list[dict[str, Any]],
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
 ) -> "pl.DataFrame":
     """Pre-resolve relation columns to external/db IDs in Polars before load().
 
@@ -197,13 +197,13 @@ def resolve_relations_in_df(
 
 
 def _derive_missing_relation_info(
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     model: str,
     field: str,
-    relational_table: Optional[str],
-    owning_model_fk: Optional[str],
-    related_model_fk: Optional[str],
-) -> tuple[Optional[str], Optional[str]]:
+    relational_table: str | None,
+    owning_model_fk: str | None,
+    related_model_fk: str | None,
+) -> tuple[str | None, str | None]:
     """Derive missing relation table and field names if possible.
 
     First tries to query Odoo's ir.model.relation table to get actual relationship info.
@@ -248,8 +248,8 @@ def _derive_missing_relation_info(
 
 
 def _query_relation_info_from_odoo(
-    config: Union[str, dict[str, Any]], model: str, related_model_fk: str
-) -> Optional[tuple[str, str]]:
+    config: str | dict[str, Any], model: str, related_model_fk: str
+) -> tuple[str, str] | None:
     """Query Odoo's ir.model.relation table to get actual relationship information.
 
     Args:
@@ -384,7 +384,7 @@ def _derive_relation_info(
 
 
 def run_direct_relational_import(
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     model: str,
     field: str,
     strategy_details: dict[str, Any],
@@ -395,7 +395,7 @@ def run_direct_relational_import(
     progress: Progress,
     task_id: TaskID,
     original_filename: str,
-) -> Optional[dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Orchestrates the high-speed direct relational import."""
     progress.update(
         task_id,
@@ -556,7 +556,7 @@ def _prepare_link_dataframe(
 
 
 def run_write_tuple_import(
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     model: str,
     field: str,
     strategy_details: dict[str, Any],
@@ -663,7 +663,7 @@ def run_write_tuple_import(
 
 
 def _create_relational_records(
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     model: str,
     field: str,
     actual_field_name: str,
@@ -806,7 +806,7 @@ def _create_relational_records(
 
 
 def run_write_o2m_tuple_import(
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     model: str,
     field: str,
     strategy_details: dict[str, Any],

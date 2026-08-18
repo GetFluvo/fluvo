@@ -11,7 +11,7 @@ private method and cannot be invoked over RPC, but creating the variant record
 directly achieves the same result for attribute-less templates.
 """
 
-from typing import Any, Optional, Union
+from typing import Any
 
 from ...lib import conf_lib
 from ...logging_config import log
@@ -57,8 +57,8 @@ def _create_default_variants(
 
 
 def run_create_missing_variants(
-    config: Union[str, dict[str, Any]],
-    domain: Optional[list[Any]] = None,
+    config: str | dict[str, Any],
+    domain: list[Any] | None = None,
     batch_size: int = 200,
     dry_run: bool = False,
 ) -> bool:
@@ -117,8 +117,8 @@ def run_create_missing_variants(
 
 
 def check_missing_variants_after_import(
-    config: Union[str, dict[str, Any]],
-    model: Optional[str],
+    config: str | dict[str, Any],
+    model: str | None,
     id_map: dict[str, int],
     fix: bool = False,
 ) -> int:

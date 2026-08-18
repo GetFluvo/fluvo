@@ -9,7 +9,7 @@ import csv
 import sys
 from collections import defaultdict
 from time import time
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 from rich.progress import (
@@ -40,10 +40,10 @@ class RPCThreadWrite(RpcThread):
         max_connection: int,
         model: Any,
         header: list[str],
-        writer: Optional[Any] = None,
-        context: Optional[dict[str, Any]] = None,
-        progress: Optional[Progress] = None,
-        task_id: Optional[TaskID] = None,
+        writer: Any | None = None,
+        context: dict[str, Any] | None = None,
+        progress: Progress | None = None,
+        task_id: TaskID | None = None,
     ) -> None:
         """Initializes the write thread handler."""
         super().__init__(max_connection)
@@ -182,8 +182,8 @@ def write_data(
     max_connection: int = 1,
     batch_size: int = 1000,
     is_fail_run: bool = False,
-    context: Optional[dict[str, Any]] = None,
-    ignore: Optional[list[str]] = None,
+    context: dict[str, Any] | None = None,
+    ignore: list[str] | None = None,
     check: bool = False,
 ) -> bool:
     """Orchestrates the entire threaded write process.

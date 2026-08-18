@@ -23,8 +23,9 @@ Usage:
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 __all__ = [
     # Constants (extensible)

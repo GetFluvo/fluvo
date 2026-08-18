@@ -1,7 +1,6 @@
 """This module provides sorting strategies for CSV data using Polars."""
 
 import tempfile
-from typing import Optional, Union
 
 import polars as pl
 
@@ -15,7 +14,7 @@ def sort_for_self_referencing(
     parent_column: str,
     encoding: str = "utf-8",
     separator: str = ";",
-) -> Optional[Union[str, bool]]:
+) -> str | bool | None:
     """Sorts a CSV file for self-referencing hierarchies.
 
     This function reads a CSV file and checks if it contains a self-referencing

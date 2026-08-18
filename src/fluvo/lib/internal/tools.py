@@ -5,10 +5,10 @@ and iteration,
 primarily used by the mapper and processor modules.
 """
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from functools import lru_cache
 from itertools import islice
-from typing import Any, Callable
+from typing import Any
 
 # Cache for XML ID sanitization - significantly speeds up repeated sanitizations
 # Max size of 100,000 should cover most imports while keeping memory bounded
@@ -134,7 +134,7 @@ class AttributeLineDict:
          - 'attribute_id/id': A dict mapping attribute name to its ID.
          - 'value_ids/id': A dict mapping attribute name to the value's ID.
         """
-        line_dict = dict(zip(header, line))
+        line_dict = dict(zip(header, line, strict=False))
         template_id = line_dict.get("product_tmpl_id/id")
         if not template_id:
             return

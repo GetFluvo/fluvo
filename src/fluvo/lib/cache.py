@@ -4,14 +4,14 @@ import configparser
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
 
 import polars as pl
 
 from ..logging_config import log
 
 _cache_enabled = True
-_uuid_by_fingerprint: dict[str, Optional[str]] = {}
+_uuid_by_fingerprint: dict[str, str | None] = {}
 
 
 def set_cache_enabled(enabled: bool) -> None:
@@ -31,13 +31,11 @@ def set_cache_enabled(enabled: bool) -> None:
 # minimal-privilege API user may lack read access to ir.config_parameter; on any
 # failure _database_uuid returns None and the caller falls back to the host+port+db
 # key (restore-detection is simply unavailable for that user).
-def _database_uuid(
-    config: Union[str, dict[str, Any]], base_fingerprint: str
-) -> Optional[str]:
+def _database_uuid(config: str | dict[str, Any], base_fingerprint: str) -> str | None:
     """Best-effort Odoo ``database.uuid``, memoized per connection fingerprint."""
     if base_fingerprint in _uuid_by_fingerprint:
         return _uuid_by_fingerprint[base_fingerprint]
-    uuid: Optional[str] = None
+    uuid: str | None = None
     try:
         from . import conf_lib  # local import avoids an import cycle
 
@@ -58,7 +56,7 @@ def _database_uuid(
     return uuid
 
 
-def _connection_fingerprint(config: Union[str, dict[str, Any]]) -> Optional[str]:
+def _connection_fingerprint(config: str | dict[str, Any]) -> str | None:
     """Return a stable host+port+db(+database.uuid) fingerprint for a config.
 
     Accepts either a path to a connection .conf file or a connection dict, so the
@@ -93,7 +91,7 @@ def _connection_fingerprint(config: Union[str, dict[str, Any]]) -> Optional[str]
     return f"{base}{uuid}" if uuid else base
 
 
-def resolve_cache_dir(config: Union[str, dict[str, Any]]) -> Optional[Path]:
+def resolve_cache_dir(config: str | dict[str, Any]) -> Path | None:
     """Cache directory for a connection, accepting a file path or a dict.
 
     Args:
@@ -117,7 +115,7 @@ def resolve_cache_dir(config: Union[str, dict[str, Any]]) -> Optional[Path]:
         return None
 
 
-def get_cache_dir(config_file: str) -> Optional[Path]:
+def get_cache_dir(config_file: str) -> Path | None:
     """Generates a unique, connection-specific cache directory path.
 
     Delegates to :func:`resolve_cache_dir` so both entry points share the same
@@ -153,7 +151,7 @@ def save_id_map(config_file: str, model: str, id_map: dict[str, int]) -> None:
         log.error(f"Failed to save id_map for model '{model}': {e}")
 
 
-def load_id_map(config_file: str, model: str) -> Optional[pl.DataFrame]:
+def load_id_map(config_file: str, model: str) -> pl.DataFrame | None:
     """Loads an id_map from the cache into a Polars DataFrame.
 
     Args:
@@ -181,13 +179,13 @@ def load_id_map(config_file: str, model: str) -> Optional[pl.DataFrame]:
 
 
 def export_id_map(
-    config: Union[str, dict[str, Any]],
+    config: str | dict[str, Any],
     model: str,
     key_field: str,
-    domain: Optional[list[Any]] = None,
+    domain: list[Any] | None = None,
     *,
     force_refresh: bool = False,
-) -> Optional[pl.DataFrame]:
+) -> pl.DataFrame | None:
     """Export and cache an id-map for ``model`` keyed by a natural field.
 
     Reads every (or domain-filtered) record of ``model`` once and resolves each to
@@ -247,7 +245,7 @@ def export_id_map(
                 int(rec["res_id"]), f"{rec['module']}.{rec['name']}"
             )
 
-        def _key_str(value: Any) -> Optional[str]:
+        def _key_str(value: Any) -> str | None:
             # m2o values come back as [id, name]; take the display part.
             if isinstance(value, (list, tuple)):
                 return str(value[1]) if len(value) > 1 else None
@@ -295,7 +293,7 @@ def save_fields_get_cache(
         log.error(f"Failed to save fields_get cache for model '{model}': {e}")
 
 
-def load_fields_get_cache(config_file: str, model: str) -> Optional[dict[str, Any]]:
+def load_fields_get_cache(config_file: str, model: str) -> dict[str, Any] | None:
     """Loads a 'fields_get' result from the JSON cache file.
 
     Args:
@@ -351,7 +349,7 @@ def generate_session_id(model: str, domain: list[Any], fields: list[Any]) -> str
     return hashlib.sha256(session_str.encode()).hexdigest()[:16]
 
 
-def get_session_dir(session_id: str) -> Optional[Path]:
+def get_session_dir(session_id: str) -> Path | None:
     """Creates and returns the path to a specific session directory.
 
     Args:

@@ -3,7 +3,6 @@
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Optional
 
 from rich.logging import RichHandler
 
@@ -11,10 +10,10 @@ from rich.logging import RichHandler
 log = logging.getLogger("fluvo")
 
 # Store reference to console handler for suppression during progress display
-_console_handler: Optional[RichHandler] = None
+_console_handler: RichHandler | None = None
 
 
-def setup_logging(verbose: bool = False, log_file: Optional[str] = None) -> None:
+def setup_logging(verbose: bool = False, log_file: str | None = None) -> None:
     """Configures the root logger for the application.
 
     This function sets up handlers to print logs to the console and optionally

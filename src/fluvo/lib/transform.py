@@ -2,27 +2,12 @@
 
 import inspect
 import os
-import sys
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import (
     Any,
-    Callable,
-    Optional,
     Union,
 )
-
-from .odoo_lib import build_polars_schema
-
-if sys.version_info < (3, 10):
-    from typing import Union as TypeUnion
-else:
-    TypeUnion = Union
-
-if sys.version_info < (3, 10):
-    from typing import Union as TypeUnion
-else:
-    TypeUnion = Union
 
 import polars as pl
 from lxml import etree
@@ -33,6 +18,11 @@ from ..logging_config import log
 from . import mapper
 from .internal.exceptions import SkippingError
 from .internal.io import write_file
+from .odoo_lib import build_polars_schema
+
+# Backwards-compatible alias kept for the public API; on Python 3.10+ it is just
+# typing.Union.
+TypeUnion = Union
 
 
 class MapperRepr:
@@ -63,16 +53,16 @@ class Processor:
     def __init__(
         self,
         mapping: Mapping[str, Any],
-        source_filename: Optional[str] = None,
-        dataframe: Optional[pl.DataFrame] = None,
-        connection: Optional[Any] = None,
-        model: Optional[str] = None,
-        config_file: Optional[str] = None,
+        source_filename: str | None = None,
+        dataframe: pl.DataFrame | None = None,
+        connection: Any | None = None,
+        model: str | None = None,
+        config_file: str | None = None,
         separator: str = ";",
         preprocess: Callable[[pl.DataFrame], pl.DataFrame] = lambda df: df,
-        schema_overrides: Optional[dict[str, pl.DataType]] = None,
-        date_formats: Optional[dict[str, str]] = None,
-        datetime_formats: Optional[dict[str, str]] = None,
+        schema_overrides: dict[str, pl.DataType] | None = None,
+        date_formats: dict[str, str] | None = None,
+        datetime_formats: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initializes the Processor.
@@ -163,8 +153,8 @@ class Processor:
     def _apply_date_formats(
         self,
         df: pl.DataFrame,
-        date_formats: Optional[dict[str, str]],
-        datetime_formats: Optional[dict[str, str]],
+        date_formats: dict[str, str] | None,
+        datetime_formats: dict[str, str] | None,
     ) -> pl.DataFrame:
         """Apply date and datetime format conversions using Polars expressions.
 
@@ -224,7 +214,7 @@ class Processor:
         return df
 
     def _parse_mapping(
-        self, mapping: Optional[Mapping[str, Any]]
+        self, mapping: Mapping[str, Any] | None
     ) -> tuple[dict[str, pl.DataType], dict[str, Any]]:
         """Parses a mapping dict to separate Polars types from mapper functions."""
         schema_overrides: dict[str, pl.DataType] = {}
@@ -250,7 +240,7 @@ class Processor:
         self,
         filename: str,
         separator: str,
-        schema_overrides: Optional[dict[str, pl.DataType]] = None,
+        schema_overrides: dict[str, pl.DataType] | None = None,
         **kwargs: Any,
     ) -> pl.DataFrame:
         """Reads a CSV or XML file and returns its content as a DataFrame."""
@@ -299,9 +289,7 @@ class Processor:
                 return pl.DataFrame()
         return pl.DataFrame()
 
-    def check(
-        self, check_fun: Callable[..., bool], message: Optional[str] = None
-    ) -> bool:
+    def check(self, check_fun: Callable[..., bool], message: str | None = None) -> bool:
         """Runs a data quality check function against the loaded data.
 
         Args:
@@ -369,11 +357,11 @@ class Processor:
     def process(
         self,
         filename_out: str,
-        params: Optional[dict[str, Any]] = None,
+        params: dict[str, Any] | None = None,
         t: str = "list",
-        null_values: Optional[list[Any]] = None,
+        null_values: list[Any] | None = None,
         m2m: bool = False,
-        m2m_columns: Optional[list[str]] = None,
+        m2m_columns: list[str] | None = None,
         dry_run: bool = False,
     ) -> pl.DataFrame:
         """Processes the data using a mapping and prepares it for writing.
@@ -438,7 +426,7 @@ class Processor:
         id_column: str,
         m2m_columns: list[str],
         filename_out: str,
-        params: Optional[dict[str, Any]] = None,
+        params: dict[str, Any] | None = None,
         separator: str = ",",
     ) -> None:
         """Processes many-to-many data by first unpivoting the source data.
@@ -522,7 +510,7 @@ class Processor:
         child_key: str,
         header_prefix: str = "child",
         separator: str = ";",
-        schema_overrides: Optional[dict[str, pl.DataType]] = None,
+        schema_overrides: dict[str, pl.DataType] | None = None,
         dry_run: bool = False,
     ) -> None:
         """Joins data from a secondary file into the processor's main data.
@@ -678,9 +666,9 @@ class Processor:
 
     def _process_mapping(
         self,
-        mapping: Mapping[str, Union[Callable[..., Any], pl.Expr]],
+        mapping: Mapping[str, Callable[..., Any] | pl.Expr],
         null_values: list[Any],
-        list_return_dtype: Optional[pl.DataType] = None,
+        list_return_dtype: pl.DataType | None = None,
     ) -> pl.DataFrame:
         """The core transformation loop."""
         if not mapping:
@@ -751,9 +739,9 @@ class Processor:
 
     def _process_mapping_m2m(
         self,
-        mapping: Mapping[str, Union[Callable[..., Any], pl.Expr]],
+        mapping: Mapping[str, Callable[..., Any] | pl.Expr],
         null_values: list[Any],
-        m2m_columns: Optional[list[str]],
+        m2m_columns: list[str] | None,
     ) -> pl.DataFrame:
         """Specific m2m processor.
 
@@ -882,7 +870,7 @@ class ProductProcessorV9(Processor):
 
     def _extract_attribute_value_data(
         self,
-        mapping: Mapping[str, Union[pl.Expr, Callable[..., Any]]],
+        mapping: Mapping[str, pl.Expr | Callable[..., Any]],
         attributes_list: list[str],
     ) -> pl.DataFrame:
         """Extracts and transforms data for 'product.attribute.value.csv'."""
@@ -901,8 +889,8 @@ class ProductProcessorV9(Processor):
 
     def process_attribute_mapping(
         self,
-        mapping: Mapping[str, Union[pl.Expr, Callable[..., Any]]],
-        line_mapping: Mapping[str, Union[pl.Expr, Callable[..., Any]]],
+        mapping: Mapping[str, pl.Expr | Callable[..., Any]],
+        line_mapping: Mapping[str, pl.Expr | Callable[..., Any]],
         attributes_list: list[str],
         attribute_prefix: str,
         path: str,

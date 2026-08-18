@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..logging_config import log
 
@@ -164,9 +164,7 @@ def save_checkpoint(checkpoint: CheckpointData) -> bool:
         return False
 
 
-def load_checkpoint(
-    file_path: str, config: Any, model: str
-) -> Optional[CheckpointData]:
+def load_checkpoint(file_path: str, config: Any, model: str) -> CheckpointData | None:
     """Load checkpoint data from disk if available and valid.
 
     Args:
