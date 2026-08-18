@@ -124,41 +124,47 @@ wrong in a way that is expensive to unpick later. It happens most often on
 LLM-assisted or scripted runs, where nobody is watching the default.
 
 To prevent this, when you import a company-specific model (one with a `company_id`
-field or any company-dependent columns) and pass **neither** `--company-id` **nor**
-`--all-companies`, a pre-flight check warns you, naming the company that *will* be
-used and how many records are about to land there:
+field or any company-dependent columns) into a **multi-company** database and pass
+**neither** `--company-id` **nor** `--all-companies`, the import **aborts** with a
+non-zero exit, naming the company that *would* have been used:
 
 ```
-╭────────────────────────── No company specified ──────────────────────────────╮
-│ 'product.product' is company-specific and no --company-id / --all-companies   │
-│ was given.                                                                    │
+╭──────────────────────────── Company required ────────────────────────────────╮
+│ 'product.product' is company-specific and this database has 4 companies, but  │
+│ no --company-id / --all-companies was given. 1,240 record(s) would be created │
+│ under company 1 "YourCo NV" — the most common silent migration error.         │
 │                                                                               │
-│ 1,240 record(s) will be created under company 1 "YourCo NV".                  │
-│                                                                               │
-│ If that is not what you intend, re-run with --company-id <id>. In automation, │
-│ pass --require-company to turn this into a hard error.                         │
+│ Choose the company: --company-id <id> or --all-companies.                     │
+│ To deliberately use the default, pass --allow-default-company.                │
 ╰───────────────────────────────────────────────────────────────────────────────╯
 ```
 
-The resolved company is also echoed in the **run summary** (and the reconciliation
-report), so which company received the data is on the record either way — whether
-you set it explicitly or accepted the default.
+This is the default because forgetting the company is a data-integrity bug, not a
+style choice — the run fails loudly and composes with `set -e` orchestration
+instead of quietly writing to the wrong company.
 
-### `--require-company` for automation
+**Single-company databases are unaffected.** When only one company exists there is
+no ambiguity, so the import proceeds without prompting.
 
-In a pipeline you don't want a warning you might miss — you want the run to stop.
-Pass `--require-company` to turn the unset case into a hard error with a non-zero
-exit code:
+Whichever way the company is decided, the resolved company is echoed in the **run
+summary** (and the reconciliation report), so it is always on the record.
+
+### `--allow-default-company` to accept the default
+
+When you genuinely want the connecting user's default company on a multi-company
+database, say so explicitly — the guard then warns (naming the company) and
+proceeds:
 
 ```bash
 fluvo import \
   --connection-file conf/prod.conf \
   --file data/products.csv --model product.product \
-  --require-company        # aborts unless --company-id / --all-companies is given
+  --allow-default-company   # proceed under the default instead of aborting
 ```
 
-This composes with `set -e` orchestration: a run that forgot the company fails
-loudly instead of quietly writing to the wrong one.
+Prefer `--company-id <id>` (a database id or an XML id like `base.main_company`)
+whenever you know the target company; reach for `--allow-default-company` only when
+the default is deliberately correct.
 
 ---
 
@@ -868,7 +874,7 @@ fluvo import \
 | `--context "{'inventory_mode': True}"` | Required to enable inventory adjustments |
 | `--sudo` | Bypasses record rules (needed for stock.quant) |
 | `--all-companies` | Enables cross-company access |
-| `--require-company` | Aborts a company-specific import unless the company is set explicitly |
+| `--allow-default-company` | Proceed under the default company instead of aborting (multi-company DBs) |
 | `--skip-existing` | Allows safe re-runs without update errors |
 | `--post-action action_apply_inventory` | Applies the stock adjustment after import |
 

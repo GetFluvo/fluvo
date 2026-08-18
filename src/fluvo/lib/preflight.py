@@ -218,6 +218,25 @@ def _resolve_default_company(
     return None, None
 
 
+def _count_companies(config: Union[str, dict[str, Any]]) -> Optional[int]:
+    """Count the companies in the target database (best-effort).
+
+    Args:
+        config: Connection config path or dict.
+
+    Returns:
+        Optional[int]: The number of ``res.company`` records, or ``None`` if it
+            can't be determined — in which case callers err on the safe side and
+            treat the database as multi-company.
+    """
+    try:
+        conn = _preflight_connection(config)
+        return int(conn.get_model("res.company").search_count([]))
+    except Exception as e:  # pragma: no cover - best-effort
+        log.debug(f"Could not count companies: {e}")
+        return None
+
+
 @register_check
 def company_context_check(
     preflight_mode: "PreflightMode",
@@ -229,20 +248,24 @@ def company_context_check(
 ) -> bool:
     """Guard against silently importing into the wrong company (#255).
 
-    Running an import without choosing a company is the single most damaging
-    silent failure in the tool: every record lands under the connecting user's
-    default company, the import succeeds, reconciliation passes, and the data is
-    wrong in a way that is expensive to unpick. This check makes the company an
-    explicit, on-the-record decision for any model that has a ``company_id`` field
-    or company-dependent columns.
+    Running a multi-company import without choosing a company is the single most
+    damaging silent failure in the tool: every record lands under the connecting
+    user's default company, the import succeeds, reconciliation passes, and the
+    data is wrong in a way that is expensive to unpick. This check makes the
+    company an explicit, on-the-record decision for any model with a ``company_id``
+    field or company-dependent columns.
 
-    Behaviour when the target is company-specific:
+    Behaviour when the target is company-specific and no company was chosen:
 
-    - a company was chosen (``--company-id`` / ``--all-companies`` set
-      ``allowed_company_ids``): record it in the run summary and continue;
-    - no company chosen: warn loudly, naming the default company (id + name) that
-      *will* be used and the record count, and record it in the summary;
-    - no company chosen and ``--require-company`` set: abort with a clear error.
+    - **single-company database** (the risk doesn't exist): proceed quietly;
+    - **multiple companies**: abort with a clear error by default, naming the
+      default company that *would* be used and the record count — unless
+      ``--allow-default-company`` was passed, in which case warn loudly and
+      proceed.
+
+    When a company was chosen (``--company-id`` / ``--all-companies``), it is
+    recorded in the run summary and the import continues. The resolved company is
+    always stored in ``import_plan['company_context']`` for the summary echo.
 
     Args:
         preflight_mode: The current pre-flight mode.
@@ -251,16 +274,17 @@ def company_context_check(
         config: Connection config path or dict.
         import_plan: Shared plan; the resolved company is stored under
             ``company_context`` so the importer can echo it in the summary.
-        **kwargs: separator, encoding, context, require_company.
+        **kwargs: separator, encoding, context, allow_default_company.
 
     Returns:
-        bool: ``False`` only when ``--require-company`` is set and no company was
-        chosen (abort); ``True`` otherwise.
+        bool: ``False`` only when the database is multi-company, no company was
+        chosen, and ``--allow-default-company`` was not passed (abort); ``True``
+        otherwise.
     """
     separator = kwargs.get("separator", ";")
     encoding = kwargs.get("encoding", "utf-8")
     context = kwargs.get("context") or {}
-    require_company = kwargs.get("require_company", False)
+    allow_default = kwargs.get("allow_default_company", False)
 
     header = _get_csv_header(filename, separator)
     if not header:
@@ -272,21 +296,8 @@ def company_context_check(
     if not _model_is_company_aware(header, odoo_fields):
         return True
 
-    company_explicit = bool(context.get("allowed_company_ids"))
-
-    # Hard stop first — this decision needs no RPC.
-    if require_company and not company_explicit:
-        _show_error_panel(
-            "Company required",
-            f"Model '{model}' is company-specific, but no [bold]--company-id[/bold] "
-            "or [bold]--all-companies[/bold] was given and [bold]--require-company"
-            "[/bold] is set.\n\n"
-            "Re-run naming the target company, e.g. [bold cyan]--company-id 1"
-            "[/bold cyan] (a database id or an XML id like 'base.main_company').",
-        )
-        return False
-
     n_rows = _count_data_rows(filename, separator, encoding)
+    company_explicit = bool(context.get("allowed_company_ids"))
 
     if company_explicit:
         ids = [int(i) for i in context["allowed_company_ids"]]
@@ -298,33 +309,60 @@ def company_context_check(
         import_plan["company_context"] = {"line": line, "explicit": True}
         return True
 
-    # No company chosen: resolve the default that WILL be used, and warn.
+    # No company chosen. Resolve the default that WOULD be used.
     default_id, default_name = _resolve_default_company(config)
-    if default_id is not None:
-        who = (
-            f'company {default_id} "{default_name}"'
-            if default_name
-            else f"company {default_id}"
-        )
-    else:
+    if default_id is None:
         who = "the connecting user's default company"
+    elif default_name:
+        who = f'company {default_id} "{default_name}"'
+    else:
+        who = f"company {default_id}"
+
+    # The wrong-company risk only exists with more than one company. Single-company
+    # databases are unambiguous, so proceed quietly there. If the count can't be
+    # determined, err on the safe side and treat it as multi-company.
+    company_count = _count_companies(config)
+    if company_count is not None and company_count <= 1:
+        import_plan["company_context"] = {
+            "line": f"Company: {who} (only company)",
+            "explicit": False,
+        }
+        log.info(f"Single-company database; {n_rows} record(s) under {who}.")
+        return True
+
+    count_str = f"{company_count} companies" if company_count else "multiple companies"
     import_plan["company_context"] = {
         "line": f"Company: {who} (default — no --company-id given)",
         "explicit": False,
     }
-    _show_warning_panel(
-        "No company specified",
-        f"'{model}' is company-specific and no [bold]--company-id[/bold] / "
-        "[bold]--all-companies[/bold] was given.\n\n"
-        f"[bold red]{n_rows} record(s) will be created under {who}.[/bold red]\n\n"
-        "If that is not what you intend, re-run with "
-        "[bold cyan]--company-id <id>[/bold cyan]. In automation, pass "
-        "[bold]--require-company[/bold] to turn this into a hard error.",
+
+    if allow_default:
+        _show_warning_panel(
+            "Using the default company",
+            f"'{model}' is company-specific, this database has {count_str}, and no "
+            "[bold]--company-id[/bold] / [bold]--all-companies[/bold] was given.\n\n"
+            f"[bold red]{n_rows} record(s) will be created under {who}.[/bold red]"
+            "\n\nProceeding because [bold]--allow-default-company[/bold] was set.",
+        )
+        log.warning(
+            f"--allow-default-company: {n_rows} record(s) under {who} "
+            f"({count_str} in the database)."
+        )
+        return True
+
+    _show_error_panel(
+        "Company required",
+        f"'{model}' is company-specific and this database has {count_str}, but no "
+        "[bold]--company-id[/bold] / [bold]--all-companies[/bold] was given. "
+        f"[bold red]{n_rows} record(s) would be created under {who}[/bold red] — "
+        "the most common silent migration error.\n\n"
+        "Choose the company: [bold cyan]--company-id <id>[/bold cyan] (a database "
+        "id or an XML id like 'base.main_company') or "
+        "[bold cyan]--all-companies[/bold cyan].\n"
+        "To deliberately use the default, pass "
+        "[bold]--allow-default-company[/bold].",
     )
-    log.warning(
-        f"No --company-id given; {n_rows} record(s) will be created under {who}."
-    )
-    return True
+    return False
 
 
 @register_check

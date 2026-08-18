@@ -961,6 +961,7 @@ class TestCompanyContextCheck:
         fields: dict[str, Any],
         header: list[str],
         plan: dict[str, Any],
+        company_count: Any = 3,
         **kwargs: Any,
     ) -> tuple[bool, MagicMock, MagicMock]:
         """Run company_context_check with the RPC/IO helpers stubbed out."""
@@ -968,6 +969,7 @@ class TestCompanyContextCheck:
             patch("fluvo.lib.preflight._get_csv_header", return_value=header),
             patch("fluvo.lib.preflight._get_odoo_fields", return_value=fields),
             patch("fluvo.lib.preflight._count_data_rows", return_value=42),
+            patch("fluvo.lib.preflight._count_companies", return_value=company_count),
             patch(
                 "fluvo.lib.preflight._resolve_default_company",
                 return_value=(1, "YourCo NV"),
@@ -1000,46 +1002,81 @@ class TestCompanyContextCheck:
         warn.assert_not_called()
         err.assert_not_called()
 
-    def test_warns_and_records_default_company_when_unset(self) -> None:
-        """company_id model, no --company-id: warn, name the default, record it."""
-        plan: dict[str, Any] = {}
-        result, warn, err = self._run(
-            {"company_id": {"type": "many2one"}}, ["id", "name"], plan, context={}
-        )
-        assert result is True
-        err.assert_not_called()
-        warn.assert_called_once()
-        assert plan["company_context"]["explicit"] is False
-        assert 'company 1 "YourCo NV"' in plan["company_context"]["line"]
-
-    def test_company_dependent_field_triggers_guard(self) -> None:
-        """A company-dependent column (not company_id) also triggers the guard."""
-        plan: dict[str, Any] = {}
-        result, warn, _ = self._run(
-            {"standard_price": {"type": "float", "company_dependent": True}},
-            ["id", "standard_price"],
-            plan,
-            context={},
-        )
-        assert result is True
-        warn.assert_called_once()
-
-    def test_require_company_aborts_when_unset(self) -> None:
-        """--require-company turns the unset case into a hard failure."""
+    def test_aborts_by_default_when_multi_company_and_unset(self) -> None:
+        """Multi-company DB, no --company-id: abort with a clear error (default)."""
         plan: dict[str, Any] = {}
         result, warn, err = self._run(
             {"company_id": {"type": "many2one"}},
             ["id", "name"],
             plan,
+            company_count=3,
             context={},
-            require_company=True,
         )
         assert result is False
         err.assert_called_once()
         warn.assert_not_called()
+        assert plan["company_context"]["explicit"] is False
+
+    def test_unknown_company_count_treated_as_multi(self) -> None:
+        """If the company count can't be determined, err on the safe side (abort)."""
+        plan: dict[str, Any] = {}
+        result, _, err = self._run(
+            {"company_id": {"type": "many2one"}},
+            ["id", "name"],
+            plan,
+            company_count=None,
+            context={},
+        )
+        assert result is False
+        err.assert_called_once()
+
+    def test_single_company_db_proceeds_quietly(self) -> None:
+        """A single-company DB has no ambiguity: proceed, no warn/abort."""
+        plan: dict[str, Any] = {}
+        result, warn, err = self._run(
+            {"company_id": {"type": "many2one"}},
+            ["id", "name"],
+            plan,
+            company_count=1,
+            context={},
+        )
+        assert result is True
+        warn.assert_not_called()
+        err.assert_not_called()
+        assert plan["company_context"]["explicit"] is False
+        assert "only company" in plan["company_context"]["line"]
+
+    def test_allow_default_company_warns_and_proceeds(self) -> None:
+        """--allow-default-company: warn (naming the default) and proceed."""
+        plan: dict[str, Any] = {}
+        result, warn, err = self._run(
+            {"company_id": {"type": "many2one"}},
+            ["id", "name"],
+            plan,
+            company_count=3,
+            context={},
+            allow_default_company=True,
+        )
+        assert result is True
+        err.assert_not_called()
+        warn.assert_called_once()
+        assert 'company 1 "YourCo NV"' in plan["company_context"]["line"]
+
+    def test_company_dependent_field_triggers_guard(self) -> None:
+        """A company-dependent column (not company_id) also triggers the guard."""
+        plan: dict[str, Any] = {}
+        result, _, err = self._run(
+            {"standard_price": {"type": "float", "company_dependent": True}},
+            ["id", "standard_price"],
+            plan,
+            company_count=2,
+            context={},
+        )
+        assert result is False
+        err.assert_called_once()
 
     def test_explicit_company_is_recorded_without_warning(self) -> None:
-        """When a company is chosen, record it in the plan and don't warn."""
+        """When a company is chosen, record it in the plan and don't warn/abort."""
         plan: dict[str, Any] = {}
         result, warn, err = self._run(
             {"company_id": {"type": "many2one"}},

@@ -157,7 +157,7 @@ def run_import(  # noqa: C901
     fix_missing_variants: bool = False,
     allow_xmlid_collisions: bool = False,
     m2m_mode: str = "replace",
-    require_company: bool = False,
+    allow_default_company: bool = False,
 ) -> Optional[dict[str, int]]:
     """Main entry point for the import command, handling all orchestration.
 
@@ -260,7 +260,7 @@ def run_import(  # noqa: C901
             encoding=encoding,
             allow_xmlid_collisions=allow_xmlid_collisions,
             context=parsed_context,
-            require_company=require_company,
+            allow_default_company=allow_default_company,
         ):
             return None
 
