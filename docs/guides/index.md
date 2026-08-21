@@ -6,6 +6,7 @@ This section provides detailed, step-by-step guides for common tasks and advance
 :maxdepth: 1
 :caption: "Guides"
 
+assessing_a_source
 importing_data
 choosing_options
 exporting_data

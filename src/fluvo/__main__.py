@@ -2029,6 +2029,66 @@ def write_cmd(connection_file: str, **kwargs: Any) -> None:
 
 
 # --- Export Command ---
+@cli.command(name="assess")
+@click.option(
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file (the source to assess).",
+)
+@click.option(
+    "--protocol",
+    type=click.Choice(
+        ["xmlrpc", "xmlrpcs", "jsonrpc", "jsonrpcs", "json2", "json2s"],
+        case_sensitive=False,
+    ),
+    default=None,
+    help="RPC protocol to use. Defaults to the config file's, or xmlrpc.",
+)
+@click.option(
+    "--models",
+    default=None,
+    help="Comma-separated models to assess (e.g. 'res.partner,product.template'). "
+    "Omit to assess a curated default set of common migration models that exist "
+    "on the database.",
+)
+@click.option(
+    "--output",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="Also write the report to this file (JSON, or Markdown with "
+    "--format markdown) — a handout for a migration scoping conversation.",
+)
+@click.option(
+    "--format",
+    "report_format",
+    type=click.Choice(["table", "json", "markdown"], case_sensitive=False),
+    default="table",
+    show_default=True,
+    help="Report format for the console (and --output).",
+)
+def assess_cmd(
+    connection_file: str,
+    protocol: str | None,
+    models: str | None,
+    output: str | None,
+    report_format: str,
+) -> None:
+    """Assess a source Odoo for migration: inventory, volumes, and risk flags."""
+    from .lib.assess import run_assess
+
+    config: str | dict[str, Any] = connection_file
+    if protocol:
+        config = {"_config_file": connection_file, "protocol": protocol}
+    model_list = [m.strip() for m in models.split(",") if m.strip()] if models else None
+    run_assess(
+        config=config,
+        models=model_list,
+        output=output,
+        fmt=report_format.lower(),
+    )
+
+
 @cli.command(name="export")
 @click.option(
     "--connection-file",
