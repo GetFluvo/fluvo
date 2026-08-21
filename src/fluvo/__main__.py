@@ -2129,6 +2129,21 @@ def write_cmd(connection_file: str, **kwargs: Any) -> None:
     "tokens. Requires an 'id' (or '.id') column in --fields. Round-trips with "
     "'fluvo import' (#282).",
 )
+@click.option(
+    "--since",
+    default=None,
+    metavar="TIMESTAMP",
+    help="Weekly-delta: export only records changed since this timestamp "
+    "(e.g. '2026-08-01' or '2026-08-01 09:00:00'). Sugar that ANDs "
+    "(write_date >= TIMESTAMP) onto --domain. Pair with 'import "
+    "--skip-unchanged' for a re-runnable delta pipeline.",
+)
+@click.option(
+    "--since-field",
+    default="write_date",
+    show_default=True,
+    help="The datetime field --since filters on (e.g. 'create_date').",
+)
 def export_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     """Runs the data export process."""
     # Handle protocol option - create config dict if protocol specified

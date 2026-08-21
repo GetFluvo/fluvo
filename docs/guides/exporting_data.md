@@ -76,6 +76,8 @@ The `export` command is built for scalability. To handle massive datasets, it us
 | `--languages` | Comma-separated language codes (e.g. `nl_NL,fr_FR`) to export translations for as `field@lang` columns. See [Exporting translations](#exporting-translations-fieldlang). |
 | `--streaming` | A flag to enable streaming mode for very large datasets. Slower but uses minimal memory. |
 | `--resume-session` | The ID of a failed export session to resume. The tool will append records to the existing output file. |
+| `--since` | Weekly-delta: export only records changed since a timestamp (e.g. `2026-08-01`). Sugar that ANDs `(write_date >= …)` onto `--domain`. See [Weekly-delta pipelines](#weekly-delta-pipelines-since). |
+| `--since-field` | The datetime field `--since` filters on. Defaults to `write_date` (use e.g. `create_date` for insert-only feeds). |
 
 
 ### Resuming Failed Exports
@@ -137,6 +139,34 @@ To export only companies (not individual contacts), the domain would be `[('is_c
 To export all companies from the United States, you would combine two criteria:
 
 `--domain "[('is_company', '=', True), ('country_id.code', '=', 'US')]"`
+
+### Weekly-delta pipelines (`--since`)
+
+For a recurring migration or sync, you rarely want to move every record every run — only what changed. `--since` is convenience sugar for exactly that: it ANDs a change-timestamp term onto whatever `--domain` you pass, so you don't have to hand-write `write_date` filters.
+
+```bash
+# Only records changed on or after 2026-08-01, combined with any other --domain.
+fluvo export --connection-file src.conf --model res.partner \
+  --fields "id,name,email" --since 2026-08-01 --output partners_delta.csv
+```
+
+- The timestamp accepts a date (`2026-08-01`) or a datetime (`2026-08-01 09:00:00`).
+- It filters on `write_date` by default; use `--since-field create_date` for insert-only feeds (records that are created but never updated).
+- Because a term appended to any Odoo domain is implicitly AND-ed with the whole, `--since` composes correctly even with a `--domain` that contains `|` (OR).
+
+**The re-runnable delta pattern.** Pair a delta export with an idempotent import so a re-run only touches what moved:
+
+```bash
+# 1. Extract only what changed since the last run.
+fluvo export --connection-file src.conf --model res.partner \
+  --fields "id,name,email" --since "$LAST_RUN" --output partners_delta.csv
+
+# 2. Load idempotently — unchanged rows are skipped, changed rows updated.
+fluvo import --connection-file dst.conf --model res.partner \
+  --file partners_delta.csv --skip-unchanged
+```
+
+Record `$LAST_RUN` after a successful run (e.g. the run's start time) and feed it back next time. Both steps drop cleanly into a [`flows.yml`](importing_data.md) as `since:` / `skip_unchanged:` step options, so the whole delta pipeline is one `fluvo --flow-file` invocation.
 
 ### Specifying Fields with `--fields`
 
