@@ -51,6 +51,58 @@ def test_run_export_success(
 
 
 @patch("fluvo.exporter.export_threaded.export_data")
+@patch("fluvo.exporter._show_success_panel")
+def test_run_export_since_injects_write_date_term(
+    mock_show_success: MagicMock, mock_export_data: MagicMock
+) -> None:
+    """--since ANDs a (write_date >= ...) term onto an empty domain (PLAN 2.4)."""
+    mock_export_data.return_value = (True, "s", 0, pl.DataFrame({"id": []}))
+    run_export(
+        config="dummy.conf",
+        model="res.partner",
+        fields="id",
+        output=None,
+        since="2026-08-01",
+    )
+    domain = mock_export_data.call_args.kwargs["domain"]
+    assert domain == [("write_date", ">=", "2026-08-01")]
+
+
+@patch("fluvo.exporter.export_threaded.export_data")
+@patch("fluvo.exporter._show_success_panel")
+def test_run_export_since_composes_with_existing_domain(
+    mock_show_success: MagicMock, mock_export_data: MagicMock
+) -> None:
+    """--since is appended to (AND-ed with) an existing --domain."""
+    mock_export_data.return_value = (True, "s", 0, pl.DataFrame({"id": []}))
+    run_export(
+        config="dummy.conf",
+        model="res.partner",
+        fields="id",
+        output=None,
+        domain="[('is_company', '=', True)]",
+        since="2026-08-01 09:00:00",
+        since_field="create_date",
+    )
+    domain = mock_export_data.call_args.kwargs["domain"]
+    assert domain == [
+        ("is_company", "=", True),
+        ("create_date", ">=", "2026-08-01 09:00:00"),
+    ]
+
+
+@patch("fluvo.exporter.export_threaded.export_data")
+@patch("fluvo.exporter._show_success_panel")
+def test_run_export_without_since_leaves_domain_untouched(
+    mock_show_success: MagicMock, mock_export_data: MagicMock
+) -> None:
+    """No --since means no injected term."""
+    mock_export_data.return_value = (True, "s", 0, pl.DataFrame({"id": []}))
+    run_export(config="dummy.conf", model="res.partner", fields="id", output=None)
+    assert mock_export_data.call_args.kwargs["domain"] == []
+
+
+@patch("fluvo.exporter.export_threaded.export_data")
 @patch("fluvo.exporter._show_error_panel")
 def test_run_export_bad_domain(
     mock_show_error_panel: MagicMock, mock_export_data: MagicMock

@@ -259,6 +259,8 @@ def run_export(  # noqa: C901, D417
     resume_session: str | None = None,
     sanitize_newlines: str | None = None,
     languages: str | None = None,
+    since: str | None = None,
+    since_field: str = "write_date",
 ) -> None:
     """Orchestrates the data export process.
 
@@ -267,6 +269,11 @@ def run_export(  # noqa: C901, D417
             with this string (e.g., " | "). Prevents CSV corruption.
         languages: If provided, comma-separated language codes to export
             translations for as ``field@lang`` columns (#282).
+        since: If provided, only export records changed since this timestamp — a
+            weekly-delta convenience that ANDs ``(since_field, '>=', since)`` onto
+            ``--domain`` (PLAN 2.4). Pair with ``import --skip-unchanged``.
+        since_field: The datetime field ``--since`` filters on (default
+            ``write_date``).
     """
     log.info(f"Starting export for model '{model}'...")
 
@@ -278,6 +285,21 @@ def run_export(  # noqa: C901, D417
             f"The provided domain string is not a valid Python literal: {domain}",
         )
         return
+    if not isinstance(parsed_domain, list):
+        _show_error_panel(
+            "Invalid Domain", f"The --domain must be a list, got: {domain}"
+        )
+        return
+
+    # --since sugar: AND a change-timestamp term onto the domain (PLAN 2.4). A
+    # term appended to any valid Odoo domain is implicitly AND-ed with the whole,
+    # so this composes correctly even when --domain contains '|'.
+    if since:
+        parsed_domain = [*parsed_domain, (since_field, ">=", since)]
+        log.info(
+            f"Delta export: only records with {since_field} >= '{since}' "
+            f"(from --since)."
+        )
 
     # Handle context as either string or dict
     if isinstance(context, dict):
