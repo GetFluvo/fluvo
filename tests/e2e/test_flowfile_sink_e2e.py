@@ -20,9 +20,7 @@ from . import assertions as A
 MODEL = "res.partner.category"
 
 
-def test_polars_frame_loads_to_odoo(
-    conn_config: dict[str, Any], rpc: Any
-) -> None:
+def test_polars_frame_loads_to_odoo(conn_config: dict[str, Any], rpc: Any) -> None:
     """A Polars frame's columns/rows load into Odoo via run_import_for_migration."""
     prefix = "ffsink"
     n = 3
