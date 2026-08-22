@@ -122,6 +122,41 @@ def expected_fail_file(config: str | dict[str, Any], model: str, filename: str) 
     return str(env_output_dir / _get_fail_filename(model, False))
 
 
+def _rm_temp(path: str | None) -> None:
+    """Best-effort removal of a temporary file (a no-op if None/absent)."""
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:  # pragma: no cover - cleanup is best-effort
+            pass
+
+
+def _parquet_to_temp_csv(parquet_path: str, separator: str) -> str:
+    """Convert a Parquet import source to a sibling temporary CSV (PLAN 4.8).
+
+    Values are coerced to import-ready strings with the same rules as the public
+    DataFrame API (bool -> 1/0, dates -> ISO, nulls -> empty, unsupported dtypes
+    rejected). The CSV is written next to the Parquet file so fail files and the
+    environment output directory resolve relative to the user's data, not the
+    system temp dir. The caller is responsible for removing it.
+
+    Args:
+        parquet_path: Path to the ``.parquet`` source.
+        separator: Field delimiter for the temporary CSV.
+
+    Returns:
+        str: The path of the temporary CSV (UTF-8).
+    """
+    from .dataframe import _coerce_for_odoo
+
+    frame = _coerce_for_odoo(pl.read_parquet(parquet_path))
+    parent = str(Path(parquet_path).resolve().parent)
+    fd, tmp = tempfile.mkstemp(prefix=".fluvo_parquet_", suffix=".csv", dir=parent)
+    os.close(fd)
+    frame.write_csv(tmp, separator=separator)
+    return tmp
+
+
 def _run_translation_passes(
     config: str | dict[str, Any],
     model: str,
@@ -575,6 +610,22 @@ def run_import(  # noqa: C901
             )
             return None
 
+    # Parquet source support (PLAN 4.8): a transform step (e.g. Flowfile) can hand
+    # off a .parquet file. Convert it to a sibling temp CSV up front, so the whole
+    # pipeline — preflight, two-pass load, translation/company passes — runs
+    # unchanged. Skipped in --fail mode (that reads the CSV fail file).
+    parquet_temp: str | None = None
+    if not fail and str(filename).lower().endswith(".parquet"):
+        try:
+            parquet_temp = _parquet_to_temp_csv(filename, separator)
+        except Exception as e:
+            _show_error_panel(
+                "Invalid Parquet source",
+                f"Could not read the Parquet file '{filename}'.\nError: {e}",
+            )
+            return None
+        filename = parquet_temp
+
     file_to_process = filename
     # Determine environment-specific output directory from config file name
     env_name = _get_env_from_config(config)
@@ -640,6 +691,7 @@ def run_import(  # noqa: C901
             context=parsed_context,
             allow_default_company=allow_default_company,
         ):
+            _rm_temp(parquet_temp)
             return None
 
     # Translation columns (field@lang, #254) are written in dedicated per-language
@@ -804,6 +856,7 @@ def run_import(  # noqa: C901
             "Import Failed",
             "The import process failed. Check logs for details.",
         )
+        _rm_temp(parquet_temp)
         return None
 
     if id_map:
@@ -1106,6 +1159,7 @@ def run_import(  # noqa: C901
             config, model, id_map, fix=fix_missing_variants
         )
 
+    _rm_temp(parquet_temp)
     return id_map
 
 

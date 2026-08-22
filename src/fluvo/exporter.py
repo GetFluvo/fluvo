@@ -16,6 +16,20 @@ class _ExportTranslationError(Exception):
     """A user-facing problem with a translation (``field@lang``) export request."""
 
 
+def _write_export_frame(frame: pl.DataFrame, output: str, separator: str) -> None:
+    """Write an export frame to ``output`` as Parquet (``.parquet``) or CSV (PLAN 4.8).
+
+    Args:
+        frame: The frame to write.
+        output: Destination path; a ``.parquet`` suffix selects Parquet.
+        separator: CSV delimiter (ignored for Parquet).
+    """
+    if output.lower().endswith(".parquet"):
+        frame.write_parquet(output)
+    else:
+        frame.write_csv(output, separator=separator)
+
+
 def _show_error_panel(title: str, message: str) -> None:
     """Displays a formatted error panel to the console."""
     console = Console(stderr=True, style="bold red")
@@ -216,8 +230,10 @@ def _run_translation_export(
     if not df_base.height:
         # No records matched: still emit the full requested header (including the
         # field@lang columns) so the schema is stable for a downstream re-import.
-        pl.DataFrame(schema={c: pl.Utf8 for c in plan["output_columns"]}).write_csv(
-            output, separator=separator
+        _write_export_frame(
+            pl.DataFrame(schema={c: pl.Utf8 for c in plan["output_columns"]}),
+            output,
+            separator,
         )
         return True, 0
 
@@ -239,7 +255,7 @@ def _run_translation_export(
 
     ordered = [c for c in plan["output_columns"] if c in merged.columns]
     merged = merged.select(ordered)
-    merged.write_csv(output, separator=separator)
+    _write_export_frame(merged, output, separator)
     return True, merged.height
 
 
@@ -392,7 +408,11 @@ def run_export(  # noqa: C901, D417
         )
         # Verify the file on disk actually holds `count` rows, like the plain path.
         try:
-            actual = len(pl.read_csv(output, separator=separator))
+            actual = (
+                len(pl.read_parquet(output))
+                if output.lower().endswith(".parquet")
+                else len(pl.read_csv(output, separator=separator))
+            )
         except Exception as e:  # pragma: no cover - validation is best-effort
             log.warning(f"Could not validate record count in {output}: {e}")
             _show_success_panel(base_message)
@@ -408,6 +428,55 @@ def run_export(  # noqa: C901, D417
                 "Record count mismatch.\n"
                 f" - Expected: {count} records\n"
                 f" - Found:    {actual} records in the output file.",
+            )
+        return
+
+    # Parquet output (PLAN 4.8): the typed intermediate format for a transform
+    # step. Materialise the whole frame and write it as Parquet — streaming (a
+    # CSV row-by-row writer) can't produce it.
+    if output and output.lower().endswith(".parquet"):
+        if streaming:
+            _show_error_panel(
+                "Unsupported combination",
+                "--streaming cannot write Parquet (the frame is materialised in "
+                "full). Drop --streaming, or use a .csv --output.",
+            )
+            raise SystemExit(1)
+        ok, _sid, record_count, frame = export_threaded.export_data(
+            config=config,
+            model=model,
+            domain=parsed_domain,
+            header=fields_list,
+            context=parsed_context,
+            output=None,
+            max_connection=int(worker),
+            batch_size=int(batch_size),
+            encoding=encoding,
+            separator=separator,
+            technical_names=technical_names,
+            streaming=False,
+            resume_session=resume_session,
+            sanitize_newlines=sanitize_newlines,
+        )
+        if not ok or frame is None:
+            _show_error_panel(
+                "Export Failed",
+                "The export process failed. Please check the logs for details.",
+            )
+            raise SystemExit(1)
+        frame.write_parquet(output)
+        message = (
+            f"Successfully exported {record_count} records to "
+            f"[bold cyan]{output}[/bold cyan] (Parquet)."
+        )
+        actual = len(pl.read_parquet(output))
+        if actual == record_count:
+            _show_success_panel(f"{message}\n[green]Record count verified.[/green]")
+        else:
+            _show_error_panel(
+                "Count Validation Warning",
+                f"{message}\n\n[bold yellow]Warning:[/bold yellow] Record count "
+                f"mismatch.\n - Expected: {record_count}\n - Found: {actual}.",
             )
         return
 

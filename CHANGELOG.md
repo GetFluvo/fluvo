@@ -50,6 +50,9 @@ in `0.0.x` beta. The published notes for each tagged release also appear on the
   for re-runnable delta pipelines paired with `import --skip-unchanged`.
 - **Public Polars DataFrame API** — `fluvo.load_dataframe` / `fluvo.export_dataframe`
   for moving data to/from Odoo without the CLI. ([#288])
+- **Parquet intermediate format** — `import --file x.parquet` reads (and coerces) a
+  Parquet source, and `export --output x.parquet` writes Parquet — a typed handoff
+  to/from a Polars-native transform step.
 
 [#251]: https://github.com/GetFluvo/fluvo/issues/251
 [#254]: https://github.com/GetFluvo/fluvo/issues/254

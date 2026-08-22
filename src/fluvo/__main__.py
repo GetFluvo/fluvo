@@ -1260,7 +1260,12 @@ def vat_validate_cmd(
     "json2 (Odoo 19+, requires API key). "
     "If not specified, uses protocol from config file or defaults to xmlrpc.",
 )
-@click.option("--file", "filename", required=True, help="File to import.")
+@click.option(
+    "--file",
+    "filename",
+    required=True,
+    help="File to import — a .csv, or a .parquet source (read + type-coerced).",
+)
 @click.option(
     "--model",
     default=None,
@@ -2108,7 +2113,11 @@ def assess_cmd(
     "json2 (Odoo 19+, requires API key). "
     "If not specified, uses protocol from config file or defaults to xmlrpc.",
 )
-@click.option("--output", required=True, help="Output file path.")
+@click.option(
+    "--output",
+    required=True,
+    help="Output file path. A .parquet suffix writes Parquet; otherwise CSV.",
+)
 @click.option("--model", required=True, help="Odoo model to export from.")
 @click.option(
     "--fields",
