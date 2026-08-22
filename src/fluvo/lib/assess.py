@@ -134,11 +134,15 @@ def render_table(assessments: list[dict[str, Any]]) -> None:
     table.add_column("Fields", justify="right")
     table.add_column("Risk flags")
     for a in assessments:
+        risk = _risk_summary(a["risks"])
+        audit = _company_audit_str(a)
+        if audit:
+            risk = f"{risk}\n{audit}" if risk != "none" else audit
         table.add_row(
             a["model"],
             _fmt_count(a["row_count"]),
             str(a["field_total"]),
-            _risk_summary(a["risks"]),
+            risk,
         )
     Console().print(table)
 
@@ -168,9 +172,13 @@ def to_markdown(assessments: list[dict[str, Any]]) -> str:
     lines.append("| Model | Rows | Fields | Risk flags |")
     lines.append("| --- | ---: | ---: | --- |")
     for a in assessments:
+        risk = _risk_summary(a["risks"])
+        audit = _company_audit_str(a)
+        if audit:
+            risk = f"{risk}; {audit}" if risk != "none" else audit
         lines.append(
             f"| `{a['model']}` | {_fmt_count(a['row_count'])} | "
-            f"{a['field_total']} | {_risk_summary(a['risks'])} |"
+            f"{a['field_total']} | {risk} |"
         )
     lines.append("")
     return "\n".join(lines)
@@ -197,7 +205,60 @@ def _discover_models(conn: Any) -> list[str]:
         return []
 
 
-def run_assess(
+def _company_distribution(conn: Any, model: str) -> list[dict[str, Any]] | None:
+    """Count a company-aware model's records grouped by ``company_id``.
+
+    Surfaces the *distribution* of existing records across companies — the cheapest
+    way to spot the "everything landed under one company" migration error (#291):
+    a company with a suspicious 0, or all records under a single company on a
+    multi-company database, stands out at a glance.
+
+    Args:
+        conn: An open Odoo connection.
+        model: A model that has a ``company_id`` field.
+
+    Returns:
+        list[dict[str, Any]] | None: One entry per company (``company_id``,
+        ``company_name``, ``count``; a ``None`` id means company-less/shared
+        records), or None if the grouping could not be read.
+    """
+    try:
+        groups = conn.get_model(model).read_group([], ["company_id"], ["company_id"])
+    except Exception as e:  # pragma: no cover - environment-dependent
+        log.debug(f"Could not read company distribution for '{model}': {e}")
+        return None
+    dist: list[dict[str, Any]] = []
+    for g in groups:
+        ref = g.get("company_id")
+        count = int(g.get("company_id_count", 0))
+        if isinstance(ref, (list, tuple)) and ref:
+            dist.append(
+                {
+                    "company_id": int(ref[0]),
+                    "company_name": str(ref[1]) if len(ref) > 1 else None,
+                    "count": count,
+                }
+            )
+        else:
+            dist.append(
+                {"company_id": None, "company_name": "(no company)", "count": count}
+            )
+    return dist
+
+
+def _company_audit_str(assessment: dict[str, Any]) -> str:
+    """Render a company-distribution audit line, or '' if not company-aware."""
+    dist = assessment.get("company_distribution")
+    if not dist:
+        return ""
+    parts = [
+        f"{d['company_id'] if d['company_id'] is not None else '-'}:{d['count']}"
+        for d in dist
+    ]
+    return "by company: " + ", ".join(parts)
+
+
+def run_assess(  # noqa: C901
     config: str | dict[str, Any],
     models: list[str] | None = None,
     output: str | None = None,
@@ -250,7 +311,14 @@ def run_assess(
         except Exception as e:  # counting can fail on access rules; report unknown
             log.debug(f"Could not count '{model}': {e}")
             row_count = None
-        assessments.append(assess_model(model, odoo_fields, row_count))
+        assessment = assess_model(model, odoo_fields, row_count)
+        # Company audit: for company-aware models, record how existing records are
+        # spread across companies, so a wrong-company migration shows up (#291).
+        if "company_id" in odoo_fields:
+            dist = _company_distribution(conn, model)
+            if dist is not None:
+                assessment["company_distribution"] = dist
+        assessments.append(assessment)
 
     if not assessments:
         _show_error_panel(

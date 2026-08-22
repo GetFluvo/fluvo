@@ -135,3 +135,60 @@ def test_run_assess_connection_failure_aborts(mock_connect: MagicMock) -> None:
     mock_connect.side_effect = Exception("refused")
     with pytest.raises(SystemExit):
         assess.run_assess("c.conf", models=["res.partner"])
+
+
+def test_company_distribution_parses_read_group() -> None:
+    """_company_distribution turns read_group output into per-company counts."""
+    conn = MagicMock()
+    model = MagicMock()
+    model.read_group.return_value = [
+        {"company_id": [1, "My Company"], "company_id_count": 4200},
+        {"company_id": [2, "Company Two"], "company_id_count": 0},
+        {"company_id": False, "company_id_count": 12},  # company-less/shared
+    ]
+    conn.get_model.return_value = model
+    dist = assess._company_distribution(conn, "res.partner")
+    assert dist == [
+        {"company_id": 1, "company_name": "My Company", "count": 4200},
+        {"company_id": 2, "company_name": "Company Two", "count": 0},
+        {"company_id": None, "company_name": "(no company)", "count": 12},
+    ]
+
+
+def test_company_audit_str() -> None:
+    """The audit line is compact and empty when the model isn't company-aware."""
+    a = {
+        "company_distribution": [
+            {"company_id": 1, "company_name": "X", "count": 4200},
+            {"company_id": 2, "company_name": "Y", "count": 0},
+        ]
+    }
+    assert assess._company_audit_str(a) == "by company: 1:4200, 2:0"
+    assert assess._company_audit_str({"model": "x"}) == ""
+
+
+@patch("fluvo.lib.assess._connect")
+def test_run_assess_includes_company_distribution(mock_connect: MagicMock) -> None:
+    """A company-aware model gets its record distribution across companies."""
+    company_fields = {"id": {"type": "integer"}, "company_id": {"type": "many2one"}}
+
+    conn = MagicMock()
+
+    def get_model(name: str) -> MagicMock:
+        m = MagicMock()
+        m.fields_get.return_value = company_fields
+        m.search_count.return_value = 5
+        m.read_group.return_value = [
+            {"company_id": [1, "Main"], "company_id_count": 5},
+            {"company_id": [2, "Other"], "company_id_count": 0},
+        ]
+        return m
+
+    conn.get_model.side_effect = get_model
+    mock_connect.return_value = conn
+    out = assess.run_assess("c.conf", models=["res.partner"])
+    assert out[0]["company_distribution"][1] == {
+        "company_id": 2,
+        "company_name": "Other",
+        "count": 0,
+    }

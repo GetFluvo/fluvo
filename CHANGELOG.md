@@ -45,7 +45,9 @@ in `0.0.x` beta. The published notes for each tagged release also appear on the
 - **Flow runner** — `fluvo --flow-file flows.yml` runs declarative, versioned
   flows (named flows, `on_error`, `--run`, `--var`, `--dry-run`). ([#251])
 - **`fluvo assess`** — a source-migration report: entity inventory, volumes,
-  field counts, and risk flags, as a table or JSON/Markdown handout.
+  field counts, and risk flags, as a table or JSON/Markdown handout. For
+  company-aware models it also audits the record distribution across companies,
+  so wrong-company data already in the database is visible.
 - **Weekly-delta exports** — `export --since <timestamp>` sugar over `--domain`,
   for re-runnable delta pipelines paired with `import --skip-unchanged`.
 - **Public Polars DataFrame API** — `fluvo.load_dataframe` / `fluvo.export_dataframe`
