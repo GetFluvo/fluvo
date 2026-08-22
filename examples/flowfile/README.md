@@ -59,4 +59,3 @@ Column-naming conventions (external ids, relational lookups, translations,
 per-company values) are the same as [`fluvo import`](../../docs/guides/importing_data.md).
 See the [Polars DataFrame API guide](../../docs/guides/dataframe_api.md) for the
 full contract.
-
