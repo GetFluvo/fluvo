@@ -21,15 +21,21 @@ Odoo ──fluvo export──▶ data.csv ──▶ Flowfile (visual transform) 
 fluvo export --connection-file source.conf --model res.partner \
   --fields "id,name,email" --output partners.csv
 
-# 2. In Flowfile: read partners.csv, transform visually, write out.csv.
+# 2. In Flowfile: read partners.csv, transform (visually on the canvas, or with
+#    Flowfile's Polars-like API), write out.csv.
 
 # 3. Load into the destination Odoo (idempotently).
 fluvo import --connection-file dest.conf --model res.partner \
   --file out.csv --skip-unchanged
 ```
 
-A [Parquet](https://github.com/GetFluvo/fluvo/issues) intermediate (PLAN 4.8)
-would make this a typed, zero-copy handoff — both sides already use `pyarrow`.
+Step 2 as runnable code is [`file_handoff.py`](file_handoff.py) — a worked
+`ff.read_csv(...).filter(...).with_columns(...).write_csv(...)` transform (needs
+`pip install Flowfile`, which is separate from Fluvo). The same nodes are what you
+would drag onto the Flowfile canvas.
+
+A Parquet intermediate (PLAN 4.8) would make this a typed, zero-copy handoff —
+both sides already use `pyarrow`.
 
 ## Mode 2 — Fluvo as an in-flow sink
 
