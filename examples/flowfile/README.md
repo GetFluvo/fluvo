@@ -34,25 +34,28 @@ would make this a typed, zero-copy handoff — both sides already use `pyarrow`.
 ## Mode 2 — Fluvo as an in-flow sink
 
 Load the transformed DataFrame straight into Odoo from a Flowfile **Polars code**
-or **Python** node, so a flow ends in a "load to Odoo" step. The recipe is
-[`fluvo_sink.py`](fluvo_sink.py) — a single `load_dataframe(df, config, model)`
-call over Fluvo's in-memory importer (real two-pass load, reconciliation, fail
-file):
+or **Python** node, so a flow ends in a "load to Odoo" step — using Fluvo's
+supported DataFrame API:
 
 ```python
-from fluvo_sink import load_dataframe  # paste the function into the node
+from fluvo import load_dataframe
 
 # `df` is the Polars frame arriving at the node; name its columns like a CSV
-# for `fluvo import` (id, field/id, field@lang, field@company, …).
+# for `fluvo import` (id, field/id, …). Real Polars types (booleans, dates,
+# numbers) are coerced for Odoo automatically.
 ok, stats = load_dataframe(df, config="dest.conf", model="res.partner")
 ```
 
-Column-naming conventions (external ids, relational lookups, translations,
-per-company values) are the same as [`fluvo import`](../../docs/guides/importing_data.md).
+The reverse — pulling Odoo data into a frame — is `export_dataframe`, so a flow
+can start from Odoo too:
 
-## Status
+```python
+from fluvo import export_dataframe
 
-Kick-off spike. Mode 2's Fluvo side works today (it wraps the existing
-`run_import_for_migration`); Mode 1 works today over CSV. Open question for the
-spike: whether to promote `load_dataframe` to a first-class `fluvo` API for any
-Polars-native caller — tracked in #288.
+df = export_dataframe("source.conf", "res.partner", ["id", "name", "email"])
+```
+
+Column-naming conventions (external ids, relational lookups) are the same as
+[`fluvo import`](../../docs/guides/importing_data.md). See the
+[Polars DataFrame API guide](../../docs/guides/dataframe_api.md) for the full
+contract (including which import features are CLI-only).
