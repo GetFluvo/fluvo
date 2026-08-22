@@ -29,6 +29,10 @@ For each model:
   - **computed (not importable)** — read-only, non-stored fields an import cannot set.
   - **binary** fields — large payloads (images, attachments).
 
+## Company audit
+
+For **company-aware** models (those with a `company_id`), the report also breaks down how existing records are spread across companies — e.g. `by company: 1:4200, 2:0`. This makes wrong-company data that is *already in the database* visible at a glance: a company with a suspicious `0`, or everything sitting under a single company on a multi-company database, is the fingerprint of a migration that ran without choosing a company (the failure the import guard now prevents going forward). It appears in the risk-flags column and, in full, under `company_distribution` in the JSON/Markdown output.
+
 ## Output as a handout
 
 By default the report prints as a console table. For an artifact you can share, write it to a file:

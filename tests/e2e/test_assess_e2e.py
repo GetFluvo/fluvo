@@ -45,3 +45,18 @@ def test_assess_discovers_default_models(conn_config: dict[str, Any], rpc: Any) 
     found = {a["model"] for a in result}
     # res.partner and res.users ship in base, so they must be discovered.
     assert {"res.partner", "res.users"} <= found
+
+
+def test_assess_reports_company_distribution(
+    conn_config: dict[str, Any], rpc: Any
+) -> None:
+    """A company-aware model's assessment includes its records-per-company audit."""
+    result = assess.run_assess(conn_config, models=["res.partner"], fmt="table")
+    partner = result[0]
+    assert "company_distribution" in partner, "expected a company audit"
+    dist = partner["company_distribution"]
+    assert dist and all(
+        {"company_id", "company_name", "count"} <= d.keys() for d in dist
+    )
+    # The per-company counts reconcile to the model's total row count.
+    assert sum(d["count"] for d in dist) == partner["row_count"]
