@@ -90,10 +90,8 @@ def _coerce_for_odoo(df: pl.DataFrame) -> pl.DataFrame:
 
     Returns:
         pl.DataFrame: The same columns, every value an import-ready string.
-
-    Raises:
-        FluvoError: If a column has a dtype with no sound scalar string form
-            (list, array, struct, object, binary, duration).
+        Columns with an un-loadable dtype (list/struct/binary/…) are refused first
+        via :func:`_reject_unsupported_dtypes`.
     """
     _reject_unsupported_dtypes(df)
     exprs = []
