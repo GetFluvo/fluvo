@@ -105,7 +105,12 @@ def test_auto_groupby_parallel_import_is_clean(
         fail=False,
         separator=",",
         ignore=None,
-        context={},
+        # Import explicitly under company 1 (== the CLI's --company-id 1, which sets
+        # allowed_company_ids). Other e2e tests create a second company in the shared
+        # DB, and the #255 company guard aborts a company-aware import that leaves the
+        # company implicit on a multi-company DB — the guard is correct, so the test
+        # states its intent rather than opting out with --allow-default-company.
+        context={"allowed_company_ids": [1]},
         encoding="utf-8",
         o2m=False,
         groupby=None,
