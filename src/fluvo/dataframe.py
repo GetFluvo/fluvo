@@ -48,6 +48,24 @@ _UNSUPPORTED_BASE_TYPES = (
 )
 
 
+def _reject_unsupported_dtypes(df: pl.DataFrame) -> None:
+    """Raise if any column has a dtype with no sound scalar string form.
+
+    Args:
+        df: The frame to check.
+
+    Raises:
+        FluvoError: naming the first offending column and dtype.
+    """
+    for name, dtype in df.schema.items():
+        if dtype.base_type() in _UNSUPPORTED_BASE_TYPES:
+            raise FluvoError(
+                f"Column '{name}' has dtype {dtype}, which has no sound value for "
+                f"an Odoo load. Convert it to a scalar/string column first "
+                f"(e.g. join a list into a comma-separated string of external ids)."
+            )
+
+
 def _coerce_for_odoo(df: pl.DataFrame) -> pl.DataFrame:
     """Cast every column to an Odoo-import-ready string.
 
@@ -77,15 +95,10 @@ def _coerce_for_odoo(df: pl.DataFrame) -> pl.DataFrame:
         FluvoError: If a column has a dtype with no sound scalar string form
             (list, array, struct, object, binary, duration).
     """
+    _reject_unsupported_dtypes(df)
     exprs = []
     for name, dtype in df.schema.items():
         base = dtype.base_type()
-        if base in _UNSUPPORTED_BASE_TYPES:
-            raise FluvoError(
-                f"Column '{name}' has dtype {dtype}, which has no sound value for "
-                f"an Odoo load. Convert it to a scalar/string column first "
-                f"(e.g. join a list into a comma-separated string of external ids)."
-            )
         col = pl.col(name)
         if dtype == pl.Boolean:
             expr = col.cast(pl.Int8).cast(pl.Utf8)
@@ -122,8 +135,8 @@ def load_dataframe(
     """Load a Polars DataFrame into an Odoo model.
 
     The DataFrame's column names are the import header — name them as you would a
-    CSV for ``fluvo import`` (``id``, ``field/id``, ``field/.id``). An ``id`` (or
-    ``.id``) column is required, to match/create records. By default values are
+    CSV for ``fluvo import`` (``id``, ``field/id``, ``field/.id``). An ``id``
+    (external id) column is required, to match/create records. By default values are
     coerced from their Polars types to Odoo-import-ready strings (see
     :func:`_coerce_for_odoo`); pass ``coerce=False`` if the frame already holds
     import-ready strings.
@@ -151,7 +164,7 @@ def load_dataframe(
 
     Raises:
         FluvoError: If ``df`` is not a materialised DataFrame, is missing an
-            ``id``/``.id`` column, uses ``@`` (translation/per-company) columns, or
+            ``id`` column, uses ``@`` (translation/per-company) columns, or
             contains a column whose dtype cannot be coerced.
     """
     if not isinstance(df, pl.DataFrame):
@@ -167,18 +180,21 @@ def load_dataframe(
             "load without the CLI's per-language/per-company passes. Use the "
             "`fluvo import` CLI for field@lang / field@company."
         )
-    if "id" not in df.columns and ".id" not in df.columns:
+    if "id" not in df.columns:
         raise FluvoError(
-            "load_dataframe requires an 'id' (external id) or '.id' (database id) "
-            "column to match or create records."
+            "load_dataframe requires an 'id' (external id) column to match or "
+            "create records."
         )
+    # Refuse un-loadable dtypes up front, so coerce=False and empty frames are
+    # guarded too (not only the coerce=True path).
+    _reject_unsupported_dtypes(df)
     if df.is_empty():
         return True, {"total_records": 0, "created_records": 0, "failed_records": 0}
 
     prepared = _coerce_for_odoo(df) if coerce else df
     header = prepared.columns
     data = [list(row) for row in prepared.iter_rows()]
-    success, stats = run_import_for_migration(
+    success, raw_stats = run_import_for_migration(
         config=config,
         model=model,
         header=header,
@@ -187,12 +203,25 @@ def load_dataframe(
         batch_size=batch_size,
         fail_file=fail_file,
     )
-    failed = int(stats.get("failed_records", 0))
+    # Pin the core reconciliation keys so callers can always read them.
+    stats: dict[str, Any] = {
+        "total_records": 0,
+        "created_records": 0,
+        "failed_records": 0,
+        **raw_stats,
+    }
+    failed = int(stats["failed_records"])
+    unaccounted = int(stats.get("unaccounted_records", 0))
     if failed and not fail_file:
         log.warning(
             f"{failed} row(s) failed to load into '{model}' and no fail_file was "
             "given — they are counted but not recoverable. Pass fail_file= to "
             "capture them."
+        )
+    if unaccounted:
+        log.warning(
+            f"{unaccounted} row(s) were unaccounted for loading into '{model}' "
+            "(created + failed < total — often duplicate ids). Verify the result."
         )
     # A partial load is not a success: only report True when nothing failed.
     return (bool(success) and failed == 0), stats

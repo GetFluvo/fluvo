@@ -25,7 +25,7 @@ df = pl.DataFrame(
 success, stats = load_dataframe(df, config="dest.conf", model="res.partner")
 ```
 
-- **Column names are the import header** — use the same conventions as [`fluvo import`](importing_data.md): `id` for the external id (required — or `.id` for the database id), `field/id` for a relational lookup by external id, `field/.id` by database id.
+- **Column names are the import header** — use the same conventions as [`fluvo import`](importing_data.md): an `id` (external id) column is **required** to match or create records; `field/id` for a relational lookup by external id, `field/.id` for one by database id.
 - **Types are coerced** from their Polars types to Odoo-import-ready values, so you can pass a natural frame:
   - booleans → `1` / `0`;
   - `Date` → `YYYY-MM-DD`, `Datetime` → `YYYY-MM-DD HH:MM:SS` (a **tz-aware** datetime is converted to UTC first, since Odoo stores naive UTC), `Time` → `HH:MM:SS`;

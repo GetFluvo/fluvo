@@ -122,10 +122,22 @@ def test_load_dataframe_rejects_at_columns() -> None:
 
 
 def test_load_dataframe_requires_id_column() -> None:
-    """A frame with no id/.id column is rejected up front."""
-    df = pl.DataFrame({"name": ["x"]})
-    with pytest.raises(FluvoError, match="id"):
-        load_dataframe(df, "c.conf", "res.partner")
+    """A frame with no 'id' column is rejected — including a '.id'-only frame.
+
+    The engine hardcodes the external-id key, so a bare '.id' row key is not a
+    valid load; reject it up front rather than fail deep with only a log line.
+    """
+    with pytest.raises(FluvoError, match="'id'"):
+        load_dataframe(pl.DataFrame({"name": ["x"]}), "c.conf", "res.partner")
+    with pytest.raises(FluvoError, match="'id'"):
+        load_dataframe(pl.DataFrame({".id": ["7"], "name": ["x"]}), "c.conf", "m")
+
+
+def test_load_dataframe_rejects_bad_dtype_even_without_coercion() -> None:
+    """An un-loadable dtype is refused even with coerce=False."""
+    df = pl.DataFrame({"id": ["a"], "tags": [[1, 2]]})
+    with pytest.raises(FluvoError, match="no sound value"):
+        load_dataframe(df, "c.conf", "res.partner", coerce=False)
 
 
 def test_load_dataframe_rejects_lazyframe() -> None:
