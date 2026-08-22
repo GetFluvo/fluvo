@@ -129,9 +129,20 @@ def test_load_dataframe_requires_id_column() -> None:
 
 
 def test_load_dataframe_rejects_lazyframe() -> None:
-    """A LazyFrame gives a clear error, not an AttributeError."""
+    """A LazyFrame gives a clear error, not an AttributeError.
+
+    In a plain run the isinstance guard raises FluvoError; under the typeguard
+    session the annotation is enforced first and raises TypeCheckError — both are
+    acceptable, the point is a clear failure rather than an AttributeError deep in.
+    """
+    try:
+        from typeguard import TypeCheckError
+
+        expected: tuple[type[Exception], ...] = (FluvoError, TypeCheckError)
+    except ImportError:  # pragma: no cover - typeguard is a dev dependency
+        expected = (FluvoError,)
     lf = pl.LazyFrame({"id": ["a"], "name": ["x"]})
-    with pytest.raises(FluvoError, match="collect"):
+    with pytest.raises(expected):
         load_dataframe(lf, "c.conf", "res.partner")  # type: ignore[arg-type]
 
 
