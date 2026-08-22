@@ -88,3 +88,58 @@ def test_export_dataframe_raises_on_failure(mock_export: MagicMock) -> None:
     mock_export.return_value = (False, "sid", 0, None)
     with pytest.raises(FluvoError):
         export_dataframe("c.conf", "res.partner", ["id"])
+
+
+def test_coerce_tz_aware_datetime_normalised_to_utc() -> None:
+    """A tz-aware datetime is converted to UTC before formatting (no silent shift)."""
+    df = pl.DataFrame(
+        {"id": ["a"], "ts": [datetime(2026, 8, 1, 12, 0, 0)]}
+    ).with_columns(pl.col("ts").dt.replace_time_zone("Europe/Amsterdam"))
+    out = _coerce_for_odoo(df).to_dicts()[0]
+    # 12:00 Amsterdam (summer, +02:00) is 10:00 UTC — the stored wall clock, shifted.
+    assert out["ts"] == "2026-08-01 10:00:00"
+
+
+def test_coerce_non_finite_float_becomes_empty() -> None:
+    """NaN and inf are not real Odoo values -> empty string."""
+    df = pl.DataFrame({"id": ["a", "b", "c"], "f": [1.5, float("nan"), float("inf")]})
+    out = _coerce_for_odoo(df)["f"].to_list()
+    assert out == ["1.5", "", ""]
+
+
+def test_coerce_rejects_unsupported_dtype() -> None:
+    """List/struct columns are refused with a clear error, not silent garbage."""
+    df = pl.DataFrame({"id": ["a"], "tags": [[1, 2, 3]]})
+    with pytest.raises(FluvoError, match="no sound value"):
+        _coerce_for_odoo(df)
+
+
+def test_load_dataframe_rejects_at_columns() -> None:
+    """field@lang / field@company columns are rejected (CLI-only), not sent to Odoo."""
+    df = pl.DataFrame({"id": ["a"], "name@nl_NL": ["x"]})
+    with pytest.raises(FluvoError, match="@"):
+        load_dataframe(df, "c.conf", "res.partner")
+
+
+def test_load_dataframe_requires_id_column() -> None:
+    """A frame with no id/.id column is rejected up front."""
+    df = pl.DataFrame({"name": ["x"]})
+    with pytest.raises(FluvoError, match="id"):
+        load_dataframe(df, "c.conf", "res.partner")
+
+
+def test_load_dataframe_rejects_lazyframe() -> None:
+    """A LazyFrame gives a clear error, not an AttributeError."""
+    lf = pl.LazyFrame({"id": ["a"], "name": ["x"]})
+    with pytest.raises(FluvoError, match="collect"):
+        load_dataframe(lf, "c.conf", "res.partner")  # type: ignore[arg-type]
+
+
+@patch("fluvo.dataframe.run_import_for_migration")
+def test_load_dataframe_partial_failure_is_not_success(mock_run: MagicMock) -> None:
+    """Engine 'success' with failed rows must not read as success (no silent loss)."""
+    mock_run.return_value = (True, {"created_records": 8, "failed_records": 2})
+    df = pl.DataFrame({"id": ["a", "b"], "name": ["x", "y"]})
+    ok, stats = load_dataframe(df, "c.conf", "res.partner")
+    assert ok is False  # 2 rows failed -> overall not success
+    assert stats["failed_records"] == 2

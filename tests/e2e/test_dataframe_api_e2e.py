@@ -53,5 +53,6 @@ def test_dataframe_roundtrip_with_coercion(
         domain=[["name", "like", f"{prefix} %"]],
     )
     assert out.height == n
-    assert set(out.get_column("name").to_list()) == {f"{prefix} {i}" for i in range(n)}
-    assert "color" in out.columns
+    # Round-trip fidelity: names and the (typed) color values come back intact.
+    by_name = dict(zip(out.get_column("name"), out.get_column("color"), strict=True))
+    assert by_name == {f"{prefix} {i}": i + 1 for i in range(n)}

@@ -41,8 +41,8 @@ supported DataFrame API:
 from fluvo import load_dataframe
 
 # `df` is the Polars frame arriving at the node; name its columns like a CSV
-# for `fluvo import` (id, field/id, field@lang, field@company, …). Real Polars
-# types (booleans, dates, numbers) are coerced for Odoo automatically.
+# for `fluvo import` (id, field/id, …). Real Polars types (booleans, dates,
+# numbers) are coerced for Odoo automatically.
 ok, stats = load_dataframe(df, config="dest.conf", model="res.partner")
 ```
 
@@ -55,7 +55,7 @@ from fluvo import export_dataframe
 df = export_dataframe("source.conf", "res.partner", ["id", "name", "email"])
 ```
 
-Column-naming conventions (external ids, relational lookups, translations,
-per-company values) are the same as [`fluvo import`](../../docs/guides/importing_data.md).
-See the [Polars DataFrame API guide](../../docs/guides/dataframe_api.md) for the
-full contract.
+Column-naming conventions (external ids, relational lookups) are the same as
+[`fluvo import`](../../docs/guides/importing_data.md). See the
+[Polars DataFrame API guide](../../docs/guides/dataframe_api.md) for the full
+contract (including which import features are CLI-only).
