@@ -140,6 +140,10 @@ To export all companies from the United States, you would combine two criteria:
 
 `--domain "[('is_company', '=', True), ('country_id.code', '=', 'US')]"`
 
+### Parquet output
+
+Give `--output` a **`.parquet`** filename and Fluvo writes Parquet instead of CSV — a typed, compact intermediate for a downstream Polars-native transform (and the counterpart to importing a `.parquet` [source](importing_data.md#parquet-sources)). Parquet holds the whole result in memory to write it, so it cannot be combined with `--streaming`; use a `.csv` output for streaming exports. `--languages` translations work with Parquet output too.
+
 ### Weekly-delta pipelines (`--since`)
 
 For a recurring migration or sync, you rarely want to move every record every run — only what changed. `--since` is convenience sugar for exactly that: it ANDs a change-timestamp term onto whatever `--domain` you pass, so you don't have to hand-write `write_date` filters.

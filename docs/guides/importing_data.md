@@ -144,6 +144,10 @@ For a successful import into Odoo, the clean CSV file you generate (the `filenam
 * **Field Separator**: The character separating columns can be defined with the `--separator` command-line option. The default is a semicolon (`;`). **Crucially, if a field's value contains the separator character, the entire field value must be enclosed in double quotes (`"`).**
 * **Skipping Lines**: If your source file contains introductory lines before the header, you can use the `--skip` option to ignore them during the import process.
 
+### Parquet sources
+
+`--file` also accepts a **`.parquet`** file, so a Polars-native transform tool (e.g. [Flowfile](https://github.com/edwardvaneechoud/Flowfile)) can hand off a typed intermediate to the load step. Fluvo reads it, coerces its typed values to import-ready strings (booleans → `1`/`0`, dates → ISO, nulls → empty — the same rules as the [DataFrame API](dataframe_api.md)), and runs the identical pipeline (pre-flight, two-pass relational load, `field@lang` / `field@company` passes). The column-naming rules above apply unchanged.
+
 ### Special Field Naming Conventions
 
 To handle relational data and updates by database ID, the tool uses special column headers:
