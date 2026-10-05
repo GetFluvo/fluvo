@@ -1264,7 +1264,6 @@ def _check_references_exist(  # noqa: C901
             except Exception as e:
                 log.debug(f"Error checking external IDs for {model}: {e}")
 
-
         # Check database IDs in batch
         existing_db: set[int] = set()
         if db_ids:
