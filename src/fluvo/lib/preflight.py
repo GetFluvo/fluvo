@@ -1240,37 +1240,30 @@ def _check_references_exist(  # noqa: C901
         if external_ids:
             try:
                 ir_model_data = connection.get_model("ir.model.data")
-                # Build domain for batch lookup
-                domain_parts = []
+                names_by_module: dict[str, set[str]] = {}
                 for ext_id in external_ids:
-                    if "." in ext_id:
-                        module, name = ext_id.split(".", 1)
-                        domain_parts.append(
+                    module, name = ext_id.split(".", 1)
+                    names_by_module.setdefault(module, set()).add(name)
+                for module, names in names_by_module.items():
+                    name_list = list(names)
+                    for start in range(0, len(name_list), 1000):
+                        batch = name_list[start : start + 1000]
+                        # batch read based on Odoo index (name, module)
+                        results = ir_model_data.search_read(
                             [
-                                "&",
-                                "&",
                                 ("module", "=", module),
-                                ("name", "=", name),
                                 ("model", "=", model),
-                            ]
+                                ("name", "in", batch),
+                            ],
+                            ["module", "name"],
                         )
-
-                # Combine with OR
-                if domain_parts:
-                    if len(domain_parts) == 1:
-                        domain = domain_parts[0]
-                    else:
-                        domain = ["|"] * (len(domain_parts) - 1)
-                        for part in domain_parts:
-                            domain.extend(part)
-
-                    results = ir_model_data.search_read(
-                        domain, ["module", "name"], limit=len(external_ids)
-                    )
-                    for r in results:
-                        existing_external.add(f"{r['module']}.{r['name']}")
+                        for record in results:
+                            existing_external.add(
+                                f"{record['module']}.{record['name']}"
+                            )
             except Exception as e:
                 log.debug(f"Error checking external IDs for {model}: {e}")
+
 
         # Check database IDs in batch
         existing_db: set[int] = set()
