@@ -1039,10 +1039,26 @@ def run_import(  # noqa: C901
                 output_dir=env_output_dir,
             )
 
+    total_processed = stats.get("total_records", 0)
+    # Measured throughput for THIS model. Imports are per-model, so this is the
+    # rows/s a user can compare across models — batching knobs (--size,
+    # --adaptive-throttle) tune a non-constraint on server-bound heavy models, so
+    # the real figure is where the time actually goes.
+    rows_per_s = (total_processed / elapsed) if elapsed > 0 else 0.0
     log.info(
-        f"{stats.get('total_records', 0)} records processed. "
-        f"Total time: {elapsed:.2f}s."
+        f"{total_processed} records processed for '{model}' in {elapsed:.2f}s "
+        f"({rows_per_s:.1f} rows/s)."
     )
+
+    # Make the per-record binary-search fallback visible: a few unresolvable
+    # values (e.g. a bad many2one) can quietly push many rows into record-by-record
+    # isolation, which is slow but otherwise only shows up if you read the log.
+    fallback_records = stats.get("fallback_records", 0)
+    if fallback_records:
+        log.info(
+            f"{fallback_records} record(s) required the per-record fallback "
+            f"(a failing row in their batch); see the fail file for the offenders."
+        )
 
     _render_translation_summary(translation_summaries)
     _render_company_summary(company_summaries)

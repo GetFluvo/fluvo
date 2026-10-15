@@ -244,6 +244,11 @@ def pooled_json_rpc(url: str, fct_name: str, params: dict[str, Any]) -> Any:
 
     Returns:
         The ``result`` field of the response (or False if absent).
+
+    Raises:
+        ValueError: If the endpoint returns a non-200 HTTP status (e.g. a 413
+            request-too-large, or a 502/504 gateway error whose body is not JSON).
+        JsonRPCException: If Odoo returns a JSON-RPC application-level error.
     """
     data = {
         "jsonrpc": "2.0",
@@ -256,6 +261,21 @@ def pooled_json_rpc(url: str, fct_name: str, params: dict[str, Any]) -> Any:
     if override:
         headers["User-Agent"] = override
     response = _get_client().post(url, json=data, headers=headers)
+    # Odoo answers JSON-RPC with HTTP 200 even for application-level errors (the
+    # error travels in the JSON body). A non-200 therefore means a transport- or
+    # proxy-level failure — 413 (request too large), 502/504 (gateway), 500
+    # (crash) — whose body is HTML/text, not JSON. Parsing it as JSON used to
+    # raise a cryptic "Expecting value" decode error, which hid a 413 behind what
+    # looked like a server crash (and a long crash-backoff). Surface the status
+    # directly, carrying the code and reason phrase so callers can react — e.g.
+    # shrink the batch on a 413. Mirrors odoolib's json2 transport, which already
+    # raises on a non-200.
+    if response.status_code != 200:
+        snippet = " ".join(response.text.split())[:200]
+        raise ValueError(
+            f"HTTP {response.status_code} {response.reason_phrase} from Odoo "
+            f"endpoint: {snippet}"
+        )
     result = response.json()
     if result.get("error", None):
         raise JsonRPCException(result["error"])

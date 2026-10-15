@@ -332,8 +332,6 @@ src/fluvo/lib/retry.py
 --------------------
 src/fluvo/lib/rpc_transport.py
     DOC203: Function `pooled_json_rpc` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['Any']; docstring return section types: ['']
-    DOC501: Function `pooled_json_rpc` has raise statements, but the docstring does not have a "Raises" section
-    DOC503: Function `pooled_json_rpc` exceptions in the "Raises" section in the docstring do not match those in the function body. Raised exceptions in the docstring: []. Raised exceptions in the body: ['JsonRPCException'].
 --------------------
 src/fluvo/lib/sort.py
     DOC111: Function `sort_for_self_referencing`: The option `--arg-type-hints-in-docstring` is `False` but there are type hints in the docstring arg list
