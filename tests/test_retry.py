@@ -61,6 +61,14 @@ class TestErrorCategorization:
         assert category == retry.ErrorCategory.TRANSIENT
         assert pattern == "broken pipe"
 
+    def test_categorize_transient_registry_reload(self) -> None:
+        """Odoo registry-reload mid-request is transient, so it is retried."""
+        category, pattern = retry.categorize_error(
+            "RuntimeError: dictionary changed size during iteration"
+        )
+        assert category == retry.ErrorCategory.TRANSIENT
+        assert pattern == "dictionary changed size during iteration"
+
     def test_categorize_transient_500_error(self) -> None:
         """Test that 500 internal server errors are categorized as transient."""
         category, pattern = retry.categorize_error("500 Internal Server Error")
@@ -356,3 +364,38 @@ class TestRetryStats:
 
         assert stats.recoverable_errors == 1
         assert stats.error_counts["external id"] == 1
+
+
+class TestPayloadTooLarge:
+    """Tests for is_payload_too_large (HTTP 413 detection)."""
+
+    def test_pooled_jsonrpc_413_message(self) -> None:
+        """The pooled json-rpc transport's 413 message is recognized."""
+        assert retry.is_payload_too_large(
+            "HTTP 413 Request Entity Too Large from Odoo endpoint: <html>...</html>"
+        )
+
+    def test_json2_unexpected_status_413(self) -> None:
+        """Odoolib json2's 'Unexpected status code 413: ...' is recognized."""
+        assert retry.is_payload_too_large(
+            "Unexpected status code 413: <html><body>413 Request Entity Too Large"
+        )
+
+    def test_proxy_content_too_large_phrase(self) -> None:
+        """The RFC 9110 'Content Too Large' phrasing is recognized."""
+        assert retry.is_payload_too_large("413 Content Too Large")
+
+    def test_payload_too_large_phrase(self) -> None:
+        """A bare 'Payload Too Large' phrase is recognized."""
+        assert retry.is_payload_too_large("Payload Too Large")
+
+    def test_incidental_413_in_value_is_not_matched(self) -> None:
+        """A bare '413' inside an unrelated value must NOT be treated as 413.
+
+        Guards the same false-positive class the TRANSIENT patterns warn about.
+        """
+        assert not retry.is_payload_too_large("Invalid value 413 for field 'amount'")
+
+    def test_unrelated_error_is_not_matched(self) -> None:
+        """An ordinary error is not mistaken for a payload-size failure."""
+        assert not retry.is_payload_too_large("Connection timed out")

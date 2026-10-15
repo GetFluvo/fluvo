@@ -389,3 +389,110 @@ def test_execute_load_batch_many_failures_triggers_fallback() -> None:
     assert isinstance(result, dict)
     # model.load is retried by the binary fallback on the failing rows.
     assert model.load.call_count >= 1
+
+
+def _413_thread_state(model: MagicMock) -> "dict[str, Any]":
+    """Minimal thread_state for _execute_load_batch with a usable progress."""
+    return {
+        "model": model,
+        "connection": MagicMock(),
+        "id_map": {},
+        "failed_lines": [],
+        "context": {},
+        "progress": MagicMock(),  # progress.console.print must be callable
+        "unique_id_field_index": 0,
+        "ignore_list": [],
+        "model_name": "res.partner",
+    }
+
+
+def test_execute_load_batch_413_halves_and_recovers() -> None:
+    """A 413 on a multi-record chunk halves the chunk and retries until it fits.
+
+    This is the self-healing path for large-binary imports: the server rejects
+    the big request (HTTP 413), fluvo shrinks the chunk until each request fits,
+    and every record still lands.
+    """
+    from fluvo.import_threaded import _execute_load_batch
+
+    counter = {"n": 0}
+
+    def fake_load(_header: Any, lines: Any, context: Any = None) -> "dict[str, Any]":
+        # The proxy rejects anything larger than a single record.
+        if len(lines) > 1:
+            raise ValueError(
+                "HTTP 413 Request Entity Too Large from Odoo endpoint: <html>…</html>"
+            )
+        counter["n"] += 1
+        return {"ids": [1000 + counter["n"]], "messages": []}
+
+    model = MagicMock()
+    model.load.side_effect = fake_load
+
+    batch_lines = [[f"rec_{i}", f"Name {i}"] for i in range(4)]
+    result = _execute_load_batch(
+        _413_thread_state(model), batch_lines, ["id", "name"], 1
+    )
+
+    assert len(result["id_map"]) == 4, "every record should load after halving"
+    assert result["failed_lines"] == []
+
+
+def test_execute_load_batch_413_single_record_too_big_goes_to_fail_file() -> None:
+    """A record that 413s even on its own is failed with an actionable message."""
+    from fluvo.import_threaded import _execute_load_batch
+
+    model = MagicMock()
+    model.load.side_effect = ValueError(
+        "HTTP 413 Request Entity Too Large from Odoo endpoint: <html>…</html>"
+    )
+
+    batch_lines = [["rec_0", "Name 0"], ["rec_1", "Name 1"]]
+    result = _execute_load_batch(
+        _413_thread_state(model), batch_lines, ["id", "name"], 1
+    )
+
+    assert result["id_map"] == {}
+    assert len(result["failed_lines"]) == 2, "both oversized records should be recorded"
+    for failed in result["failed_lines"]:
+        # Last column is the error reason; it must name the 413 and be actionable.
+        assert "413" in failed[-1]
+        assert "client_max_body_size" in failed[-1]
+
+
+def test_execute_load_batch_counts_fallback_records() -> None:
+    """Records pushed into the per-record binary-search fallback are counted.
+
+    The count is what the run summary surfaces so the (otherwise log-only) cost
+    of a failing row dragging its batch into record isolation is visible.
+    """
+    from fluvo.import_threaded import _execute_load_batch
+
+    model = MagicMock()
+    # A non-413, non-transient failure routes the whole chunk into the fallback.
+    model.load.side_effect = Exception("Odoo: unresolvable many2one value 'UK'")
+
+    batch_lines = [["rec_0", "Name 0"], ["rec_1", "Name 1"]]
+    result = _execute_load_batch(
+        _413_thread_state(model), batch_lines, ["id", "name"], 1
+    )
+
+    assert result["fallback_records"] == 2
+    assert result["id_map"] == {}
+    assert len(result["failed_lines"]) == 2
+
+
+def test_execute_load_batch_no_fallback_on_clean_load() -> None:
+    """A clean load reports zero fallback records."""
+    from fluvo.import_threaded import _execute_load_batch
+
+    model = MagicMock()
+    model.load.return_value = {"ids": [11, 12], "messages": []}
+
+    batch_lines = [["rec_0", "Name 0"], ["rec_1", "Name 1"]]
+    result = _execute_load_batch(
+        _413_thread_state(model), batch_lines, ["id", "name"], 1
+    )
+
+    assert result["fallback_records"] == 0
+    assert len(result["id_map"]) == 2

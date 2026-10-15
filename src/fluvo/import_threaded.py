@@ -1746,6 +1746,11 @@ def _execute_load_batch(  # noqa: C901
     lines_to_process = list(batch_lines)
     aggregated_id_map: dict[str, int] = {}
     aggregated_failed_lines: list[list[Any]] = []
+    # Records handed to the per-record binary-search fallback. A single
+    # unresolvable value (e.g. a bad many2one) aborts its whole batch and sends
+    # the rows into record-by-record isolation — correct, but otherwise invisible
+    # until you read the log. Counted here and surfaced in the run summary.
+    fallback_records = 0
     chunk_size = len(lines_to_process)
 
     # Track retry attempts for serialization errors to prevent infinite retries
@@ -2074,6 +2079,7 @@ def _execute_load_batch(  # noqa: C901
                         if i >= len(created_ids) or created_ids[i] is None
                     ]
                     if failed_lines_to_retry:
+                        fallback_records += len(failed_lines_to_retry)
                         fallback_result = _load_batch_with_binary_fallback(
                             model,
                             connection,
@@ -2151,6 +2157,43 @@ def _execute_load_batch(  # noqa: C901
                         [
                             *list(line),
                             "Load failed: client read-timeout (server status unknown)",
+                        ]
+                    )
+                lines_to_process = lines_to_process[chunk_size:]
+                continue
+
+            # HTTP 413: the request body exceeds the server's / reverse proxy's
+            # maximum size (e.g. nginx client_max_body_size). This is a *sizing*
+            # problem, not a bad record — halve the chunk and retry, mirroring the
+            # transient-error reduction below, down to a single record. This is the
+            # self-healing path for imports with large binary fields (images,
+            # attachments): the batch shrinks until it fits the server's limit. A
+            # lone record that still 413s cannot be sent as-is (its binary field is
+            # simply too big); record it to the fail file with an actionable message
+            # instead of looping forever.
+            if retry_lib.is_payload_too_large(error_str):
+                if chunk_size > 1:
+                    chunk_size = max(1, chunk_size // 2)
+                    progress.console.print(
+                        f"[yellow]WARN:[/] Batch {batch_number} exceeded the "
+                        f"server's maximum request size (HTTP 413). Halving chunk "
+                        f"size to {chunk_size} and retrying."
+                    )
+                    continue
+                clean_error = error_str.strip().replace("\n", " ")
+                log.error(
+                    f"Batch {batch_number}: a single record exceeds the server's "
+                    f"maximum request size (HTTP 413); cannot send as-is. "
+                    f"{clean_error}"
+                )
+                for line in valid_chunk:
+                    aggregated_failed_lines.append(
+                        [
+                            *list(line),
+                            "Load failed: record exceeds the server's maximum "
+                            "request size (HTTP 413). Shrink a large field (e.g. "
+                            "resize the image/binary) or raise the reverse proxy's "
+                            "client_max_body_size.",
                         ]
                     )
                 lines_to_process = lines_to_process[chunk_size:]
@@ -2247,6 +2290,7 @@ def _execute_load_batch(  # noqa: C901
                             f"{len(current_chunk)} records."
                         )
                         clean_error = error_str.strip().replace("\n", " ")
+                        fallback_records += len(current_chunk)
                         fallback_result = _load_batch_with_binary_fallback(
                             model,
                             connection,
@@ -2286,6 +2330,7 @@ def _execute_load_batch(  # noqa: C901
                 f"('{clean_error}'). "
                 f"Using binary search fallback for {len(current_chunk)} records."
             )
+            fallback_records += len(current_chunk)
             fallback_result = _load_batch_with_binary_fallback(
                 model,
                 connection,
@@ -2305,6 +2350,7 @@ def _execute_load_batch(  # noqa: C901
         "id_map": aggregated_id_map,
         "failed_lines": aggregated_failed_lines,
         "success": True,
+        "fallback_records": fallback_records,
     }
 
 
@@ -2498,6 +2544,7 @@ def _run_threaded_pass(  # noqa: C901
         "failed_lines": [],
         "failed_writes": [],
         "successful_writes": 0,
+        "fallback_records": 0,
     }
     consecutive_failures = 0
     successful_batches = 0
@@ -2534,6 +2581,7 @@ def _run_threaded_pass(  # noqa: C901
                 aggregated["id_map"].update(result.get("id_map", {}))
                 aggregated["failed_writes"].extend(result.get("failed_writes", []))
                 aggregated["successful_writes"] += result.get("successful_writes", 0)
+                aggregated["fallback_records"] += result.get("fallback_records", 0)
                 failed_lines = result.get("failed_lines", [])
                 if failed_lines:
                     aggregated["failed_lines"].extend(failed_lines)
@@ -2775,6 +2823,7 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
     # Aggregated results
     combined_id_map: dict[str, int] = {}
     combined_failed_lines: list[list[Any]] = []
+    combined_fallback_records = 0
     aborted = False
     header: list[str] | None = None
     unique_id_field_index: int | None = None
@@ -2844,6 +2893,7 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
                     result = future.result()
                     if result:
                         combined_id_map.update(result.get("id_map", {}))
+                        combined_fallback_records += result.get("fallback_records", 0)
                         batch_failed = result.get("failed_lines", [])
                         combined_failed_lines.extend(batch_failed)
                         # Persist failures to the fail file so streamed rows that
@@ -2874,6 +2924,7 @@ def _orchestrate_streaming_pass_1(  # noqa: C901
         "success": not aborted,
         "id_map": combined_id_map,
         "failed_lines": combined_failed_lines,
+        "fallback_records": combined_fallback_records,
     }
 
 
@@ -3664,6 +3715,7 @@ def import_data(  # noqa: C901
         "failed_records": failed_records,
         "updated_relations": updates_made,
         "id_map": id_map,
+        "fallback_records": pass_1_results.get("fallback_records", 0),
     }
 
     # --- Reconciliation Check ---

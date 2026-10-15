@@ -146,6 +146,7 @@ def httpx_error() -> Exception:
 def test_pooled_json_rpc_returns_result() -> None:
     """A successful response returns its 'result' payload via the shared client."""
     fake_resp = MagicMock()
+    fake_resp.status_code = 200
     fake_resp.json.return_value = {"result": {"ok": 1}}
     fake_client = MagicMock()
     fake_client.post.return_value = fake_resp
@@ -165,6 +166,7 @@ def test_pooled_json_rpc_raises_on_error() -> None:
     from odoolib.tools import JsonRPCException
 
     fake_resp = MagicMock()
+    fake_resp.status_code = 200
     fake_resp.json.return_value = {"error": {"message": "boom"}}
     fake_client = MagicMock()
     fake_client.post.return_value = fake_resp
@@ -252,6 +254,7 @@ def test_pooled_json_rpc_injects_per_host_user_agent() -> None:
     """pooled_json_rpc injects the per-host UA override into the request (#193)."""
     rpc_transport.set_user_agent("rpc.example.com", "Mozilla/5.0 rpc")
     fake_client = MagicMock()
+    fake_client.post.return_value.status_code = 200
     fake_client.post.return_value.json.return_value = {"result": 42}
     try:
         with patch.object(rpc_transport, "_get_client", return_value=fake_client):
@@ -321,3 +324,47 @@ def test_apply_user_agent_dedupes_case_insensitive_header() -> None:
         assert h["X"] == "y"
     finally:
         rpc_transport._user_agents.pop("h2.example.com", None)
+
+
+def _resp(
+    status: int, *, reason: str = "", text: str = "", json_body: Any = None
+) -> MagicMock:
+    """Build a fake httpx-like response for the pooled transport."""
+    resp = MagicMock()
+    resp.status_code = status
+    resp.reason_phrase = reason
+    resp.text = text
+    resp.json.return_value = json_body if json_body is not None else {}
+    return resp
+
+
+def test_pooled_json_rpc_raises_on_413_before_json_parse() -> None:
+    """A 413 is surfaced as an HTTP-status error, not a JSON-decode error.
+
+    Regression: nginx answers a too-large request with an HTML body, and parsing
+    that as JSON used to raise a cryptic "Expecting value" error that hid the 413.
+    """
+    fake_client = MagicMock()
+    fake_client.post.return_value = _resp(
+        413,
+        reason="Request Entity Too Large",
+        text="<html><head><title>413 Request Entity Too Large</title></head></html>",
+    )
+    with patch.object(rpc_transport, "_get_client", return_value=fake_client):
+        with pytest.raises(ValueError, match="413") as exc:
+            rpc_transport.pooled_json_rpc("http://x/jsonrpc", "call", {"a": 1})
+    # The message must be classifiable as a payload-too-large failure downstream.
+    from fluvo.lib import retry
+
+    assert retry.is_payload_too_large(str(exc.value))
+    # We never tried to JSON-decode the HTML error body.
+    fake_client.post.return_value.json.assert_not_called()
+
+
+def test_pooled_json_rpc_passes_through_on_200() -> None:
+    """A normal 200 JSON-RPC response still returns its result unchanged."""
+    fake_client = MagicMock()
+    fake_client.post.return_value = _resp(200, json_body={"result": [1, 2, 3]})
+    with patch.object(rpc_transport, "_get_client", return_value=fake_client):
+        out = rpc_transport.pooled_json_rpc("http://x/jsonrpc", "call", {"a": 1})
+    assert out == [1, 2, 3]

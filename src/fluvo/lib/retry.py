@@ -116,6 +116,11 @@ TRANSIENT_ERROR_PATTERNS = [
     "transaction aborted",
     "server closed connection",
     "internal server error",
+    # Odoo's model registry was reloaded mid-request (typically a concurrent
+    # module install), raising "RuntimeError: dictionary changed size during
+    # iteration" from the server. It is transient: the same payload succeeds once
+    # the registry settles, so retry/backoff instead of stalling the run.
+    "dictionary changed size during iteration",
     # NOTE: bare substrings like "500", "memory", "dns" and "no data" were removed:
     # they match permanent errors whose text merely *contains* those characters
     # (an id/amount "…500…", a "memory_" field, "no data provided"), which
@@ -315,6 +320,42 @@ def is_recoverable_error(error: str) -> bool:
     """
     category, _ = categorize_error(error)
     return category == ErrorCategory.RECOVERABLE
+
+
+# HTTP 413 surfaces differently per transport and per proxy: json2 raises
+# "Unexpected status code 413: …", the pooled json-rpc transport raises
+# "HTTP 413 Request Entity Too Large …", and reverse proxies phrase the body as
+# "Request Entity Too Large" (RFC 7231) or "Content Too Large" (RFC 9110). Match
+# the distinctive phrases rather than a bare "413", which the codebase already
+# learned can appear incidentally inside ids/amounts (see the note on the
+# TRANSIENT patterns above).
+PAYLOAD_TOO_LARGE_PATTERNS = [
+    "request entity too large",
+    "payload too large",
+    "content too large",
+    "entity too large",
+    "http 413",
+    "status code 413",
+    "status 413",
+]
+
+
+def is_payload_too_large(error: str) -> bool:
+    """Check whether an error means the request body exceeded the server limit.
+
+    This is HTTP 413 — the request (or a reverse proxy, e.g. nginx's
+    ``client_max_body_size``) rejected the payload as too large. Such a request
+    can never succeed unchanged: the caller must send a smaller payload (fewer
+    records per batch, or a smaller binary field) and retry.
+
+    Args:
+        error: The error message string.
+
+    Returns:
+        bool: True if the error indicates an oversized request payload (HTTP 413).
+    """
+    error_lower = error.lower()
+    return any(pattern in error_lower for pattern in PAYLOAD_TOO_LARGE_PATTERNS)
 
 
 def get_retry_recommendation(error: str) -> dict[str, Any]:
