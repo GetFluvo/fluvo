@@ -169,6 +169,56 @@ class TestCheckReferencesExist:
         assert "res.partner" in missing
         assert "base.missing" in missing["res.partner"]["partner_id/id"]
 
+    def test_groups_external_ids_by_module_in_name_batches(self) -> None:
+        """Query external ids per module, in name batches of 1000."""
+        mock_conn = MagicMock()
+        ir_model_data = MagicMock()
+        mock_conn.get_model.return_value = ir_model_data
+
+        sale_names = {f"order_{index}" for index in range(1001)}
+        sale_names.add("order.extra")
+        external_ids = {f"sale.{name}" for name in sale_names}
+        external_ids.add("account.journal_1")
+        refs = {"sale.order": {"order_id/id": external_ids}}
+
+        def search_read(
+            domain: list[tuple[str, str, Any]],
+            fields: list[str],
+        ) -> list[dict[str, str]]:
+            assert fields == ["module", "name"]
+            module = domain[0][2]
+            names = domain[2][2]
+            assert isinstance(names, list)
+            return [
+                {"module": str(module), "name": str(name)}
+                for name in names
+                if not (module == "sale" and name == "order_0")
+            ]
+
+        ir_model_data.search_read.side_effect = search_read
+
+        missing = preflight._check_references_exist(mock_conn, refs)
+
+        batches_by_module: dict[str, list[list[str]]] = {}
+        for call in ir_model_data.search_read.call_args_list:
+            domain = call.args[0]
+            assert not call.kwargs
+            assert [item[0] for item in domain] == ["module", "model", "name"]
+            assert [item[1] for item in domain] == ["=", "=", "in"]
+            assert domain[1][2] == "sale.order"
+            raw_names = domain[2][2]
+            assert isinstance(raw_names, list)
+            names = [str(name) for name in raw_names]
+            batches_by_module.setdefault(str(domain[0][2]), []).append(names)
+
+        assert set(batches_by_module) == {"account", "sale"}
+        assert batches_by_module["account"] == [["journal_1"]]
+        sale_batches = batches_by_module["sale"]
+        assert sorted(len(batch) for batch in sale_batches) == [2, 1000]
+        assert {name for batch in sale_batches for name in batch} == sale_names
+        assert missing == {"sale.order": {"order_id/id": {"sale.order_0"}}}
+        mock_conn.get_model.assert_called_once_with("ir.model.data")
+
     def test_handles_database_ids(self) -> None:
         """Test checking database IDs."""
         mock_conn = MagicMock()
