@@ -1,10 +1,12 @@
 """Test the main importer orchestrator."""
 
+import csv
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 from fluvo.importer import (
+    _count_csv_records,
     _count_lines,
     _get_env_from_config,
     _get_fail_filename,
@@ -811,6 +813,44 @@ class TestImporterEdgeCases:
     def test_count_lines_file_not_found(self) -> None:
         """Test line count returns 0 for non-existent file."""
         assert _count_lines("/nonexistent/file.csv") == 0
+
+    def test_count_csv_records_file_not_found(self) -> None:
+        """Record count returns 0 for a non-existent file."""
+        assert _count_csv_records("/nonexistent/file.csv") == 0
+
+    def test_count_csv_records_header_only(self, tmp_path: Path) -> None:
+        """A header-only fail file has zero data records."""
+        file_path = tmp_path / "res_partner_fail.csv"
+        file_path.write_text('"id","name","_ERROR_REASON"\n')
+        assert _count_csv_records(str(file_path)) == 0
+
+    def test_count_csv_records_ignores_embedded_newlines(self, tmp_path: Path) -> None:
+        """Error messages with hard newlines must not inflate the count.
+
+        This is the exact failure a user reported: three failed records whose
+        QUOTE_ALL error column carried hard newlines were counted as seven by a
+        physical-line count. The quote-aware record count must return three.
+        """
+        file_path = tmp_path / "res_partner_fail.csv"
+        with open(file_path, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.writer(fh, quoting=csv.QUOTE_ALL)
+            writer.writerow(["id", "name", "_ERROR_REASON"])
+            writer.writerow(["r1", "A", "ValidationError:\nline two\nline three"])
+            writer.writerow(["r2", "B", "psycopg2 error:\ndetail line"])
+            writer.writerow(["r3", "C", "single line error"])
+        # Physical lines would be 7 (1 header + 3+2+1 wrapped); records are 3.
+        assert _count_lines(str(file_path)) > 3  # the buggy signal
+        assert _count_csv_records(str(file_path)) == 3
+
+    def test_count_csv_records_respects_separator(self, tmp_path: Path) -> None:
+        """A semicolon-delimited fail file counts records correctly."""
+        file_path = tmp_path / "res_partner_fail.csv"
+        with open(file_path, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.writer(fh, delimiter=";", quoting=csv.QUOTE_ALL)
+            writer.writerow(["id", "name", "_ERROR_REASON"])
+            writer.writerow(["r1", "A", "err;with;semicolons\nand newline"])
+            writer.writerow(["r2", "B", "ok"])
+        assert _count_csv_records(str(file_path), separator=";") == 2
 
     @patch("fluvo.importer._show_error_panel")
     def test_run_import_context_type_error(self, mock_show_error: MagicMock) -> None:
