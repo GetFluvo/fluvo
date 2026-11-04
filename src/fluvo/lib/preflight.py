@@ -28,6 +28,11 @@ from .internal.ui import _show_error_panel, _show_warning_panel
 # A registry to hold all pre-flight check functions
 PREFLIGHT_CHECKS: list[Callable[..., bool]] = []
 
+# Max ids per ``search``/``search_read`` domain when verifying references.
+# One giant domain (e.g. 5 leaves per id OR-ed for ~149k ids) does not survive
+# the RPC round-trip; chunking keeps every call small and resilient.
+_REFERENCE_LOOKUP_CHUNK = 2000
+
 
 def _handle_m2m_field(
     field_name: str,
@@ -1235,56 +1240,67 @@ def _check_references_exist(  # noqa: C901
                 except ValueError:
                     invalid_refs.add(ref)
 
-        # Check external IDs in batch
+        # If a lookup RPC cannot run, the result is *unknown*, not "all missing".
+        # Reporting every ref as missing (the old behaviour: one oversized domain
+        # that died, exception swallowed at debug) is a false alarm that can block
+        # a valid import. Track that and skip classification for the failed side.
+        external_check_failed = False
+        db_check_failed = False
+
+        # Check external IDs. Group by module and query
+        # [('model','=',model),('module','=',module),('name','in',chunk)] in
+        # small chunks — one tiny domain per chunk instead of 5 leaves per id.
         existing_external: set[str] = set()
         if external_ids:
+            by_module: dict[str, list[str]] = {}
+            for ext_id in external_ids:
+                module, name = ext_id.split(".", 1)
+                by_module.setdefault(module, []).append(name)
             try:
                 ir_model_data = connection.get_model("ir.model.data")
-                # Build domain for batch lookup
-                domain_parts = []
-                for ext_id in external_ids:
-                    if "." in ext_id:
-                        module, name = ext_id.split(".", 1)
-                        domain_parts.append(
+                for module, names in by_module.items():
+                    for i in range(0, len(names), _REFERENCE_LOOKUP_CHUNK):
+                        chunk = names[i : i + _REFERENCE_LOOKUP_CHUNK]
+                        results = ir_model_data.search_read(
                             [
-                                "&",
-                                "&",
-                                ("module", "=", module),
-                                ("name", "=", name),
                                 ("model", "=", model),
-                            ]
+                                ("module", "=", module),
+                                ("name", "in", chunk),
+                            ],
+                            ["module", "name"],
                         )
-
-                # Combine with OR
-                if domain_parts:
-                    if len(domain_parts) == 1:
-                        domain = domain_parts[0]
-                    else:
-                        domain = ["|"] * (len(domain_parts) - 1)
-                        for part in domain_parts:
-                            domain.extend(part)
-
-                    results = ir_model_data.search_read(
-                        domain, ["module", "name"], limit=len(external_ids)
-                    )
-                    for r in results:
-                        existing_external.add(f"{r['module']}.{r['name']}")
+                        for r in results:
+                            existing_external.add(f"{r['module']}.{r['name']}")
             except Exception as e:
-                log.debug(f"Error checking external IDs for {model}: {e}")
+                external_check_failed = True
+                log.warning(
+                    f"Reference check could NOT verify external ids for '{model}' "
+                    f"({len(external_ids)} refs): {e}. Not flagging them as "
+                    f"missing — the check failed, it did not find them absent."
+                )
 
-        # Check database IDs in batch
+        # Check database IDs, chunked for the same reason.
         existing_db: set[int] = set()
         if db_ids:
+            db_id_list = list(db_ids)
             try:
                 model_obj = connection.get_model(model)
-                results = model_obj.search([("id", "in", list(db_ids))])
-                existing_db = set(results)
+                for i in range(0, len(db_id_list), _REFERENCE_LOOKUP_CHUNK):
+                    chunk_ids = db_id_list[i : i + _REFERENCE_LOOKUP_CHUNK]
+                    existing_db.update(model_obj.search([("id", "in", chunk_ids)]))
             except Exception as e:
-                log.debug(f"Error checking database IDs for {model}: {e}")
+                db_check_failed = True
+                log.warning(
+                    f"Reference check could NOT verify database ids for '{model}' "
+                    f"({len(db_ids)} refs): {e}. Not flagging them as missing."
+                )
 
-        # Find missing refs for each column
-        missing_external = external_ids - existing_external
-        missing_db = db_ids - existing_db
+        # Find missing refs. A side whose check failed contributes nothing to the
+        # missing set (unknown ≠ missing); invalid refs are always real failures.
+        missing_external = (
+            set() if external_check_failed else external_ids - existing_external
+        )
+        missing_db = set() if db_check_failed else db_ids - existing_db
         all_missing = missing_external | {str(i) for i in missing_db} | invalid_refs
 
         if all_missing:

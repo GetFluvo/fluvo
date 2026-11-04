@@ -201,6 +201,63 @@ class TestCheckReferencesExist:
         assert "res.partner" in missing
         assert "not_a_valid_id" in missing["res.partner"]["partner_id"]
 
+    def test_external_lookup_failure_is_not_reported_as_missing(self) -> None:
+        """A lookup RPC that dies must NOT flag every ref as missing.
+
+        Regression: the check built one oversized domain for all ids, the RPC
+        failed, the exception was swallowed at debug, and so 100% of refs were
+        reported missing on large columns. A failed check is "unknown", not
+        "all absent".
+        """
+        mock_conn = MagicMock()
+        ir_model_data = MagicMock()
+        ir_model_data.search_read.side_effect = RuntimeError("request too large")
+        mock_conn.get_model.return_value = ir_model_data
+
+        refs = {
+            "product.template": {
+                "product_tmpl_id/id": {f"PRODUCT_TEMPLATE.p{i}" for i in range(50)},
+            }
+        }
+
+        missing = preflight._check_references_exist(mock_conn, refs)
+        assert not missing  # check failed -> nothing claimed missing
+
+    def test_db_lookup_failure_is_not_reported_as_missing(self) -> None:
+        """A failed database-id lookup is also unknown, not missing."""
+        mock_conn = MagicMock()
+        model_obj = MagicMock()
+        model_obj.search.side_effect = RuntimeError("timeout")
+        mock_conn.get_model.return_value = model_obj
+
+        refs = {"res.partner": {"partner_id": {"1", "2", "3"}}}
+
+        missing = preflight._check_references_exist(mock_conn, refs)
+        assert not missing
+
+    def test_external_lookup_is_chunked(self) -> None:
+        """Large id sets are split into small chunks, not one giant domain."""
+        mock_conn = MagicMock()
+        ir_model_data = MagicMock()
+        names = [f"p{i}" for i in range(4500)]
+
+        def _search_read(domain: Any, _fields: Any, **_kw: Any) -> list[dict[str, Any]]:
+            # Echo back the chunk's names as existing so all resolve.
+            in_leaf = next(leaf for leaf in domain if leaf[0] == "name")
+            chunk = in_leaf[2]
+            assert len(chunk) <= preflight._REFERENCE_LOOKUP_CHUNK
+            return [{"module": "base", "name": n} for n in chunk]
+
+        ir_model_data.search_read.side_effect = _search_read
+        mock_conn.get_model.return_value = ir_model_data
+
+        refs = {"res.partner": {"partner_id/id": {f"base.{n}" for n in names}}}
+
+        missing = preflight._check_references_exist(mock_conn, refs)
+        assert not missing
+        # 4500 names / 2000 per chunk -> 3 calls.
+        assert ir_model_data.search_read.call_count == 3
+
 
 class TestReferenceCheck:
     """Tests for the reference_check preflight function."""
