@@ -35,6 +35,33 @@ def _count_lines(filepath: str) -> int:
         return 0
 
 
+def _count_csv_records(
+    filepath: str, separator: str = ",", encoding: str = "utf-8"
+) -> int:
+    """Counts data records (rows minus header) in a CSV file.
+
+    Unlike :func:`_count_lines`, this parses the CSV so a quoted field that
+    contains hard newlines — common in Odoo error messages written to the fail
+    file (``csv.QUOTE_ALL``) — counts as a single record, not one per physical
+    line. Returns 0 if the file is missing or has only a header.
+
+    Args:
+        filepath: Path to the CSV file.
+        separator: Field delimiter (row boundaries are quote-aware regardless,
+            so this only affects within-row field splitting).
+        encoding: File encoding.
+
+    Returns:
+        int: Number of data records, excluding the header row.
+    """
+    try:
+        with open(filepath, newline="", encoding=encoding) as f:
+            reader = csv.reader(f, delimiter=separator)
+            return max(sum(1 for _ in reader) - 1, 0)
+    except FileNotFoundError:
+        return 0
+
+
 def _infer_model_from_filename(filename: str) -> str | None:
     """Tries to guess the Odoo model from a CSV filename."""
     basename = Path(filename).stem
@@ -274,7 +301,15 @@ def _run_translation_passes(
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
-        failed = max(_count_lines(fail_file) - 1, 0)
+        # Authoritative count (len of failed_lines). Counting fail-file lines
+        # overcounts when an Odoo error message carries hard newlines, since the
+        # fail CSV is QUOTE_ALL; fall back to a quote-aware record count.
+        failed = int(
+            stats.get(
+                "failed_records",
+                _count_csv_records(fail_file, separator, encoding),
+            )
+        )
         written = int(stats.get("created_records", 0)) if success else 0
         if failed:
             log.warning(
@@ -458,7 +493,13 @@ def _run_company_passes(
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
-        failed = max(_count_lines(fail_file) - 1, 0)
+        # Authoritative count; quote-aware fallback (see translation pass).
+        failed = int(
+            stats.get(
+                "failed_records",
+                _count_csv_records(fail_file, separator, encoding),
+            )
+        )
         written = int(stats.get("created_records", 0)) if success else 0
         if failed:
             log.warning(
@@ -643,8 +684,10 @@ def run_import(  # noqa: C901
     if fail:
         # Look for fail file in environment-specific directory
         fail_path = env_output_dir / _get_fail_filename(model, False)
-        line_count = _count_lines(str(fail_path))
-        if line_count <= 1:
+        # Quote-aware record count: error messages with hard newlines in the
+        # QUOTE_ALL fail file must not inflate the "records to retry" number.
+        record_count = _count_csv_records(str(fail_path), separator, encoding)
+        if record_count < 1:
             Console().print(
                 Panel(
                     f"No records to retry in '{fail_path}'.",
@@ -657,8 +700,7 @@ def run_import(  # noqa: C901
             # benign no-op must stay distinguishable from a real failure.
             return {}
         log.info(
-            f"Running in --fail mode. Retrying {line_count - 1} records from: "
-            f"{fail_path}"
+            f"Running in --fail mode. Retrying {record_count} records from: {fail_path}"
         )
         file_to_process = str(fail_path)
         if ignore is None:
@@ -1153,7 +1195,15 @@ def run_import(  # noqa: C901
             )
     else:
         num_imported = len(id_map)
-        num_failed = _count_lines(fail_output_file) - 1  # Subtract header
+        # Authoritative failed-record count. Counting physical lines in the fail
+        # file overcounts: it is written QUOTE_ALL, so an Odoo error message with
+        # hard newlines makes one failed record span several lines.
+        num_failed = int(
+            stats.get(
+                "failed_records",
+                _count_csv_records(fail_output_file, separator, encoding),
+            )
+        )
         Console().print(
             Panel(
                 f"Partial import for [cyan]{model}[/cyan]: "
