@@ -1210,12 +1210,17 @@ def _extract_references_from_csv(  # noqa: C901
 def _check_references_exist(  # noqa: C901
     connection: Any,
     references: dict[str, dict[str, set[str]]],
-) -> dict[str, dict[str, set[str]]]:
+) -> tuple[dict[str, dict[str, set[str]]], dict[str, dict[str, set[str]]]]:
     """Check which references exist in Odoo.
 
-    Returns dict of missing references: model -> column -> set of missing refs.
+    Returns a ``(missing, unverified)`` pair, each shaped model -> column ->
+    set of refs. ``missing`` are refs confirmed absent in Odoo; ``unverified``
+    are refs the lookup could not check (an RPC that errored). Keeping the two
+    apart is deliberate: an unverifiable check must never masquerade as "all
+    present" nor as "all missing".
     """
     missing: dict[str, dict[str, set[str]]] = {}
+    unverified: dict[str, dict[str, set[str]]] = {}
 
     for model, columns in references.items():
         # Collect all unique refs for this model
@@ -1240,12 +1245,15 @@ def _check_references_exist(  # noqa: C901
                 except ValueError:
                     invalid_refs.add(ref)
 
-        # If a lookup RPC cannot run, the result is *unknown*, not "all missing".
+        # A lookup RPC that cannot run leaves those refs *unknown*, not missing.
         # Reporting every ref as missing (the old behaviour: one oversized domain
         # that died, exception swallowed at debug) is a false alarm that can block
-        # a valid import. Track that and skip classification for the failed side.
-        external_check_failed = False
-        db_check_failed = False
+        # a valid import. Failures are tracked per chunk, so refs that WERE
+        # positively resolved in surviving chunks are still classified normally.
+        unverified_external: set[str] = set()
+        unverified_db: set[int] = set()
+        last_external_error: Exception | None = None
+        last_db_error: Exception | None = None
 
         # Check external IDs. Group by module and query
         # [('model','=',model),('module','=',module),('name','in',chunk)] in
@@ -1258,25 +1266,35 @@ def _check_references_exist(  # noqa: C901
                 by_module.setdefault(module, []).append(name)
             try:
                 ir_model_data = connection.get_model("ir.model.data")
+            except Exception as e:  # cannot even get the model: all unverified
+                last_external_error = e
+                ir_model_data = None
+                unverified_external = set(external_ids)
+            if ir_model_data is not None:
                 for module, names in by_module.items():
                     for i in range(0, len(names), _REFERENCE_LOOKUP_CHUNK):
                         chunk = names[i : i + _REFERENCE_LOOKUP_CHUNK]
-                        results = ir_model_data.search_read(
-                            [
-                                ("model", "=", model),
-                                ("module", "=", module),
-                                ("name", "in", chunk),
-                            ],
-                            ["module", "name"],
-                        )
+                        try:
+                            results = ir_model_data.search_read(
+                                [
+                                    ("model", "=", model),
+                                    ("module", "=", module),
+                                    ("name", "in", chunk),
+                                ],
+                                ["module", "name"],
+                            )
+                        except Exception as e:  # only THIS chunk is unknown
+                            last_external_error = e
+                            unverified_external.update(f"{module}.{n}" for n in chunk)
+                            continue
                         for r in results:
                             existing_external.add(f"{r['module']}.{r['name']}")
-            except Exception as e:
-                external_check_failed = True
+            if unverified_external:
                 log.warning(
-                    f"Reference check could NOT verify external ids for '{model}' "
-                    f"({len(external_ids)} refs): {e}. Not flagging them as "
-                    f"missing — the check failed, it did not find them absent."
+                    f"Reference check could NOT verify "
+                    f"{len(unverified_external)} of {len(external_ids)} external "
+                    f"id(s) for '{model}': {last_external_error}. Treating them "
+                    f"as unverified, not missing."
                 )
 
         # Check database IDs, chunked for the same reason.
@@ -1285,23 +1303,40 @@ def _check_references_exist(  # noqa: C901
             db_id_list = list(db_ids)
             try:
                 model_obj = connection.get_model(model)
+            except Exception as e:
+                last_db_error = e
+                model_obj = None
+                unverified_db = set(db_ids)
+            if model_obj is not None:
                 for i in range(0, len(db_id_list), _REFERENCE_LOOKUP_CHUNK):
                     chunk_ids = db_id_list[i : i + _REFERENCE_LOOKUP_CHUNK]
-                    existing_db.update(model_obj.search([("id", "in", chunk_ids)]))
-            except Exception as e:
-                db_check_failed = True
+                    try:
+                        existing_db.update(model_obj.search([("id", "in", chunk_ids)]))
+                    except Exception as e:
+                        last_db_error = e
+                        unverified_db.update(chunk_ids)
+            if unverified_db:
                 log.warning(
-                    f"Reference check could NOT verify database ids for '{model}' "
-                    f"({len(db_ids)} refs): {e}. Not flagging them as missing."
+                    f"Reference check could NOT verify {len(unverified_db)} of "
+                    f"{len(db_ids)} database id(s) for '{model}': {last_db_error}. "
+                    f"Treating them as unverified, not missing."
                 )
 
-        # Find missing refs. A side whose check failed contributes nothing to the
-        # missing set (unknown ≠ missing); invalid refs are always real failures.
-        missing_external = (
-            set() if external_check_failed else external_ids - existing_external
-        )
-        missing_db = set() if db_check_failed else db_ids - existing_db
+        # Classify. A ref is missing only if it was actually checked and absent;
+        # unverified refs (failed chunks) are set aside. Invalid-format refs are
+        # always real failures.
+        missing_external = external_ids - existing_external - unverified_external
+        missing_db = db_ids - existing_db - unverified_db
         all_missing = missing_external | {str(i) for i in missing_db} | invalid_refs
+        all_unverified = unverified_external | {str(i) for i in unverified_db}
+
+        if all_unverified:
+            for col, refs in columns.items():
+                col_unverified = refs & all_unverified
+                if col_unverified:
+                    unverified.setdefault(model, {}).setdefault(col, set()).update(
+                        col_unverified
+                    )
 
         if all_missing:
             for col, refs in columns.items():
@@ -1313,7 +1348,7 @@ def _check_references_exist(  # noqa: C901
                         missing[model][col] = set()
                     missing[model][col].update(col_missing)
 
-    return missing
+    return missing, unverified
 
 
 def _display_missing_references(
@@ -1406,44 +1441,65 @@ def reference_check(  # noqa: C901
         return bool(check_refs != "fail")
 
     # Check which references exist
-    missing = _check_references_exist(connection, references)
+    missing, unverified = _check_references_exist(connection, references)
 
-    # Exclude self-references (IDs defined in this same file)
-    # This applies to the model being imported (e.g., parent_id on res.partner)
-    if model in missing and defined_ids:
-        for col in list(missing[model].keys()):
-            # Remove references that are defined in this file
-            missing[model][col] -= defined_ids
-            # If no missing refs left for this column, remove it
-            if not missing[model][col]:
-                del missing[model][col]
-        # If no missing columns left for this model, remove it
-        if not missing[model]:
-            del missing[model]
+    # Exclude self-references (IDs defined in this same file) from both buckets.
+    # This applies to the model being imported (e.g., parent_id on res.partner).
+    for bucket in (missing, unverified):
+        if model in bucket and defined_ids:
+            for col in list(bucket[model].keys()):
+                bucket[model][col] -= defined_ids
+                if not bucket[model][col]:
+                    del bucket[model][col]
+            if not bucket[model]:
+                del bucket[model]
 
-    if not missing:
+    unverified_count = sum(
+        len(refs) for cols in unverified.values() for refs in cols.values()
+    )
+
+    if not missing and not unverified:
         total_refs = sum(
             len(refs) for cols in references.values() for refs in cols.values()
         )
         log.info(f"All {total_refs} relational references verified successfully.")
         return True
 
-    # Handle missing references
-    _display_missing_references(missing)
+    # Surface missing references (confirmed absent).
+    if missing:
+        _display_missing_references(missing)
 
+    # An unverifiable check is honest about being incomplete — it must not read
+    # as success. Under --check-refs=fail we fail closed: the user asked us to
+    # confirm references and we could not, so we do not wave the import through.
     if check_refs == "fail":
-        _show_error_panel(
-            "Reference Check Failed",
-            "Import aborted due to missing references. "
-            "Use --check-refs=warn to continue anyway.",
-        )
+        if missing:
+            _show_error_panel(
+                "Reference Check Failed",
+                "Import aborted due to missing references. "
+                "Use --check-refs=warn to continue anyway.",
+            )
+        else:
+            _show_error_panel(
+                "Reference Check Incomplete",
+                f"Could not verify {unverified_count} reference(s) against Odoo "
+                "(the lookup errored; see the warnings above). Aborting because "
+                "--check-refs=fail requires confirmation. "
+                "Use --check-refs=warn to continue anyway.",
+            )
         return False
 
     # check_refs == "warn"
-    log.warning(
-        "Continuing with import despite missing references. "
-        "Some records may fail to import."
-    )
+    if missing:
+        log.warning(
+            "Continuing with import despite missing references. "
+            "Some records may fail to import."
+        )
+    if unverified_count:
+        log.warning(
+            f"Continuing: {unverified_count} reference(s) could not be verified "
+            "(the check could not reach Odoo for them, not that they are absent)."
+        )
     return True
 
 
