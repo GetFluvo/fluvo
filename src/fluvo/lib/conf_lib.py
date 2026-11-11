@@ -33,12 +33,38 @@ _ODOOLIB_PARAMS = frozenset(
 )
 
 
+def _apply_api_key_alias(config_dict: dict[str, Any]) -> None:
+    """Route an `api_key` entry to odoolib's `password` field, in place.
+
+    Odoo 19 / json2 authenticates with an API key, which odoolib still carries
+    in the `password` field — so a user who (reasonably) writes ``api_key = ...``
+    in the connection would otherwise have it silently ignored and then hit a
+    bare 401 that looks like missing rights. An explicit `password` wins.
+
+    Args:
+        config_dict: The connection config, mutated in place: ``api_key`` is
+            removed and, when it is the only credential, copied to ``password``.
+    """
+    api_key = config_dict.pop("api_key", None)
+    if not api_key:
+        return
+    existing = config_dict.get("password")
+    if existing and existing != api_key:
+        log.warning(
+            "Both 'password' and 'api_key' are set in the connection config; "
+            "using 'password' and ignoring 'api_key'."
+        )
+    else:
+        config_dict["password"] = api_key
+
+
 def get_connection_from_dict(config_dict: dict[str, Any]) -> Any:
     """Establishes a connection to Odoo from a dictionary.
 
     Args:
         config_dict: A dictionary with connection details.
-            Required: hostname, database, login, password
+            Required: hostname, database, login, password (or api_key, an alias
+                for password — Odoo 19 / json2 authenticates with an API key)
             Optional: port, protocol (xmlrpc|jsonrpc|json2), uid
 
     Returns:
@@ -57,11 +83,14 @@ def get_connection_from_dict(config_dict: dict[str, Any]) -> Any:
             file_config.update(config_dict)
             config_dict = file_config
 
+        _apply_api_key_alias(config_dict)
+
         # Explicitly check for required keys before proceeding.
         required_keys = ["hostname", "database", "login", "password"]
         for key in required_keys:
             if key not in config_dict:
-                raise KeyError(f"Required key '{key}' not found in config dict.")
+                hint = " (or 'api_key')" if key == "password" else ""
+                raise KeyError(f"Required key '{key}'{hint} not found in config dict.")
 
         # Ensure port and uid are integers if they exist
         if "port" in config_dict:

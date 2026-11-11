@@ -176,6 +176,68 @@ def test_pooled_json_rpc_raises_on_error() -> None:
             rpc_transport.pooled_json_rpc("http://x/jsonrpc", "call", {})
 
 
+@pytest.mark.parametrize("status", [401, 403])
+def test_pooled_json_rpc_rejected_key_raises_auth_error(status: int) -> None:
+    """A 401/403 on the RPC channel is an auth error with key-not-rights guidance."""
+    from odoolib.tools import AuthenticationError
+
+    fake_resp = MagicMock()
+    fake_resp.status_code = status
+    fake_resp.reason_phrase = "Unauthorized" if status == 401 else "Forbidden"
+    fake_client = MagicMock()
+    fake_client.post.return_value = fake_resp
+
+    with patch.object(rpc_transport, "_get_client", return_value=fake_client):
+        with pytest.raises(AuthenticationError) as exc:
+            rpc_transport.pooled_json_rpc("http://x/jsonrpc", "call", {})
+    msg = str(exc.value)
+    assert "api_key" in msg and "permissions" in msg
+
+
+def test_pooled_json_rpc_other_non_200_still_value_error() -> None:
+    """A non-auth non-200 (e.g. 413) stays a ValueError, not an auth error."""
+    fake_resp = MagicMock()
+    fake_resp.status_code = 413
+    fake_resp.reason_phrase = "Request Entity Too Large"
+    fake_resp.text = "<html>too big</html>"
+    fake_client = MagicMock()
+    fake_client.post.return_value = fake_resp
+
+    with patch.object(rpc_transport, "_get_client", return_value=fake_client):
+        with pytest.raises(ValueError, match="HTTP 413"):
+            rpc_transport.pooled_json_rpc("http://x/jsonrpc", "call", {})
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_json2_shim_post_rejected_key_raises_auth_error(status: int) -> None:
+    """json2's POST shim turns a 401/403 into an actionable AuthenticationError."""
+    from odoolib.tools import AuthenticationError
+
+    fake_resp = MagicMock()
+    fake_resp.status_code = status
+    fake_resp.reason_phrase = "Unauthorized" if status == 401 else "Forbidden"
+    fake_client = MagicMock()
+    fake_client.post.return_value = fake_resp
+    shim = rpc_transport._PooledHttpx(MagicMock())
+
+    with patch.object(rpc_transport, "_get_client", return_value=fake_client):
+        with pytest.raises(AuthenticationError):
+            shim.post("http://x/json/2/res.partner/read", json={"ids": [1]})
+
+
+def test_json2_shim_post_returns_response_on_200() -> None:
+    """A 200 POST passes the response straight through (no auth interference)."""
+    fake_resp = MagicMock()
+    fake_resp.status_code = 200
+    fake_client = MagicMock()
+    fake_client.post.return_value = fake_resp
+    shim = rpc_transport._PooledHttpx(MagicMock())
+
+    with patch.object(rpc_transport, "_get_client", return_value=fake_client):
+        out = shim.post("http://x/json/2/res.partner/read", json={"ids": [1]})
+    assert out is fake_resp
+
+
 def test_get_client_is_singleton() -> None:
     """The pooled client is created once and reused."""
     rpc_transport._client = None
