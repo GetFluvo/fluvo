@@ -35,9 +35,38 @@ import threading
 from typing import Any
 
 import httpx
-from odoolib.tools import JsonRPCException
+from odoolib.tools import AuthenticationError, JsonRPCException
 
 from ..logging_config import log
+
+# HTTP statuses that mean "Odoo refused these credentials", not "you lack rights".
+_AUTH_REJECTED_STATUSES = frozenset({401, 403})
+
+
+def _credentials_rejected_message(status_code: int, reason: str) -> str:
+    """Actionable message for a rejected API key / password.
+
+    A bare 401/403 reads like a permissions problem, so users hunt for access
+    rights when the real cause is usually a wrong key or a key put in a field
+    fluvo does not read. Spell the likely cause out instead. Raised as an
+    ``AuthenticationError`` (odoolib's own type), so odoolib's ``check_login``
+    still treats it as "not authenticated".
+
+    Args:
+        status_code: The HTTP status returned by Odoo (401 or 403).
+        reason: The HTTP reason phrase.
+
+    Returns:
+        str: The guidance message.
+    """
+    return (
+        f"Odoo rejected the credentials (HTTP {status_code} {reason}). This is an "
+        "authentication failure, not a missing-permissions problem: check that the "
+        "API key / password is correct and still active, and that it is set in the "
+        "connection's 'password' (or 'api_key') field. Odoo 19 authenticates with "
+        "an API key over the json2 protocol, not a login password."
+    )
+
 
 # --- json2 introspection fallback (#213) -----------------------------------
 # The Odoo 19 ``json2`` connector maps *positional* method arguments to parameter
@@ -215,10 +244,35 @@ class _PooledHttpx:
         self._real = real
 
     def post(self, url: str, **kwargs: Any) -> Any:
-        """POST via the pooled client."""
+        """POST via the pooled client.
+
+        Args:
+            url: The request URL.
+            **kwargs: Passed through to the pooled client's ``post`` (any
+                per-call ``timeout`` is dropped so the client default applies).
+
+        Returns:
+            Any: The httpx ``Response`` on a non-auth status.
+
+        Raises:
+            AuthenticationError: If Odoo answers the RPC POST with 401/403 — a
+                rejected API key, not a permissions issue. json2 (Odoo 19)
+                authenticates every call via this POST, so this is the single
+                point where a bad key surfaces; translating it here gives an
+                actionable message and still satisfies odoolib's ``check_login``
+                (which catches ``AuthenticationError``). The GET path is left
+                alone so the WAF-blocked introspection fallback (#213) is intact.
+        """
         kwargs.pop("timeout", None)
         _apply_user_agent(url, kwargs)
-        return _get_client().post(url, **kwargs)
+        response = _get_client().post(url, **kwargs)
+        if response.status_code in _AUTH_REJECTED_STATUSES:
+            raise AuthenticationError(
+                _credentials_rejected_message(
+                    response.status_code, response.reason_phrase
+                )
+            )
+        return response
 
     def get(self, url: str, **kwargs: Any) -> Any:
         """GET via the pooled client."""
@@ -246,8 +300,11 @@ def pooled_json_rpc(url: str, fct_name: str, params: dict[str, Any]) -> Any:
         The ``result`` field of the response (or False if absent).
 
     Raises:
-        ValueError: If the endpoint returns a non-200 HTTP status (e.g. a 413
-            request-too-large, or a 502/504 gateway error whose body is not JSON).
+        AuthenticationError: If the endpoint returns 401/403 — rejected
+            credentials (a wrong or inactive API key), not a permissions issue.
+        ValueError: If the endpoint returns any other non-200 HTTP status (e.g. a
+            413 request-too-large, or a 502/504 gateway error whose body is not
+            JSON).
         JsonRPCException: If Odoo returns a JSON-RPC application-level error.
     """
     data = {
@@ -270,6 +327,12 @@ def pooled_json_rpc(url: str, fct_name: str, params: dict[str, Any]) -> Any:
     # directly, carrying the code and reason phrase so callers can react — e.g.
     # shrink the batch on a 413. Mirrors odoolib's json2 transport, which already
     # raises on a non-200.
+    if response.status_code in _AUTH_REJECTED_STATUSES:
+        # A proxy (or Odoo itself) rejecting the credentials on the RPC channel:
+        # give the same key-not-rights guidance as the json2 path.
+        raise AuthenticationError(
+            _credentials_rejected_message(response.status_code, response.reason_phrase)
+        )
     if response.status_code != 200:
         snippet = " ".join(response.text.split())[:200]
         raise ValueError(

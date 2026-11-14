@@ -84,6 +84,49 @@ def test_get_connection_missing_key_from_dict() -> None:
         get_connection_from_dict(config_dict)
 
 
+@patch("fluvo.lib.conf_lib.odoolib.get_connection")
+def test_api_key_is_accepted_as_password_alias(
+    mock_get_connection: MagicMock,
+) -> None:
+    """`api_key` (Odoo 19 / json2) is routed to odoolib's `password` field."""
+    config_dict = {
+        "hostname": "srv",
+        "database": "db",
+        "login": "user",
+        "api_key": "secret-key",
+        "protocol": "json2",
+    }
+    get_connection_from_dict(config_dict)
+    call_kwargs = mock_get_connection.call_args.kwargs
+    assert call_kwargs.get("password") == "secret-key"
+    # api_key is not an odoolib parameter and must not leak through.
+    assert "api_key" not in call_kwargs
+
+
+@patch("fluvo.lib.conf_lib.odoolib.get_connection")
+def test_password_wins_when_both_password_and_api_key_set(
+    mock_get_connection: MagicMock,
+) -> None:
+    """An explicit `password` takes precedence over a differing `api_key`."""
+    config_dict = {
+        "hostname": "srv",
+        "database": "db",
+        "login": "user",
+        "password": "the-password",
+        "api_key": "a-different-key",
+    }
+    get_connection_from_dict(config_dict)
+    call_kwargs = mock_get_connection.call_args.kwargs
+    assert call_kwargs.get("password") == "the-password"
+
+
+def test_missing_password_hints_at_api_key_alias() -> None:
+    """The missing-password error names `api_key`, so the fix is discoverable."""
+    config_dict = {"hostname": "srv", "database": "db", "login": "user"}
+    with pytest.raises(KeyError, match="api_key"):
+        get_connection_from_dict(config_dict)
+
+
 def test_get_connection_malformed_value_from_dict() -> None:
     """Tests that a ValueError is raised for a malformed value from a dict."""
     config_dict = {
