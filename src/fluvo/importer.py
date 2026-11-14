@@ -301,15 +301,11 @@ def _run_translation_passes(
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
-        # Authoritative count (len of failed_lines). Counting fail-file lines
-        # overcounts when an Odoo error message carries hard newlines, since the
-        # fail CSV is QUOTE_ALL; fall back to a quote-aware record count.
-        failed = int(
-            stats.get(
-                "failed_records",
-                _count_csv_records(fail_file, separator, encoding),
-            )
-        )
+        # Count the fail file itself (quote-aware): it is the artifact the user
+        # is pointed at, and it holds BOTH passes' failures, whereas
+        # stats["failed_records"] is pass-1 only. QUOTE_ALL means an error with
+        # hard newlines spans several physical lines, so a line count overcounts.
+        failed = _count_csv_records(fail_file, separator, encoding)
         written = int(stats.get("created_records", 0)) if success else 0
         if failed:
             log.warning(
@@ -493,13 +489,8 @@ def _run_company_passes(
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
-        # Authoritative count; quote-aware fallback (see translation pass).
-        failed = int(
-            stats.get(
-                "failed_records",
-                _count_csv_records(fail_file, separator, encoding),
-            )
-        )
+        # Count the fail file itself, quote-aware (see translation pass).
+        failed = _count_csv_records(fail_file, separator, encoding)
         written = int(stats.get("created_records", 0)) if success else 0
         if failed:
             log.warning(
@@ -1195,15 +1186,12 @@ def run_import(  # noqa: C901
             )
     else:
         num_imported = len(id_map)
-        # Authoritative failed-record count. Counting physical lines in the fail
-        # file overcounts: it is written QUOTE_ALL, so an Odoo error message with
-        # hard newlines makes one failed record span several lines.
-        num_failed = int(
-            stats.get(
-                "failed_records",
-                _count_csv_records(fail_output_file, separator, encoding),
-            )
-        )
+        # Count the fail file (quote-aware): it is what this message points at and
+        # it holds BOTH passes' failures. stats["failed_records"] is pass-1 only,
+        # so a clean pass 1 + failing pass 2 would wrongly read as 0. QUOTE_ALL
+        # means an error with hard newlines spans several physical lines, so the
+        # old `_count_lines - 1` overcounted.
+        num_failed = _count_csv_records(fail_output_file, separator, encoding)
         Console().print(
             Panel(
                 f"Partial import for [cyan]{model}[/cyan]: "

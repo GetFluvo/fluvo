@@ -146,7 +146,7 @@ class TestCheckReferencesExist:
             }
         }
 
-        missing = preflight._check_references_exist(mock_conn, refs)
+        missing, _unverified = preflight._check_references_exist(mock_conn, refs)
         assert not missing
 
     def test_some_refs_missing(self) -> None:
@@ -165,7 +165,7 @@ class TestCheckReferencesExist:
             }
         }
 
-        missing = preflight._check_references_exist(mock_conn, refs)
+        missing, _unverified = preflight._check_references_exist(mock_conn, refs)
         assert "res.partner" in missing
         assert "base.missing" in missing["res.partner"]["partner_id/id"]
 
@@ -182,7 +182,7 @@ class TestCheckReferencesExist:
             }
         }
 
-        missing = preflight._check_references_exist(mock_conn, refs)
+        missing, _unverified = preflight._check_references_exist(mock_conn, refs)
         assert "res.partner" in missing
         assert "999" in missing["res.partner"]["partner_id"]
 
@@ -197,7 +197,7 @@ class TestCheckReferencesExist:
             }
         }
 
-        missing = preflight._check_references_exist(mock_conn, refs)
+        missing, _unverified = preflight._check_references_exist(mock_conn, refs)
         assert "res.partner" in missing
         assert "not_a_valid_id" in missing["res.partner"]["partner_id"]
 
@@ -220,8 +220,10 @@ class TestCheckReferencesExist:
             }
         }
 
-        missing = preflight._check_references_exist(mock_conn, refs)
+        missing, unverified = preflight._check_references_exist(mock_conn, refs)
         assert not missing  # check failed -> nothing claimed missing
+        # ...but the refs are reported as unverified (unknown), all 50 of them.
+        assert len(unverified["product.template"]["product_tmpl_id/id"]) == 50
 
     def test_db_lookup_failure_is_not_reported_as_missing(self) -> None:
         """A failed database-id lookup is also unknown, not missing."""
@@ -232,8 +234,9 @@ class TestCheckReferencesExist:
 
         refs = {"res.partner": {"partner_id": {"1", "2", "3"}}}
 
-        missing = preflight._check_references_exist(mock_conn, refs)
+        missing, unverified = preflight._check_references_exist(mock_conn, refs)
         assert not missing
+        assert unverified["res.partner"]["partner_id"] == {"1", "2", "3"}
 
     def test_external_lookup_is_chunked(self) -> None:
         """Large id sets are split into small chunks, not one giant domain."""
@@ -253,10 +256,50 @@ class TestCheckReferencesExist:
 
         refs = {"res.partner": {"partner_id/id": {f"base.{n}" for n in names}}}
 
-        missing = preflight._check_references_exist(mock_conn, refs)
+        missing, _unverified = preflight._check_references_exist(mock_conn, refs)
         assert not missing
         # 4500 names / 2000 per chunk -> 3 calls.
         assert ir_model_data.search_read.call_count == 3
+
+    def test_one_failing_chunk_does_not_discard_other_chunks(self) -> None:
+        """A dead chunk only makes ITS ids unverified, not the whole model.
+
+        The surviving chunks still classify normally: ids confirmed absent in a
+        chunk that succeeded are reported missing; ids in the failed chunk are
+        unverified; ids found are neither.
+        """
+        mock_conn = MagicMock()
+        ir_model_data = MagicMock()
+        # 2500 names -> 2 chunks (2000 + 500). The 2nd chunk raises; in the 1st
+        # (surviving) chunk we omit one name from the results so it reads as
+        # genuinely missing. Order of names across chunks is arbitrary (set), so
+        # we record what the mock actually did rather than assume boundaries.
+        names = [f"p{i}" for i in range(2500)]
+        state: dict[str, Any] = {"calls": 0, "failed": set(), "absent": None}
+
+        def _search_read(domain: Any, _fields: Any, **_kw: Any) -> list[dict[str, Any]]:
+            in_leaf = next(leaf for leaf in domain if leaf[0] == "name")
+            chunk = in_leaf[2]
+            state["calls"] += 1
+            if state["calls"] == 2:  # second chunk dies
+                state["failed"].update(chunk)
+                raise RuntimeError("transient on second chunk")
+            # first chunk: omit chunk[0] from results -> confirmed absent
+            state["absent"] = chunk[0]
+            return [{"module": "base", "name": n} for n in chunk[1:]]
+
+        ir_model_data.search_read.side_effect = _search_read
+        mock_conn.get_model.return_value = ir_model_data
+
+        refs = {"res.partner": {"partner_id/id": {f"base.{n}" for n in names}}}
+
+        missing, unverified = preflight._check_references_exist(mock_conn, refs)
+        # The genuinely-absent id in the surviving chunk is still caught...
+        assert missing["res.partner"]["partner_id/id"] == {f"base.{state['absent']}"}
+        # ...while the failed chunk's ids are unverified, not missing.
+        assert unverified["res.partner"]["partner_id/id"] == {
+            f"base.{n}" for n in state["failed"]
+        }
 
 
 class TestReferenceCheck:
@@ -305,7 +348,7 @@ class TestReferenceCheck:
         mock_extract.return_value = {
             "res.partner": {"partner_id/id": {"base.partner_1"}}
         }
-        mock_check.return_value = {}  # No missing refs
+        mock_check.return_value = ({}, {})  # No missing, none unverified
 
         result = preflight.reference_check(
             preflight_mode=PreflightMode.NORMAL,
@@ -340,7 +383,10 @@ class TestReferenceCheck:
             "partner_id": {"type": "many2one", "relation": "res.partner"}
         }
         mock_extract.return_value = {"res.partner": {"partner_id/id": {"base.missing"}}}
-        mock_check.return_value = {"res.partner": {"partner_id/id": {"base.missing"}}}
+        mock_check.return_value = (
+            {"res.partner": {"partner_id/id": {"base.missing"}}},
+            {},
+        )
 
         result = preflight.reference_check(
             preflight_mode=PreflightMode.NORMAL,
@@ -352,6 +398,90 @@ class TestReferenceCheck:
 
         assert result is False
         mock_display.assert_called_once()
+
+    @patch("fluvo.lib.preflight._get_csv_header")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    @patch("fluvo.lib.preflight.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.preflight._extract_references_from_csv")
+    @patch("fluvo.lib.preflight._check_references_exist")
+    @patch("fluvo.lib.preflight._display_missing_references")
+    def test_unverified_refs_fail_mode_aborts(
+        self,
+        mock_display: Any,
+        mock_check: Any,
+        mock_extract: Any,
+        mock_conn: Any,
+        mock_fields: Any,
+        mock_header: Any,
+    ) -> None:
+        """A check that could not verify must NOT pass under --check-refs=fail.
+
+        Regression: an unverifiable check returned empty `missing`, the caller
+        then logged "all verified" and returned True, silently opening the gate.
+        """
+        from fluvo.enums import PreflightMode
+
+        mock_header.return_value = ["id", "name", "partner_id/id"]
+        mock_fields.return_value = {
+            "partner_id": {"type": "many2one", "relation": "res.partner"}
+        }
+        mock_extract.return_value = {"res.partner": {"partner_id/id": {"base.x"}}}
+        # Nothing confirmed missing, but the ref could not be verified.
+        mock_check.return_value = (
+            {},
+            {"res.partner": {"partner_id/id": {"base.x"}}},
+        )
+
+        result = preflight.reference_check(
+            preflight_mode=PreflightMode.NORMAL,
+            model="res.partner",
+            filename="test.csv",
+            config="config.conf",
+            check_refs="fail",
+        )
+
+        assert result is False
+        # No "missing references" panel — nothing was confirmed missing.
+        mock_display.assert_not_called()
+
+    @patch("fluvo.lib.preflight._get_csv_header")
+    @patch("fluvo.lib.preflight._get_odoo_fields")
+    @patch("fluvo.lib.preflight.conf_lib.get_connection_from_config")
+    @patch("fluvo.lib.preflight._extract_references_from_csv")
+    @patch("fluvo.lib.preflight._check_references_exist")
+    @patch("fluvo.lib.preflight._display_missing_references")
+    def test_unverified_refs_warn_mode_continues(
+        self,
+        mock_display: Any,
+        mock_check: Any,
+        mock_extract: Any,
+        mock_conn: Any,
+        mock_fields: Any,
+        mock_header: Any,
+    ) -> None:
+        """Unverifiable refs under --check-refs=warn continue (return True)."""
+        from fluvo.enums import PreflightMode
+
+        mock_header.return_value = ["id", "name", "partner_id/id"]
+        mock_fields.return_value = {
+            "partner_id": {"type": "many2one", "relation": "res.partner"}
+        }
+        mock_extract.return_value = {"res.partner": {"partner_id/id": {"base.x"}}}
+        mock_check.return_value = (
+            {},
+            {"res.partner": {"partner_id/id": {"base.x"}}},
+        )
+
+        result = preflight.reference_check(
+            preflight_mode=PreflightMode.NORMAL,
+            model="res.partner",
+            filename="test.csv",
+            config="config.conf",
+            check_refs="warn",
+        )
+
+        assert result is True
+        mock_display.assert_not_called()
 
     @patch("fluvo.lib.preflight._get_csv_header")
     @patch("fluvo.lib.preflight._get_odoo_fields")
@@ -376,7 +506,10 @@ class TestReferenceCheck:
             "partner_id": {"type": "many2one", "relation": "res.partner"}
         }
         mock_extract.return_value = {"res.partner": {"partner_id/id": {"base.missing"}}}
-        mock_check.return_value = {"res.partner": {"partner_id/id": {"base.missing"}}}
+        mock_check.return_value = (
+            {"res.partner": {"partner_id/id": {"base.missing"}}},
+            {},
+        )
 
         result = preflight.reference_check(
             preflight_mode=PreflightMode.NORMAL,
@@ -486,11 +619,14 @@ class TestSelfReferenceExclusion:
         # IDs defined in this file
         mock_extract_ids.return_value = {"__import__.company_a", "__import__.company_b"}
         # Database check says both are "missing"
-        mock_check.return_value = {
-            "res.partner": {
-                "parent_id/id": {"__import__.company_a", "__import__.external"}
-            }
-        }
+        mock_check.return_value = (
+            {
+                "res.partner": {
+                    "parent_id/id": {"__import__.company_a", "__import__.external"}
+                }
+            },
+            {},
+        )
 
         preflight.reference_check(
             preflight_mode=PreflightMode.NORMAL,
@@ -533,9 +669,10 @@ class TestSelfReferenceExclusion:
         }
         # The "missing" reference is actually defined in the same file
         mock_extract_ids.return_value = {"__import__.company_a", "__import__.contact_1"}
-        mock_check.return_value = {
-            "res.partner": {"parent_id/id": {"__import__.company_a"}}
-        }
+        mock_check.return_value = (
+            {"res.partner": {"parent_id/id": {"__import__.company_a"}}},
+            {},
+        )
 
         result = preflight.reference_check(
             preflight_mode=PreflightMode.NORMAL,
