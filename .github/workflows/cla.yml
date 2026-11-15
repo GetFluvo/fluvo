@@ -8,17 +8,24 @@ name: CLA Assistant
 #
 # How it works: on a PR from a non-allowlisted author, the action posts a comment
 # asking them to sign by replying with the exact sentence below. The signature is
-# recorded in a JSON file on a dedicated `cla-signatures` branch, and the action
-# sets a `license/cla` commit status. Add `license/cla` to master's required
-# status checks (branch protection) to make it a hard merge gate — it lives in its
-# own workflow (it needs `pull_request_target` + `issue_comment` triggers and
-# elevated permissions), so it cannot be folded into the `all-checks` job in
-# tests.yml, which only aggregates jobs within that workflow.
+# recorded in a JSON file on a dedicated `cla-signatures` branch. The gate is this
+# job's own check-run, named `cla`: it FAILS when a committer has not signed and
+# succeeds when everyone has (or is allowlisted). `cla` is a required status check
+# on master. It lives in its own workflow (it needs `pull_request_target` +
+# `issue_comment` triggers and elevated permissions), so it cannot be folded into
+# the `all-checks` job in tests.yml, which only aggregates jobs within that
+# workflow.
 #
-# One-time setup by a maintainer:
-#   * Create a repo secret `PERSONAL_ACCESS_TOKEN` (a PAT with `repo` scope) so the
-#     action can commit signatures to the `cla-signatures` branch.
-#   * Add `license/cla` to the required status checks on `master`.
+# NOTE: the action does not set a separate `license/cla` commit status in v2.6.1 —
+# requiring that context would block every PR on a status that never arrives.
+# Require the `cla` job instead.
+#
+# Setup (done; recorded here so it can be reproduced):
+#   * Repo secret `PERSONAL_ACCESS_TOKEN` — a fine-grained PAT scoped to this repo
+#     with Contents: read & write, so the action can commit signatures.
+#   * The `cla-signatures` branch must EXIST (the action does not create it) and
+#     must stay UNPROTECTED, or the action cannot commit to it.
+#   * `cla` added to the required status checks on `master`.
 
 on:
   issue_comment:
@@ -40,6 +47,11 @@ jobs:
     # which would red-X every PR before the one-time setup is done. Until the
     # PERSONAL_ACCESS_TOKEN secret exists, skip the job cleanly so it doesn't block
     # or alarm; the moment the secret is added, enforcement turns on automatically.
+    #
+    # CAUTION: now that `cla` is a REQUIRED check, this guard is also a silent
+    # failure mode — if the PAT is ever revoked or expires, the job skips, and
+    # GitHub counts a skipped required check as passing. Enforcement would be off
+    # with every PR still green. Re-check this when rotating the token.
     env:
       HAS_PAT: ${{ secrets.PERSONAL_ACCESS_TOKEN != '' }}
     steps:

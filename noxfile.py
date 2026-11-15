@@ -193,7 +193,9 @@ def tests(session: nox.Session) -> None:
     )
 
     session.install("pytest", "coverage", "pytest-mock")
-    session.install("-e", ".")
+    # Install the `flows` extra so the flow-runner tests (which need PyYAML)
+    # run; PyYAML is no longer a core dependency.
+    session.install("-e", ".[flows,images]")
     session.run("pytest", *session.posargs)
 
 
@@ -209,7 +211,7 @@ def e2e(session: nox.Session) -> None:
     FLUVO_E2E_SCALE) for the opt-in stress tier.
     """
     session.install("pytest", "pytest-mock", "pytest-cov", "coverage[toml]")
-    session.install("-e", ".")
+    session.install("-e", ".[flows,images]")
     args = session.posargs or ["-m", "not large"]
     # Override the default addopts (which ignores tests/e2e and runs doctests).
     # Also measure src coverage: the e2e suite drives the import/export engine
@@ -238,7 +240,7 @@ def tests_compiled(session: nox.Session) -> None:
     session.install("pytest", "pytest-mock")
 
     # Install the project WITH the env var to trigger mypyc compilation
-    session.install("-e", ".", env={"FLUVO_COMPILE_MYPYC": "1"})
+    session.install("-e", ".[flows,images]", env={"FLUVO_COMPILE_MYPYC": "1"})
 
     session.run("pytest", *session.posargs)
 
@@ -288,7 +290,7 @@ def typeguard_tests(session: nox.Session) -> None:
     )
 
     session.install("typeguard", "pytest", "pytest-mock")
-    session.install("-e", ".")
+    session.install("-e", ".[flows,images]")
     session.run("pytest", "--typeguard-packages", package, *session.posargs)
 
 

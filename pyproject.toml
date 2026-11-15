@@ -30,7 +30,6 @@ dependencies = [
     "rich",
     "polars",
     "pyarrow",
-    "pyyaml >=6.0",
 ]
 
 
@@ -53,7 +52,6 @@ requires = [
     "rich",
     "polars",
     "pyarrow",
-    "pyyaml >=6.0",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -85,6 +83,9 @@ xdoctest = ["xdoctest[colors] >=0.15.10"]
 # Optional image down-scaling before base64 upload (issue #315). Core stays
 # installable and fully testable without this; only the opt-in resize path needs it.
 images = ["Pillow >=10.0.0"]
+# The declarative flow runner (`fluvo --flow-file`) parses YAML. Core does not,
+# so PyYAML is optional; install with `pip install fluvo[flows]`.
+flows = ["pyyaml >=6.0"]
 
 
 [dependency-groups]
@@ -99,6 +100,8 @@ dev = [
     # Exercise the opt-in image-resize path (#315) in CI; the feature stays
     # optional for users via the `images` extra, guarded by skipif in tests.
     "Pillow >=10.0.0",
+    # Exercise the flow runner (optional `fluvo[flows]` extra) in CI.
+    "pyyaml >=6.0",
 ]
 lint = ["ruff >=0.5.5", "pydoclint >=0.5.0"]
 docs = [

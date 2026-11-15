@@ -1,27 +1,26 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/getfluvo/fluvo/master/docs/_static/icon.png" width="200">
+  <img src="https://raw.githubusercontent.com/GetFluvo/fluvo/master/docs/_static/icon.png" width="200">
 </p>
 
 # Fluvo
 
-[![PyPI](https://img.shields.io/pypi/v/fluvo.svg)][pypi status]
-[![Status](https://img.shields.io/pypi/status/fluvo.svg)][pypi status]
-[![Python Version](https://img.shields.io/pypi/pyversions/fluvo)][pypi status]
-[![License](https://img.shields.io/pypi/l/fluvo)][license]
+[![PyPI](https://img.shields.io/pypi/v/fluvo?style=flat-square&logo=pypi&logoColor=white)][pypi status]
+[![Python Version](https://img.shields.io/pypi/pyversions/fluvo?style=flat-square&logo=python&logoColor=white)][pypi status]
+[![License](https://img.shields.io/pypi/l/fluvo?style=flat-square)][license]
+[![Website](https://img.shields.io/badge/website-getfluvo.com-0a7cff?style=flat-square&logo=googlechrome&logoColor=white)][getfluvo.com]
 
-[![Read the documentation at https://fluvo.readthedocs.io/](https://img.shields.io/readthedocs/fluvo/latest.svg?label=Read%20the%20Docs)][read the docs]
-[![Tests](https://github.com/getfluvo/fluvo/workflows/Tests/badge.svg)][tests]
-[![Codecov](https://codecov.io/gh/getfluvo/fluvo/branch/master/graph/badge.svg)][codecov]
-
-[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)][pre-commit]
-[![Ruff codestyle][ruff badge]][ruff project]
+[![Tests](https://img.shields.io/github/actions/workflow/status/GetFluvo/fluvo/tests.yml?branch=master&style=flat-square&logo=github&label=tests)][tests]
+[![Codecov](https://img.shields.io/codecov/c/github/GetFluvo/fluvo?style=flat-square&logo=codecov&logoColor=white)][codecov]
+[![Docs](https://img.shields.io/readthedocs/fluvo/latest?style=flat-square&logo=readthedocs&logoColor=white&label=docs)][read the docs]
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=flat-square)][ruff project]
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?style=flat-square&logo=pre-commit&logoColor=white)][pre-commit]
 
 [pypi status]: https://pypi.org/project/fluvo/
+[getfluvo.com]: https://getfluvo.com
 [read the docs]: https://fluvo.readthedocs.io/en/latest/
-[tests]: https://github.com/getfluvo/fluvo/actions?workflow=Tests
-[codecov]: https://app.codecov.io/gh/getfluvo/fluvo
+[tests]: https://github.com/GetFluvo/fluvo/actions/workflows/tests.yml
+[codecov]: https://app.codecov.io/gh/GetFluvo/fluvo
 [pre-commit]: https://github.com/pre-commit/pre-commit
-[ruff badge]: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json
 [ruff project]: https://github.com/astral-sh/ruff
 
 **Fluvo is the data-migration engine for Odoo implementation partners.** When you're moving a client onto Odoo — from a legacy ERP, a spreadsheet estate, or an older Odoo — Fluvo turns a migration from a one-shot manual load into a repeatable run you can rehearse on UAT, drive from scripts, and trust in production.
@@ -127,16 +126,15 @@ please [file an issue] with a detailed description — the exact command, the Od
 
 ## Credits
 
-Development of this project is financially supported by [stefcy.com].
+Fluvo is built and maintained by the team at [getfluvo.com].
 
-[stefcy.com]: https://stefcy.com
 [@bosd]: https://github.com/bosd
 [pypi]: https://pypi.org/
-[file an issue]: https://github.com/getfluvo/fluvo/issues
+[file an issue]: https://github.com/GetFluvo/fluvo/issues
 [pip]: https://pip.pypa.io/
 
 <!-- github-only -->
 
-[license]: https://github.com/getfluvo/fluvo/blob/master/LICENSE
-[contributor guide]: https://github.com/getfluvo/fluvo/blob/master/CONTRIBUTING.md
+[license]: https://github.com/GetFluvo/fluvo/blob/master/LICENSE
+[contributor guide]: https://github.com/GetFluvo/fluvo/blob/master/CONTRIBUTING.md
 [command-line reference]: https://fluvo.readthedocs.io/en/latest/usage.html
