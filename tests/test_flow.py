@@ -1,5 +1,6 @@
 """Tests for the declarative flow-file parser/validator (#251)."""
 
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,15 @@ from fluvo.lib.flow import (
     FlowError,
     parse_flow_file,
     select_flows,
+)
+
+# Parsing a flow file needs PyYAML (the optional `fluvo[flows]` extra). Where it
+# is not installed (e.g. a Python without a PyYAML wheel yet), these tests skip
+# rather than fail; the "missing PyYAML gives a clear error" behaviour is still
+# exercised on interpreters where the extra is present.
+pytestmark = pytest.mark.skipif(
+    importlib.util.find_spec("yaml") is None,
+    reason="PyYAML (the fluvo[flows] extra) is not installed",
 )
 
 # A representative valid file used across several tests.

@@ -22,8 +22,27 @@ for f in glob.glob('src/fluvo/*.c'): os.remove(f);
 nox.options.default_venv_backend = "uv"
 
 package = "fluvo"
-python_versions = ["3.12", "3.13", "3.14", "3.11", "3.10"]
+python_versions = ["3.12", "3.13", "3.14", "3.11", "3.10", "3.15"]
 nox.needs_version = ">= 2021.6.6"
+
+# PyYAML (the optional `flows` extra) has no cp315 wheel yet, so on Python 3.15
+# we install the core package only and the flow-runner tests skip themselves
+# (they are guarded by a PyYAML skipif). Everywhere else we install the `flows`
+# extra so the full flow suite runs.
+_NO_FLOWS_WHEEL = {"3.15"}
+
+
+def _install_fluvo(session: nox.Session, **kwargs: object) -> None:
+    """Install the package editable, with the `flows` extra where PyYAML has a wheel.
+
+    Args:
+        session: The active nox session.
+        **kwargs: Extra keyword arguments forwarded to ``session.install``.
+    """
+    target = "." if session.python in _NO_FLOWS_WHEEL else ".[flows]"
+    session.install("-e", target, **kwargs)
+
+
 nox.options.sessions = (
     "pre-commit",
     "mypy",
@@ -195,7 +214,7 @@ def tests(session: nox.Session) -> None:
     session.install("pytest", "coverage", "pytest-mock")
     # Install the `flows` extra so the flow-runner tests (which need PyYAML)
     # run; PyYAML is no longer a core dependency.
-    session.install("-e", ".[flows]")
+    _install_fluvo(session)
     session.run("pytest", *session.posargs)
 
 
@@ -211,7 +230,7 @@ def e2e(session: nox.Session) -> None:
     FLUVO_E2E_SCALE) for the opt-in stress tier.
     """
     session.install("pytest", "pytest-mock", "pytest-cov", "coverage[toml]")
-    session.install("-e", ".[flows]")
+    _install_fluvo(session)
     args = session.posargs or ["-m", "not large"]
     # Override the default addopts (which ignores tests/e2e and runs doctests).
     # Also measure src coverage: the e2e suite drives the import/export engine
@@ -240,7 +259,7 @@ def tests_compiled(session: nox.Session) -> None:
     session.install("pytest", "pytest-mock")
 
     # Install the project WITH the env var to trigger mypyc compilation
-    session.install("-e", ".[flows]", env={"FLUVO_COMPILE_MYPYC": "1"})
+    _install_fluvo(session, env={"FLUVO_COMPILE_MYPYC": "1"})
 
     session.run("pytest", *session.posargs)
 
@@ -290,7 +309,7 @@ def typeguard_tests(session: nox.Session) -> None:
     )
 
     session.install("typeguard", "pytest", "pytest-mock")
-    session.install("-e", ".[flows]")
+    _install_fluvo(session)
     session.run("pytest", "--typeguard-packages", package, *session.posargs)
 
 
