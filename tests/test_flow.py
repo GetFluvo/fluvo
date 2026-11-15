@@ -409,3 +409,22 @@ def test_select_unknown_flow(tmp_path: Path) -> None:
     ff = parse_flow_file(_write(tmp_path, VALID))
     with pytest.raises(FlowError, match="no such flow"):
         select_flows(ff, ["nope"])
+
+
+def test_missing_pyyaml_gives_actionable_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without PyYAML (the optional fluvo[flows] extra), parsing fails clearly."""
+    import builtins
+    from typing import Any
+
+    real_import = builtins.__import__
+
+    def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "yaml" or name.startswith("yaml."):
+            raise ImportError("No module named 'yaml'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    with pytest.raises(FlowError, match=r"fluvo\[flows\]"):
+        parse_flow_file(_write(tmp_path, VALID))
