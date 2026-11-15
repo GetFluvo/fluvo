@@ -18,9 +18,9 @@ Schema (v1)::
         steps:
           - run: import         # import | export | write | migrate
             id: create-partners # optional, unique within the flow
-            with:               # keys are the command's CLI flags, dashes->underscores
+            with:               # the command's PARAMETER names — see note below
               connection_file: "{{ vars.conn }}"
-              file: data/partners.csv
+              filename: data/partners.csv
               model: res.partner
 
 Variable precedence is ``--var`` > ``env.*`` (OS environment) > the ``vars`` block,
@@ -28,6 +28,12 @@ scoped to names the author declared (or passed with ``--var``). ``vars`` may
 reference other vars; they are resolved to a fixed point with cycle detection.
 Connections are always referenced by *file path* — a flow file never contains a
 password.
+
+``with:`` keys are the **click parameter names** of the target command. Those are
+usually the long flag with dashes replaced by underscores — but not always, since a
+flag may declare an explicit parameter name. The one that bites: ``--file`` is the
+parameter ``filename``, so a step writes ``filename:``, not ``file:``. A wrong key
+reaches the command as an unexpected argument and fails there, not at parse time.
 """
 
 import os
