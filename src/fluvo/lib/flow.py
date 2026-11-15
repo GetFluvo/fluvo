@@ -36,8 +36,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
 
-import yaml
-
 SUPPORTED_VERSION = 1
 VALID_COMMANDS = ("import", "export", "write", "migrate")
 VALID_ON_ERROR = ("abort", "continue")
@@ -432,8 +430,27 @@ def parse_flow_file(
     except OSError as exc:
         raise FlowError(f"Could not read flow file '{path}': {exc}") from exc
 
+    # PyYAML is an optional dependency (the `fluvo[flows]` extra): the core
+    # import/export path never needs it, so it is imported lazily here and only
+    # the flow runner requires it to be installed.
     try:
-        data: Any = yaml.safe_load(text)
+        import yaml
+    except ImportError as exc:
+        raise FlowError(
+            "Reading flow files requires PyYAML, which is not installed. "
+            "Install it with:  pip install 'fluvo[flows]'"
+        ) from exc
+
+    # Prefer the libyaml C loader (much faster) when PyYAML was built with it;
+    # fall back to the pure-Python SafeLoader otherwise. Both are *safe* loaders
+    # (no arbitrary object construction from the flow file).
+    loader: Any = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+    try:
+        # S506 is suppressed below: `loader` is always a safe loader
+        # (CSafeLoader or SafeLoader), never the full Loader, so the flow file
+        # cannot instantiate arbitrary objects.
+        data: Any = yaml.load(text, Loader=loader)  # noqa: S506
     except yaml.YAMLError as exc:
         raise FlowError(f"Invalid YAML in flow file '{path}':\n{exc}") from exc
 

@@ -325,7 +325,6 @@ dependencies = [
     { name = "odoo-client-lib" },
     { name = "polars" },
     { name = "pyarrow" },
-    { name = "pyyaml" },
     { name = "rich" },
 ]
 
@@ -349,6 +348,9 @@ docs = [
     { name = "sphinx-click" },
     { name = "sphinx-copybutton" },
     { name = "sphinx-mermaid" },
+]
+flows = [
+    { name = "pyyaml" },
 ]
 lint = [
     { name = "pydoclint" },
@@ -375,6 +377,7 @@ dev = [
     { name = "pygments" },
     { name = "pytest" },
     { name = "pytest-mock" },
+    { name = "pyyaml" },
 ]
 docs = [
     { name = "myst-parser" },
@@ -423,7 +426,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=6.2.5" },
     { name = "pytest-mock", marker = "extra == 'dev'" },
     { name = "pytest-mock", marker = "extra == 'mypy'" },
-    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "pyyaml", marker = "extra == 'flows'", specifier = ">=6.0" },
     { name = "rich" },
     { name = "ruff", marker = "extra == 'lint'", specifier = ">=0.5.5" },
     { name = "shibuya", marker = "extra == 'docs'", specifier = ">=2025.5.30" },
@@ -436,7 +439,7 @@ requires-dist = [
     { name = "types-pyyaml", marker = "extra == 'mypy'", specifier = ">=6.0" },
     { name = "xdoctest", extras = ["colors"], marker = "extra == 'xdoctest'", specifier = ">=0.15.10" },
 ]
-provides-extras = ["dev", "lint", "docs", "mypy", "typeguard", "xdoctest"]
+provides-extras = ["dev", "lint", "docs", "mypy", "typeguard", "xdoctest", "flows"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -447,6 +450,7 @@ dev = [
     { name = "pygments", specifier = ">=2.10.0" },
     { name = "pytest", specifier = ">=6.2.5" },
     { name = "pytest-mock" },
+    { name = "pyyaml", specifier = ">=6.0" },
 ]
 docs = [
     { name = "myst-parser", specifier = ">=3.0.1" },
