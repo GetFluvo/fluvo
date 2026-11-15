@@ -260,7 +260,10 @@ def coverage(session: nox.Session) -> None:
         "click",
         "odoo-client-lib @ git+https://github.com/odoo/odoo-client-lib.git@refs/pull/5/head",
     )
-    session.install("-e", ".")
+    # Install the optional extras too: the flow-runner and image-resize tests
+    # assert on the happy path, so without PyYAML/Pillow they fail here rather
+    # than skip. Keep this list in step with `tests_compiled`.
+    session.install("-e", ".[flows,images]")
     session.log("Running pytest with coverage...")
     session.run("pytest", "--cov=src", "--cov-report=xml", "tests/")
 
