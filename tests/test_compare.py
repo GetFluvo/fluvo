@@ -8,6 +8,9 @@ it, and must not be reported.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import polars as pl
 import pytest
 
@@ -16,6 +19,7 @@ from fluvo.lib.compare import (
     DUTCH,
     CompareError,
     CompareOptions,
+    CompareResult,
     FieldSpec,
     apply_column_map,
     build_field_specs,
@@ -31,7 +35,9 @@ from fluvo.lib.compare import (
 # --------------------------------------------------------------------------
 
 
-def _one(source_value: str, target_value: str, spec: FieldSpec, **options: object):
+def _one(
+    source_value: str, target_value: str, spec: FieldSpec, **options: Any
+) -> CompareResult:
     """Compare a single cell and return the result."""
     source = pl.DataFrame({"k": ["1"], spec.name: [source_value]})
     target = pl.DataFrame({"k": ["1"], spec.name: [target_value]})
@@ -40,11 +46,13 @@ def _one(source_value: str, target_value: str, spec: FieldSpec, **options: objec
         target,
         key="k",
         fields=[spec],
-        options=CompareOptions(**options),  # type: ignore[arg-type]
+        options=CompareOptions(**options),
     )
 
 
-def _differs(source_value: str, target_value: str, spec: FieldSpec, **options) -> bool:
+def _differs(
+    source_value: str, target_value: str, spec: FieldSpec, **options: Any
+) -> bool:
     """True when the two values are reported as a difference."""
     return _one(source_value, target_value, spec, **options).stats.differing_cells == 1
 
@@ -468,7 +476,7 @@ def test_markdown_says_so_when_there_is_nothing_to_report() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_csv_is_read_as_text_so_nothing_is_mangled_twice(tmp_path) -> None:
+def test_csv_is_read_as_text_so_nothing_is_mangled_twice(tmp_path: Path) -> None:
     """Type inference on read would re-apply the mangling being looked for."""
     path = tmp_path / "rows.csv"
     path.write_text("code;qty\n007;1,50\n", encoding="utf-8")
@@ -477,7 +485,7 @@ def test_csv_is_read_as_text_so_nothing_is_mangled_twice(tmp_path) -> None:
     assert frame.row(0) == ("007", "1,50")
 
 
-def test_excel_round_trip(tmp_path) -> None:
+def test_excel_round_trip(tmp_path: Path) -> None:
     """A workbook reads back as text, leading zeros intact."""
     pytest.importorskip("fastexcel")
     pytest.importorskip("xlsxwriter")
@@ -488,7 +496,7 @@ def test_excel_round_trip(tmp_path) -> None:
     assert frame.row(0)[0] == "007"
 
 
-def test_unreadable_file_is_reported_with_its_path(tmp_path) -> None:
+def test_unreadable_file_is_reported_with_its_path(tmp_path: Path) -> None:
     """A read failure names the file."""
     with pytest.raises(CompareError, match="Could not read"):
         read_source_file(str(tmp_path / "missing.csv"))

@@ -7,7 +7,9 @@ options object, and the exit codes a pipeline relies on.
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import polars as pl
 from click.testing import CliRunner
@@ -28,11 +30,13 @@ def _result(**stats: int) -> CompareResult:
         duplicate_target_keys=_EMPTY,
         unkeyed_source=_EMPTY,
         unkeyed_target=_EMPTY,
-        stats=CompareStats(**stats),  # type: ignore[arg-type]
+        stats=CompareStats(**stats),
     )
 
 
-def _invoke(tmp_path, *extra: str, result: CompareResult | None = None):
+def _invoke(
+    tmp_path: Path, *extra: str, result: CompareResult | None = None
+) -> tuple[Any, MagicMock]:
     """Run `fluvo compare` with the connection and source files stubbed out."""
     connection = tmp_path / "connection.conf"
     connection.write_text("[Connection]\n", encoding="utf-8")
@@ -59,7 +63,7 @@ def _invoke(tmp_path, *extra: str, result: CompareResult | None = None):
     return invocation, run_compare
 
 
-def test_options_reach_run_compare(tmp_path) -> None:
+def test_options_reach_run_compare(tmp_path: Path) -> None:
     """The command is a thin wrapper: every flag lands on the call."""
     invocation, run_compare = _invoke(
         tmp_path,
@@ -78,7 +82,7 @@ def test_options_reach_run_compare(tmp_path) -> None:
     assert kwargs["options"].case_insensitive is True
 
 
-def test_locale_and_date_order_are_explicit_choices(tmp_path) -> None:
+def test_locale_and_date_order_are_explicit_choices(tmp_path: Path) -> None:
     """Both default to the European reading and can be flipped."""
     _, run_compare = _invoke(tmp_path)
     options = run_compare.call_args.kwargs["options"]
@@ -91,13 +95,13 @@ def test_locale_and_date_order_are_explicit_choices(tmp_path) -> None:
     assert options.date_order == "mdy"
 
 
-def test_numeric_coercion_can_be_turned_off(tmp_path) -> None:
+def test_numeric_coercion_can_be_turned_off(tmp_path: Path) -> None:
     """Leading zeros become reportable again with one flag."""
     _, run_compare = _invoke(tmp_path, "--no-numeric-coercion")
     assert run_compare.call_args.kwargs["options"].numeric_coercion is False
 
 
-def test_map_builds_the_rename_dict(tmp_path) -> None:
+def test_map_builds_the_rename_dict(tmp_path: Path) -> None:
     """--map is repeatable and splits on the first '=' only."""
     _, run_compare = _invoke(
         tmp_path, "--map", "BTW nummer=vat", "--map", "Klant naam=name"
@@ -108,14 +112,14 @@ def test_map_builds_the_rename_dict(tmp_path) -> None:
     }
 
 
-def test_malformed_map_is_rejected(tmp_path) -> None:
+def test_malformed_map_is_rejected(tmp_path: Path) -> None:
     """A --map without '=' is a usage error, not a silent no-op."""
     invocation, _ = _invoke(tmp_path, "--map", "vat")
     assert invocation.exit_code != 0
     assert "Sheet Column=odoo_field" in invocation.output
 
 
-def test_malformed_domain_is_rejected(tmp_path) -> None:
+def test_malformed_domain_is_rejected(tmp_path: Path) -> None:
     """A domain that is not a list literal fails before any connection is made."""
     invocation, run_compare = _invoke(tmp_path, "--domain", "not-a-domain")
     assert invocation.exit_code != 0
@@ -123,14 +127,14 @@ def test_malformed_domain_is_rejected(tmp_path) -> None:
     run_compare.assert_not_called()
 
 
-def test_malformed_context_is_rejected(tmp_path) -> None:
+def test_malformed_context_is_rejected(tmp_path: Path) -> None:
     """Same for a context that is not a dict literal."""
     invocation, run_compare = _invoke(tmp_path, "--context", "[1, 2]")
     assert invocation.exit_code != 0
     run_compare.assert_not_called()
 
 
-def test_fail_on_difference_sets_the_exit_code(tmp_path) -> None:
+def test_fail_on_difference_sets_the_exit_code(tmp_path: Path) -> None:
     """For CI: a clean comparison exits 0, a dirty one exits 1."""
     dirty = _result(matched_records=1, differing_records=1)
     invocation, _ = _invoke(tmp_path, "--fail-on-difference", result=dirty)
@@ -141,14 +145,14 @@ def test_fail_on_difference_sets_the_exit_code(tmp_path) -> None:
     assert invocation.exit_code == 0
 
 
-def test_differences_alone_do_not_fail_the_command(tmp_path) -> None:
+def test_differences_alone_do_not_fail_the_command(tmp_path: Path) -> None:
     """Without the flag, differences are a report, not an error."""
     dirty = _result(matched_records=1, differing_records=1)
     invocation, _ = _invoke(tmp_path, result=dirty)
     assert invocation.exit_code == 0
 
 
-def test_a_setup_error_is_shown_and_exits_one(tmp_path) -> None:
+def test_a_setup_error_is_shown_and_exits_one(tmp_path: Path) -> None:
     """A CompareError surfaces as a panel, not a traceback."""
     connection = tmp_path / "connection.conf"
     connection.write_text("[Connection]\n", encoding="utf-8")
