@@ -8,8 +8,10 @@ Processor for each row of the source data.
 """
 
 import base64
+import io
 import os
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, cast
 
 import httpx
@@ -19,6 +21,7 @@ from .internal.exceptions import SkippingError
 from .internal.tools import to_m2m, to_m2o
 
 __all__ = [
+    "ImageResize",
     "binary",
     "binary_url_map",
     "binary_url_to_base64",
@@ -55,6 +58,104 @@ LineDict = dict[str, Any]
 StateDict = dict[str, Any]
 MapperFunc = Callable[[LineDict, StateDict], Any]
 ListMapperFunc = Callable[[LineDict, StateDict], list[str]]
+
+
+_IMAGES_EXTRA_HINT = (
+    "Image resizing requires Pillow, which is not installed. "
+    "Install it with:  pip install 'fluvo[images]'"
+)
+
+
+@dataclass(frozen=True)
+class ImageResize:
+    """Opt-in down-scaling applied to image bytes before base64 encoding (#315).
+
+    Odoo stores image fields at most 1920px wide/high (``image_1920``), so
+    shrinking a larger original to that bound is lossless in Odoo terms while
+    cutting the base64 payload by an order of magnitude. Resizing is opt-in:
+    the image mappers encode the original bytes unchanged unless an
+    ``ImageResize`` is supplied, and an image already within ``max_dimension``
+    is passed through untouched (never re-encoded).
+    """
+
+    max_dimension: int = 1920
+    quality: int = 85
+
+
+def _resize_image_bytes(content: bytes, resize: ImageResize) -> bytes:
+    """Down-scale image ``content`` to a JPEG within ``resize.max_dimension``.
+
+    Orientation is honoured (EXIF transpose) before the size is measured, and
+    images with alpha or a palette are flattened onto white before the JPEG
+    encode. An image already within the bound is returned unchanged, so nothing
+    is needlessly re-encoded. The function degrades rather than corrupts:
+    bytes that are not a decodable image, or that Pillow cannot process, are
+    returned unchanged with a warning.
+
+    Args:
+        content: The raw image bytes.
+        resize: The target bound and JPEG quality.
+
+    Returns:
+        bytes: The re-encoded JPEG bytes, or ``content`` unchanged when the
+        image is already small enough or could not be decoded.
+
+    Raises:
+        ImportError: If Pillow (the ``fluvo[images]`` extra) is not installed.
+    """
+    try:
+        from PIL import Image, ImageOps
+    except ImportError as e:
+        raise ImportError(_IMAGES_EXTRA_HINT) from e
+
+    try:
+        with Image.open(io.BytesIO(content)) as opened:
+            # Honour orientation before measuring, else a rotated portrait reads
+            # as landscape and the wrong side is bounded.
+            img = ImageOps.exif_transpose(opened)
+            if max(img.size) <= resize.max_dimension:
+                return content  # already within bounds: do not re-encode
+
+            if img.mode in ("RGBA", "LA", "PA", "P"):
+                # JPEG has no alpha; flatten any transparency onto white.
+                rgba = img.convert("RGBA")
+                background = Image.new("RGB", rgba.size, (255, 255, 255))
+                background.paste(rgba, mask=rgba.split()[-1])
+                img = background
+            elif img.mode != "RGB":
+                img = img.convert("RGB")
+
+            img.thumbnail(
+                (resize.max_dimension, resize.max_dimension),
+                Image.Resampling.LANCZOS,
+            )
+            buffer = io.BytesIO()
+            img.save(buffer, format="JPEG", quality=resize.quality)
+            return buffer.getvalue()
+    except Exception as e:  # Pillow raises many exception types on bad input
+        log.warning(
+            f"Could not resize image ({e}); passing the original bytes through."
+        )
+        return content
+
+
+def _encode_image_bytes(content: bytes, resize: ImageResize | None) -> str:
+    """Base64-encode image bytes, optionally resizing first.
+
+    With ``resize`` as ``None`` the result is byte-identical to encoding
+    ``content`` directly, so existing callers are unaffected.
+
+    Args:
+        content: The raw image bytes.
+        resize: The resize configuration, or ``None`` to encode as-is.
+
+    Returns:
+        str: The base64-encoded (and optionally resized) image as an ASCII
+        string.
+    """
+    if resize is not None:
+        content = _resize_image_bytes(content, resize)
+    return base64.b64encode(content).decode("utf-8")
 
 
 def _get_field_value(line: LineDict, field: str, default: Any = None) -> Any:
@@ -586,13 +687,19 @@ def record(mapping: dict[str, MapperFunc]) -> MapperFunc:
     return record_fun
 
 
-def binary(field: str, path_prefix: str = "", skip: bool = False) -> MapperFunc:
+def binary(
+    field: str,
+    path_prefix: str = "",
+    skip: bool = False,
+    resize: ImageResize | None = None,
+) -> MapperFunc:
     """Returns a mapper that converts a local file to a base64 string.
 
     Args:
         field: The source column containing the path to the file.
         path_prefix: An optional prefix to prepend to the file path.
         skip: If True, raises SkippingError if the file is not found.
+        resize: Optional image down-scaling (#315); None encodes bytes as-is.
 
     Returns:
         A mapper function that returns the base64 encoded string.
@@ -606,7 +713,7 @@ def binary(field: str, path_prefix: str = "", skip: bool = False) -> MapperFunc:
         full_path = os.path.join(path_prefix, filepath)
         try:
             with open(full_path, "rb") as f:
-                return base64.b64encode(f.read()).decode("utf-8")
+                return _encode_image_bytes(f.read(), resize)
         except FileNotFoundError as e:
             if skip:
                 raise SkippingError(f"File not found at '{full_path}'") from e
@@ -619,12 +726,14 @@ def binary(field: str, path_prefix: str = "", skip: bool = False) -> MapperFunc:
 def binary_url_to_base64(
     field: str,
     skip_on_fail: bool = False,
+    resize: ImageResize | None = None,
 ) -> MapperFunc:
     """Returns a mapper that downloads a file from a URL and converts to base64.
 
     Args:
         field: The source column containing the URL.
         skip_on_fail: If True, raises SkippingError if the URL cannot be fetched.
+        resize: Optional image down-scaling (#315); None encodes bytes as-is.
 
     Returns:
         A mapper function that returns the base64 encoded string, an empty string,
@@ -641,7 +750,7 @@ def binary_url_to_base64(
         try:
             response = httpx.get(url, timeout=10)
             response.raise_for_status()
-            return base64.b64encode(response.content).decode("utf-8")
+            return _encode_image_bytes(response.content, resize)
         except httpx.HTTPError as e:
             if skip_on_fail:
                 raise SkippingError(f"Cannot fetch file at URL '{url}': {e}") from e
@@ -812,13 +921,14 @@ def split_file_number(file_nb: int) -> Callable[[LineDict, int], int]:
 
 
 def path_to_image(
-    field: str, path: str
+    field: str, path: str, resize: ImageResize | None = None
 ) -> Callable[[dict[str, Any], dict[str, Any]], str | None]:
     """Returns a mapper that converts a local file path to a base64 string.
 
     Args:
         field: The column name containing the relative path to the image.
         path: The base directory where the image files are located.
+        resize: Optional image down-scaling (#315); None encodes bytes as-is.
     """
 
     def _mapper(row: dict[str, Any], state: dict[str, Any]) -> str | None:
@@ -834,7 +944,7 @@ def path_to_image(
         try:
             with open(full_path, "rb") as image_file:
                 content = image_file.read()
-            return base64.b64encode(content).decode("utf-8")
+            return _encode_image_bytes(content, resize)
         except OSError as e:
             log.error(f"Could not read file {full_path}: {e}")
             return None

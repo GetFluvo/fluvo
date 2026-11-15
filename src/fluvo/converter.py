@@ -9,8 +9,26 @@ import base64
 import polars as pl
 
 from .lib import mapper
+from .lib.mapper import ImageResize
 from .lib.transform import Processor
 from .logging_config import log
+
+
+def _build_resize(max_dimension: int | None, quality: int) -> ImageResize | None:
+    """Build an :class:`ImageResize` from CLI-style knobs, or None when off.
+
+    Args:
+        max_dimension: The longest-side bound in pixels, or None to disable
+            resizing (the default, so output is unchanged for existing callers).
+        quality: The JPEG quality used when an image is re-encoded.
+
+    Returns:
+        ImageResize | None: An :class:`ImageResize` when ``max_dimension`` is
+        set, else ``None``.
+    """
+    if max_dimension is None:
+        return None
+    return ImageResize(max_dimension=max_dimension, quality=quality)
 
 
 def to_base64(filepath: str) -> str:
@@ -29,13 +47,18 @@ def run_path_to_image(
     out: str,
     path: str,
     delimiter: str = ";",
+    max_dimension: int | None = None,
+    quality: int = 85,
 ) -> None:
     """Path to image.
 
-    Converts local file paths in specified columns
-    into base64 encoded strings.
+    Converts local file paths in specified columns into base64 encoded strings.
+    When ``max_dimension`` is set, each image is down-scaled to that bound and
+    re-encoded as JPEG before encoding (#315); left as None, images are encoded
+    unchanged.
     """
     log.info(f"Starting path-to-image conversion for file: {file}")
+    resize = _build_resize(max_dimension, quality)
     o2o_mapping = Processor(
         source_filename=file, mapping={}, separator=delimiter
     ).get_o2o_mapping()
@@ -43,7 +66,10 @@ def run_path_to_image(
     # Create the final mapping, overriding the image path fields
     mapping = {
         **o2o_mapping,
-        **{f: mapper.path_to_image(f, path=path) for f in fields.split(",")},
+        **{
+            f: mapper.path_to_image(f, path=path, resize=resize)
+            for f in fields.split(",")
+        },
     }
 
     processor = Processor(
@@ -72,18 +98,24 @@ def run_url_to_image(
     out: str,
     delimiter: str = ";",
     b64: bool = False,
+    max_dimension: int | None = None,
+    quality: int = 85,
 ) -> None:
     """URL to image.
 
     Downloads images from URLs in specified columns and converts them to base64.
+    When ``max_dimension`` is set, each image is down-scaled to that bound and
+    re-encoded as JPEG before encoding (#315); left as None, images are encoded
+    unchanged.
     """
     log.info(f"Starting URL-to-image conversion for file: {file}")
+    resize = _build_resize(max_dimension, quality)
     o2o_mapping = Processor(
         mapping={}, source_filename=file, separator=delimiter
     ).get_o2o_mapping()
     mapping = {
         **o2o_mapping,
-        **{f: mapper.binary_url_to_base64(f) for f in fields.split(",")},
+        **{f: mapper.binary_url_to_base64(f, resize=resize) for f in fields.split(",")},
     }
 
     # FIX: Initialize processor with the correct mapping
