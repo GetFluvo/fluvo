@@ -82,6 +82,16 @@ uid = 2
     uv pip install fluvo
     ```
 
+### Optional extras
+
+The core package stays lean. Some features pull in extra dependencies, installed via extras:
+
+```bash
+uv pip install "fluvo[flows]"   # the declarative flow runner (`fluvo --flow-file`), needs PyYAML
+```
+
+If you run `fluvo --flow-file` without the `flows` extra, Fluvo fails with a clear message telling you to install it.
+
 ## 5. Installing for Development
 
 If you want to contribute to the project or test the latest unreleased changes, you can install the library directly from the source code.
