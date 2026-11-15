@@ -11,6 +11,7 @@ importing_data
 dataframe_api
 choosing_options
 exporting_data
+comparing_against_a_spreadsheet
 exporting_data_for_modules
 data_transformations
 configuration

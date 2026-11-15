@@ -82,6 +82,9 @@ docs = [
 mypy = ["mypy >=0.930", "pytest-mock", "types-pyyaml >=6.0"]
 typeguard = ["typeguard >=2.13.3"]
 xdoctest = ["xdoctest[colors] >=0.15.10"]
+# Spreadsheet reading for `fluvo compare` (issue #298). Core stays installable
+# without it; only reading .xlsx/.ods needs an engine.
+excel = ["fastexcel >=0.12"]
 
 
 [dependency-groups]
@@ -93,6 +96,11 @@ dev = [
     "pygments >=2.10.0",
     "nox >=2024.04.14",
     "pytest-mock",
+    # Exercise the spreadsheet-reading path of `fluvo compare` (#298) in CI; the
+    # feature stays optional for users via the `excel` extra. xlsxwriter is only
+    # needed to *write* the .xlsx a test then reads back.
+    "fastexcel >=0.12",
+    "xlsxwriter >=3.2",
 ]
 lint = ["ruff >=0.5.5", "pydoclint >=0.5.0"]
 docs = [
