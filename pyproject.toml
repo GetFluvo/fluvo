@@ -80,6 +80,9 @@ docs = [
 mypy = ["mypy >=0.930", "pytest-mock", "types-pyyaml >=6.0"]
 typeguard = ["typeguard >=2.13.3"]
 xdoctest = ["xdoctest[colors] >=0.15.10"]
+# Spreadsheet reading for `fluvo compare` (issue #298). Core stays installable
+# without it; only reading .xlsx/.ods needs an engine.
+excel = ["fastexcel >=0.12"]
 # Optional image down-scaling before base64 upload (issue #315). Core stays
 # installable and fully testable without this; only the opt-in resize path needs it.
 images = ["Pillow >=10.0.0"]
@@ -97,6 +100,11 @@ dev = [
     "pygments >=2.10.0",
     "nox >=2024.04.14",
     "pytest-mock",
+    # Exercise the spreadsheet-reading path of `fluvo compare` (#298) in CI; the
+    # feature stays optional for users via the `excel` extra. xlsxwriter is only
+    # needed to *write* the .xlsx a test then reads back.
+    "fastexcel >=0.12",
+    "xlsxwriter >=3.2",
     # Exercise the opt-in image-resize path (#315) in CI; the feature stays
     # optional for users via the `images` extra, guarded by skipif in tests.
     "Pillow >=10.0.0",

@@ -2094,6 +2094,207 @@ def assess_cmd(
     )
 
 
+@cli.command(name="compare")
+@click.option(
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
+)
+@click.option(
+    "--protocol",
+    type=click.Choice(
+        ["xmlrpc", "xmlrpcs", "jsonrpc", "jsonrpcs", "json2", "json2s"],
+        case_sensitive=False,
+    ),
+    default=None,
+    help="RPC protocol to use. Defaults to the config file's, or xmlrpc.",
+)
+@click.option("--model", required=True, help="The Odoo model to compare against.")
+@click.option(
+    "--file",
+    "source_file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="The spreadsheet (.xlsx/.ods) or delimited file to compare.",
+)
+@click.option("--sheet", default=None, help="Worksheet name (default: the first).")
+@click.option("-s", "--sep", "separator", default=";", help="CSV separator character.")
+@click.option(
+    "--key",
+    required=True,
+    help="Business key column(s), comma-separated for a composite key. Must be "
+    "present on both sides (e.g. 'vat' or 'default_code,company_id').",
+)
+@click.option(
+    "--fields",
+    default=None,
+    help="Comma-separated fields to compare. Defaults to the file's columns that "
+    "exist as fields on the model.",
+)
+@click.option(
+    "--map",
+    "column_map",
+    multiple=True,
+    help="Rename a spreadsheet column to the Odoo field it holds, as "
+    "'Sheet Column=odoo_field'. Repeatable.",
+)
+@click.option("--domain", default="[]", help="Odoo domain filter as a list string.")
+@click.option(
+    "--context",
+    default="{}",
+    help="Odoo context as a dictionary string, e.g. \"{'lang': 'nl_NL'}\".",
+)
+@click.option(
+    "--locale",
+    type=click.Choice(["dutch", "anglo"], case_sensitive=False),
+    default="dutch",
+    show_default=True,
+    help="How the FILE writes numbers: 'dutch' (1.234,56) or 'anglo' (1,234.56). "
+    "Never guessed -- an inverted guess misreads values by a factor of a thousand.",
+)
+@click.option(
+    "--date-order",
+    type=click.Choice(["dmy", "mdy", "iso"], case_sensitive=False),
+    default="dmy",
+    show_default=True,
+    help="How to read an all-numeric date in the file: 05-01-2024 as 5 January "
+    "(dmy), 1 May (mdy), or ISO dates only.",
+)
+@click.option(
+    "--numeric-coercion/--no-numeric-coercion",
+    default=True,
+    show_default=True,
+    help="Treat two text values that both parse as the same number as equal. This "
+    "is what stops Excel's '007' -> 7 mangling producing false differences; turn "
+    "it off when leading zeros are meaningful and you want them reported.",
+)
+@click.option(
+    "--case-insensitive",
+    is_flag=True,
+    default=False,
+    help="Ignore case when comparing text and relation values.",
+)
+@click.option(
+    "--float-decimals",
+    default=6,
+    show_default=True,
+    type=int,
+    help="Decimal places a numeric value is rounded to before comparison.",
+)
+@click.option(
+    "--datetime-granularity",
+    type=click.Choice(["second", "date"], case_sensitive=False),
+    default="second",
+    show_default=True,
+    help="Compare datetimes to the second, or only by their date.",
+)
+@click.option(
+    "--format",
+    "report_format",
+    type=click.Choice(["table", "json", "markdown"], case_sensitive=False),
+    default="table",
+    show_default=True,
+    help="Report format for the console (and --output).",
+)
+@click.option(
+    "--output",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="Also write the report to this file (JSON, or Markdown with "
+    "--format markdown).",
+)
+@click.option(
+    "--write-fixes",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="Write a Fluvo-loadable CSV of the file's values for the differing "
+    "records. Review it, then load it with `fluvo import` -- compare itself never "
+    "writes to Odoo.",
+)
+@click.option(
+    "--fail-on-difference",
+    is_flag=True,
+    default=False,
+    help="Exit with status 1 when anything differs. For CI and nightly checks.",
+)
+def compare_cmd(**kwargs: Any) -> None:
+    """Compare an Odoo model against a spreadsheet (read-only).
+
+    Answers "does what's in Odoo match this file?" without the false differences a
+    generic diff produces: numbers, leading zeros Excel ate, Dutch booleans, Excel
+    date serials, many2one labels and selection labels are all normalised first.
+    """
+    from .lib.compare import ANGLO, DUTCH, CompareError, CompareOptions, run_compare
+    from .lib.internal.ui import _show_error_panel
+
+    config: str | dict[str, Any] = kwargs["connection_file"]
+    if kwargs["protocol"]:
+        config = {
+            "_config_file": kwargs["connection_file"],
+            "protocol": kwargs["protocol"],
+        }
+
+    column_map: dict[str, str] = {}
+    for pair in kwargs["column_map"]:
+        if "=" not in pair:
+            raise click.BadParameter(
+                f"--map expects 'Sheet Column=odoo_field', got '{pair}'."
+            )
+        source_column, odoo_field = pair.split("=", 1)
+        column_map[source_column.strip()] = odoo_field.strip()
+
+    try:
+        domain = ast.literal_eval(kwargs["domain"])
+        if not isinstance(domain, list):
+            raise ValueError("not a list")
+    except (ValueError, SyntaxError) as exc:
+        raise click.BadParameter(
+            f"--domain must be an Odoo domain list literal, got '{kwargs['domain']}'."
+        ) from exc
+    try:
+        context = ast.literal_eval(kwargs["context"])
+        if not isinstance(context, dict):
+            raise ValueError("not a dict")
+    except (ValueError, SyntaxError) as exc:
+        raise click.BadParameter(
+            f"--context must be a dict literal, got '{kwargs['context']}'."
+        ) from exc
+
+    options = CompareOptions(
+        locale=ANGLO if kwargs["locale"].lower() == "anglo" else DUTCH,
+        date_order=kwargs["date_order"].lower(),
+        numeric_coercion=kwargs["numeric_coercion"],
+        case_insensitive=kwargs["case_insensitive"],
+        float_decimals=kwargs["float_decimals"],
+        datetime_granularity=kwargs["datetime_granularity"].lower(),
+    )
+
+    try:
+        result = run_compare(
+            config=config,
+            model=kwargs["model"],
+            file=kwargs["source_file"],
+            key=kwargs["key"],
+            fields=kwargs["fields"],
+            column_map=column_map or None,
+            domain=domain,
+            context=context,
+            delimiter=kwargs["separator"],
+            sheet=kwargs["sheet"],
+            options=options,
+            fmt=kwargs["report_format"].lower(),
+            output=kwargs["output"],
+            write_fixes=kwargs["write_fixes"],
+        )
+    except CompareError as exc:
+        _show_error_panel("Comparison failed", str(exc))
+        raise SystemExit(1) from exc
+
+    if kwargs["fail_on_difference"] and not result.stats.clean:
+        raise SystemExit(1)
+
+
 @cli.command(name="export")
 @click.option(
     "--connection-file",
