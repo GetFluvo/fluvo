@@ -10,6 +10,12 @@ name: Dependabot auto-merge
 #     run the PR's code — we only call the GitHub API via `gh`. No untrusted code runs.
 #   * `gh pr merge --auto` enables auto-merge; the branch-protection `all-checks`
 #     gate holds the actual merge until the full CI matrix passes.
+#
+# No self-approval: master requires no PR review, and GitHub forbids the Actions
+# token from approving PRs ("GitHub Actions is not permitted to approve pull
+# requests"). A `gh pr review --approve` here only fails the step and blocks the
+# merge — so we don't do it. If a review requirement is ever added to master,
+# approve with a dedicated app/PAT, not the default GITHUB_TOKEN.
 
 on: pull_request_target
 
@@ -35,7 +41,6 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr review --approve "$PR_URL"
           gh pr merge --auto --squash "$PR_URL"
 
       - name: Comment on held major bumps
