@@ -75,6 +75,9 @@ guides/index
 reference
 faq
 contributing
+Support <support>
+Security <security>
+Channel charter <channel-charter>
 Code of Conduct <codeofconduct>
 License <license>
 Changelog <https://github.com/getfluvo/fluvo/releases>

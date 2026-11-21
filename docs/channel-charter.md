@@ -1,0 +1,3 @@
+```{include} ../CHANNEL-CHARTER.md
+
+```
