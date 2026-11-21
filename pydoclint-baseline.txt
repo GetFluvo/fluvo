@@ -7,7 +7,6 @@ src/fluvo/export_threaded.py
     DOC203: Method `RPCThreadExport._execute_batch` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['tuple[list[dict[str, Any]], list[int]]']; docstring return section types: ['A tuple containing']
     DOC201: Function `_clean_and_transform_batch` does not have a return section in docstring
     DOC203: Function `_clean_and_transform_batch` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
-    DOC203: Function `_enrich_main_df_with_xml_ids` return type(s) in docstring not consistent with the return annotation. Return annotation types: ['pl.DataFrame']; docstring return section types: ['']
     DOC101: Function `_process_export_batches`: Docstring contains fewer arguments than in function signature.
     DOC103: Function `_process_export_batches`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [encoding: str, enrich_main_xml_id: bool, fields_info: dict[str, dict[str, Any]], is_resuming: bool, model_name: str, output: str | None, rpc_thread: 'RPCThreadExport', separator: str, session_dir: Path | None, streaming: bool, total_ids: int].
     DOC201: Function `_process_export_batches` does not have a return section in docstring
