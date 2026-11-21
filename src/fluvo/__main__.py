@@ -2072,15 +2072,54 @@ def write_cmd(connection_file: str, **kwargs: Any) -> None:
     show_default=True,
     help="Report format for the console (and --output).",
 )
+@click.option(
+    "--profile",
+    is_flag=True,
+    default=False,
+    help=(
+        "Also read a sample of rows and profile the VALUES: fill rates, "
+        "order-of-magnitude populations (mixed units), date-format drift, "
+        "dirty enumerations, and unqualified value fields."
+    ),
+)
+@click.option(
+    "--group-by",
+    default=None,
+    help=(
+        "With --profile: repeat the numeric population test within each value "
+        "of this field, where the model has it (e.g. categ_id)."
+    ),
+)
+@click.option(
+    "--profile-limit",
+    type=int,
+    default=None,
+    show_default="10000",
+    help="With --profile: maximum rows read per model.",
+)
+@click.option(
+    "--decimal-comma",
+    is_flag=True,
+    default=False,
+    help=(
+        "With --profile: the data uses comma as the decimal separator. "
+        "Never guessed, because an inverted guess changes every numeric finding."
+    ),
+)
 def assess_cmd(
     connection_file: str,
     protocol: str | None,
     models: str | None,
     output: str | None,
     report_format: str,
+    profile: bool,
+    group_by: str | None,
+    profile_limit: int | None,
+    decimal_comma: bool,
 ) -> None:
     """Assess a source Odoo for migration: inventory, volumes, and risk flags."""
-    from .lib.assess import run_assess
+    from .lib.assess import DEFAULT_PROFILE_LIMIT, run_assess
+    from .lib.mangling import ANGLO, DUTCH
 
     config: str | dict[str, Any] = connection_file
     if protocol:
@@ -2091,6 +2130,12 @@ def assess_cmd(
         models=model_list,
         output=output,
         fmt=report_format.lower(),
+        profile=profile,
+        group_by=group_by,
+        profile_limit=(
+            profile_limit if profile_limit is not None else DEFAULT_PROFILE_LIMIT
+        ),
+        locale=DUTCH if decimal_comma else ANGLO,
     )
 
 

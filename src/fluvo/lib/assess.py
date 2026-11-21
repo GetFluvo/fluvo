@@ -7,6 +7,14 @@ fields, non-importable computed fields, binaries). The output is meant to be
 handed to a prospect in place of a paid discovery call, so it renders both to the
 console and to a machine-readable JSON / Markdown artifact.
 
+With ``--profile`` (issue #349) it additionally reads a bounded sample of rows
+and runs :mod:`fluvo.lib.profiling` over the values, which catches the
+data-quality problems metadata cannot see: two unit populations sharing one
+numeric column, date-format drift, dirty enumerations, and a value field whose
+qualifier (unit of measure, currency, language) is left empty. The sample is
+capped and the cap is reported, because a fill rate from a sample is an
+estimate and saying so is the whole point of an assessment.
+
 The analysis engine (:func:`assess_model`) is pure: it takes ``fields_get``
 metadata plus a row count and returns a structured summary, so it is fully
 unit-testable without a live Odoo. :func:`run_assess` is the thin connector.
@@ -15,12 +23,15 @@ unit-testable without a live Odoo. :func:`run_assess` is the thin connector.
 import json
 from typing import Any
 
+import polars as pl
 from rich.console import Console
 from rich.table import Table
 
 from ..logging_config import log
 from . import conf_lib
 from .internal.ui import _show_error_panel
+from .mangling import ANGLO, Locale
+from .profiling import looks_like_qualifier, profile_frame
 
 # A curated default set of common migration models, used when --models is omitted.
 DEFAULT_MODELS = (
@@ -36,6 +47,20 @@ DEFAULT_MODELS = (
     "stock.picking",
     "crm.lead",
 )
+
+#: Default ceiling on rows read per model for ``--profile``. Profiling reads
+#: values, so it is the one part of ``assess`` that is not cheap on a large
+#: database; the cap keeps a free assessment from hammering a prospect's server.
+DEFAULT_PROFILE_LIMIT = 10_000
+
+#: Odoo field types profiled as numbers.
+_NUMERIC_TYPES = frozenset({"integer", "float", "monetary"})
+
+#: Odoo field types profiled as dates.
+_DATE_TYPES = frozenset({"date", "datetime"})
+
+#: Odoo field types profiled as enumerations.
+_ENUM_TYPES = frozenset({"selection", "char"})
 
 
 def assess_model(
@@ -92,6 +117,143 @@ def assess_model(
             "relational": relational,
         },
     }
+
+
+def select_profile_fields(
+    odoo_fields: dict[str, Any],
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    """Choose which of a model's fields are worth reading values for.
+
+    Binaries, text/html blobs and one2many/many2many fields are excluded: they
+    are expensive to transfer and there is nothing a value profile can say
+    about them. Relational many2one fields are read only when their name reads
+    as a *qualifier* (unit of measure, currency, language), because that is the
+    cross-field check in :func:`fluvo.lib.profiling.profile_qualifier_pairs`.
+
+    Args:
+        odoo_fields: The model's ``fields_get()`` metadata.
+
+    Returns:
+        tuple[list[str], list[str], list[str], list[str]]: Numeric, date,
+        enumeration and qualifier field names, each sorted.
+    """
+    numeric: list[str] = []
+    dates: list[str] = []
+    enums: list[str] = []
+    qualifiers: list[str] = []
+    for name, info in odoo_fields.items():
+        ftype = info.get("type", "unknown")
+        if ftype in _NUMERIC_TYPES:
+            numeric.append(name)
+        elif ftype in _DATE_TYPES:
+            dates.append(name)
+        elif ftype in _ENUM_TYPES:
+            enums.append(name)
+        if ftype == "many2one" and looks_like_qualifier(name):
+            qualifiers.append(name)
+    return sorted(numeric), sorted(dates), sorted(enums), sorted(qualifiers)
+
+
+def _scalar(value: Any) -> str | None:
+    """Flatten one Odoo RPC value to a string, or None when it is unset.
+
+    Odoo returns ``False`` for any unset scalar and ``[id, display_name]`` for
+    a set many2one, so a raw ``search_read`` result is not a rectangular table
+    of scalars until this has run over it.
+
+    Args:
+        value: A single value from a ``search_read`` row.
+
+    Returns:
+        str | None: The value as a string, or None when unset.
+    """
+    if value is None or value is False:
+        return None
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return None
+        # many2one comes back as [id, display_name]; the name is what a human
+        # reads in a report, and it is what makes a qualifier legible.
+        return str(value[-1])
+    return str(value)
+
+
+def rows_to_frame(rows: list[dict[str, Any]], columns: list[str]) -> pl.DataFrame:
+    """Build a string-typed Polars frame from ``search_read`` output.
+
+    Everything becomes ``pl.String``, including numbers: the profiling engine
+    parses numerics itself under an explicit locale, and a uniform dtype avoids
+    the mixed ``False`` / number / list columns Odoo returns.
+
+    Args:
+        rows: Rows from ``search_read``.
+        columns: Field names to include, in order.
+
+    Returns:
+        pl.DataFrame: One column per requested field, all ``pl.String``.
+    """
+    data = {column: [_scalar(row.get(column)) for row in rows] for column in columns}
+    return pl.DataFrame(data, schema={column: pl.String for column in columns})
+
+
+def _profile_model(
+    conn: Any,
+    model: str,
+    odoo_fields: dict[str, Any],
+    row_count: int | None,
+    limit: int,
+    group_by: str | None,
+    locale: Locale,
+) -> dict[str, Any] | None:
+    """Read a bounded sample of one model and profile its values.
+
+    Args:
+        conn: An open Odoo connection.
+        model: The model's technical name.
+        odoo_fields: The model's ``fields_get()`` metadata.
+        row_count: Total records, or None when it could not be counted.
+        limit: Maximum rows to read.
+        group_by: Field to repeat the numeric population test within, when the
+            model has it.
+        locale: Decimal/thousands convention for numeric parsing.
+
+    Returns:
+        dict[str, Any] | None: The profile, with ``sampled``, ``total`` and
+        ``sampled_all`` recording what it was computed from; or None when the
+        model has no profilable field or could not be read.
+    """
+    numeric, dates, enums, qualifiers = select_profile_fields(odoo_fields)
+    columns = sorted(set(numeric + dates + enums + qualifiers))
+    if not columns:
+        log.debug(f"Nothing to profile on '{model}': no profilable fields.")
+        return None
+
+    group = group_by if group_by and group_by in odoo_fields else None
+    if group and group not in columns:
+        columns.append(group)
+
+    try:
+        rows = conn.get_model(model).search_read([], columns, limit=limit)
+    except Exception as e:
+        log.warning(f"Could not read values for '{model}' to profile it ({e}).")
+        return None
+    if not rows:
+        return None
+
+    frame = rows_to_frame(rows, columns)
+    profile = profile_frame(
+        frame,
+        numeric=numeric,
+        dates=dates,
+        enums=enums,
+        locale=locale,
+        group_by=group,
+    )
+    profile["sampled"] = frame.height
+    profile["total"] = row_count
+    profile["sampled_all"] = row_count is not None and frame.height >= row_count
+    profile["group_by"] = group
+    return profile
 
 
 def _risk_summary(risks: dict[str, Any]) -> str:
@@ -181,6 +343,212 @@ def to_markdown(assessments: list[dict[str, Any]]) -> str:
             f"{a['field_total']} | {risk} |"
         )
     lines.append("")
+    profile_section = profile_markdown(assessments)
+    if profile_section:
+        lines.append(profile_section)
+    return "\n".join(lines)
+
+
+def _fill_pct(fill: dict[str, Any]) -> str:
+    """Format a fill rate as a percentage string."""
+    return f"{fill['fill_rate'] * 100:.0f}%"
+
+
+def _decades_str(decades: dict[str, Any]) -> str:
+    """Render a decade histogram as ``1eN:share`` pairs, most populous first."""
+    total = sum(int(v) for v in decades.values()) or 1
+    parts = [
+        f"1e{d}:{100 * int(n) / total:.0f}%"
+        for d, n in sorted(decades.items(), key=lambda kv: int(kv[0]))
+    ]
+    return " ".join(parts)
+
+
+def profile_findings(assessments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Flatten every model's profile into one list of flagged findings.
+
+    Only flagged columns are returned. A report that lists every clean column
+    buries the finding, and the per-model counts in the summary line already
+    say how much was looked at.
+
+    Args:
+        assessments: Per-model assessments, some carrying a ``profile`` key.
+
+    Returns:
+        list[dict[str, Any]]: One entry per flagged column or qualifier pair,
+        with ``model``, ``column``, ``kind``, ``fill``, ``flags`` and ``detail``.
+    """
+    findings: list[dict[str, Any]] = []
+    for assessment in assessments:
+        profile = assessment.get("profile")
+        if not profile:
+            continue
+        model = assessment["model"]
+        for report in profile["columns"]:
+            if not report["flags"]:
+                continue
+            findings.append(
+                {
+                    "model": model,
+                    "column": report["column"],
+                    "kind": report["kind"],
+                    "fill": _fill_pct(report["fill"]),
+                    "flags": list(report["flags"]),
+                    "detail": _finding_detail(report),
+                }
+            )
+        for pair in profile["qualifiers"]:
+            findings.append(
+                {
+                    "model": model,
+                    "column": pair["value_column"],
+                    "kind": "qualifier",
+                    "fill": f"{pair['value_fill_rate'] * 100:.0f}%",
+                    "flags": list(pair["flags"]),
+                    "detail": (
+                        f"`{pair['qualifier_column']}` is only "
+                        f"{pair['qualifier_fill_rate'] * 100:.0f}% filled"
+                    ),
+                }
+            )
+    return findings
+
+
+def _finding_detail(report: dict[str, Any]) -> str:
+    """Build the one-line evidence string for a flagged column.
+
+    Args:
+        report: A per-column profile from :mod:`fluvo.lib.profiling`.
+
+    Returns:
+        str: Human-readable evidence for why the column was flagged.
+    """
+    kind = report["kind"]
+    if kind == "numeric":
+        bits = [f"decades {_decades_str(report['decades'])}"]
+        whole, decimal = report["whole"], report["decimal"]
+        if "whole-vs-decimal" in report["flags"]:
+            bits.append(
+                f"whole n={whole['count']} at 1e{whole['median_decade']} vs "
+                f"decimal n={decimal['count']} at 1e{decimal['median_decade']}"
+            )
+        groups = report.get("groups") or []
+        if groups:
+            bits.append(f"{len(groups)} group(s) also split")
+        return "; ".join(bits)
+    if kind == "date":
+        formats = ", ".join(f"{k}={v}" for k, v in report["formats"].items())
+        detail = f"formats {formats}"
+        if report["ambiguous"]:
+            detail += f"; {report['ambiguous']} day/month-ambiguous"
+        return detail
+    if kind == "enumeration":
+        bits = [f"{report['distinct']} distinct"]
+        if report["collisions"]:
+            shown = "; ".join(" / ".join(g) for g in report["collisions"][:3])
+            bits.append(f"collisions: {shown}")
+        if report["tail"]:
+            bits.append(f"{len(report['tail'])} tail value(s)")
+        return "; ".join(bits)
+    return ""
+
+
+def render_profile_table(assessments: list[dict[str, Any]]) -> None:
+    """Print the value-profiling findings as a second rich table.
+
+    Args:
+        assessments: Per-model assessments, some carrying a ``profile`` key.
+    """
+    console = Console()
+    findings = profile_findings(assessments)
+    profiled = [a for a in assessments if a.get("profile")]
+    if not profiled:
+        return
+
+    for assessment in profiled:
+        profile = assessment["profile"]
+        scope = (
+            "all rows"
+            if profile["sampled_all"]
+            else f"{profile['sampled']:,} of {_fmt_count(profile['total'])} rows"
+        )
+        console.print(
+            f"[dim]{assessment['model']}: profiled "
+            f"{len(profile['columns'])} column(s) over {scope}[/dim]"
+        )
+
+    if not findings:
+        console.print("[green]Value profiling found nothing to flag.[/green]")
+        return
+
+    table = Table(title="Value profiling findings", expand=False)
+    table.add_column("Model", style="cyan", no_wrap=True)
+    table.add_column("Column", style="yellow", no_wrap=True)
+    table.add_column("Kind")
+    table.add_column("Fill", justify="right")
+    table.add_column("Flags", style="red")
+    table.add_column("Evidence")
+    for finding in findings:
+        table.add_row(
+            finding["model"],
+            finding["column"],
+            finding["kind"],
+            finding["fill"],
+            ", ".join(finding["flags"]),
+            finding["detail"],
+        )
+    console.print(table)
+
+
+def profile_markdown(assessments: list[dict[str, Any]]) -> str:
+    """Render the value-profiling findings as a Markdown section.
+
+    Args:
+        assessments: Per-model assessments, some carrying a ``profile`` key.
+
+    Returns:
+        str: The Markdown section, or an empty string when nothing was profiled.
+    """
+    profiled = [a for a in assessments if a.get("profile")]
+    if not profiled:
+        return ""
+
+    lines = ["## Value profiling", ""]
+    for assessment in profiled:
+        profile = assessment["profile"]
+        scope = (
+            "all rows"
+            if profile["sampled_all"]
+            else f"a sample of {profile['sampled']:,} of "
+            f"{_fmt_count(profile['total'])} rows"
+        )
+        lines.append(
+            f"- `{assessment['model']}`: {len(profile['columns'])} column(s) "
+            f"profiled over {scope}."
+        )
+    lines.append("")
+
+    findings = profile_findings(assessments)
+    if not findings:
+        lines.append("Nothing was flagged.")
+        lines.append("")
+        return "\n".join(lines)
+
+    lines.append(
+        "Fill rates computed from a sample are estimates. A flag is a question "
+        "to ask, not a defect: it says the column holds more than one kind of "
+        "value, and someone has to say which kind is correct."
+    )
+    lines.append("")
+    lines.append("| Model | Column | Kind | Fill | Flags | Evidence |")
+    lines.append("| --- | --- | --- | ---: | --- | --- |")
+    for finding in findings:
+        lines.append(
+            f"| `{finding['model']}` | `{finding['column']}` | {finding['kind']} "
+            f"| {finding['fill']} | {', '.join(finding['flags'])} "
+            f"| {finding['detail']} |"
+        )
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -263,6 +631,10 @@ def run_assess(  # noqa: C901
     models: list[str] | None = None,
     output: str | None = None,
     fmt: str = "table",
+    profile: bool = False,
+    group_by: str | None = None,
+    profile_limit: int = DEFAULT_PROFILE_LIMIT,
+    locale: Locale = ANGLO,
 ) -> list[dict[str, Any]]:
     """Assess the requested models on the source Odoo and emit a report (PLAN 2.2).
 
@@ -273,6 +645,15 @@ def run_assess(  # noqa: C901
         output: If given, also write the report (JSON or Markdown per ``fmt``,
             defaulting to JSON) to this path.
         fmt: Console/report format: ``table`` (default), ``json`` or ``markdown``.
+        profile: Also read a bounded sample of rows and profile the values
+            (issue #349). Off by default: it is the only part of ``assess``
+            that transfers data rather than metadata.
+        group_by: Field to repeat the numeric population test within, where the
+            model has it — a unit mix invisible across a whole table is often
+            obvious inside one product category.
+        profile_limit: Maximum rows read per model when profiling.
+        locale: Decimal/thousands convention used to parse numeric values.
+            Never inferred, because an inverted guess changes every finding.
 
     Returns:
         list[dict[str, Any]]: The per-model assessments (also for programmatic use).
@@ -318,6 +699,18 @@ def run_assess(  # noqa: C901
             dist = _company_distribution(conn, model)
             if dist is not None:
                 assessment["company_distribution"] = dist
+        if profile:
+            model_profile = _profile_model(
+                conn,
+                model,
+                odoo_fields,
+                row_count,
+                profile_limit,
+                group_by,
+                locale,
+            )
+            if model_profile is not None:
+                assessment["profile"] = model_profile
         assessments.append(assessment)
 
     if not assessments:
@@ -334,6 +727,8 @@ def run_assess(  # noqa: C901
         Console().print(to_markdown(assessments))
     else:
         render_table(assessments)
+        if profile:
+            render_profile_table(assessments)
 
     if output:
         document = (
