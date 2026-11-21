@@ -119,10 +119,17 @@ Distributed under the terms of the [LGPL 3.0 license][license],
 _Fluvo_ is free and open source software.
 It began as, and remains a derivative of, `odoo_csv_import` by Thibault Francois — see [NOTICE](NOTICE) for attribution.
 
-## Issues
+## Support and issues
 
 If you hit a problem mid-migration,
 please [file an issue] with a detailed description — the exact command, the Odoo version, and what reconciliation reported all help.
+[SUPPORT.md][support] says where to ask, what makes a report fixable, and what response you can expect.
+
+Found a security problem? Do not open a public issue — see [SECURITY.md][security].
+
+If you implement Odoo for clients, the [channel charter][channel charter] states what we commit to
+as a vendor who also does migration work: we do not hold the end-client relationship on your
+projects, and we do not bid against you on work you brought us into.
 
 ## Credits
 
@@ -138,3 +145,6 @@ Fluvo is built and maintained by the team at [getfluvo.com].
 [license]: https://github.com/GetFluvo/fluvo/blob/master/LICENSE
 [contributor guide]: https://github.com/GetFluvo/fluvo/blob/master/CONTRIBUTING.md
 [command-line reference]: https://fluvo.readthedocs.io/en/latest/usage.html
+[support]: https://github.com/GetFluvo/fluvo/blob/master/SUPPORT.md
+[security]: https://github.com/GetFluvo/fluvo/blob/master/SECURITY.md
+[channel charter]: https://github.com/GetFluvo/fluvo/blob/master/CHANNEL-CHARTER.md
