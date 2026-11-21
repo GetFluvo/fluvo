@@ -41,9 +41,10 @@ of your next pitch, knowing your toolchain?**
    generic we learn may improve Fluvo; nothing specific becomes an example, a case
    study or a sales page without your written agreement.
 
-6. **Paying us never buys capability others lack in the core.** Commercial agreements
-   change what we commit to — response times, a named contact, who carries the risk.
-   They do not unlock features. The engine is the same engine for everyone.
+6. **Paying us never takes anything out of the core.** The engine — everything that
+   moves your data — is LGPL-3.0 and is the same engine for everyone. Commercial
+   products exist alongside it, for proving and reporting on a migration rather than
+   performing one. We will never move an existing core capability behind them.
 
 ## What we do take directly
 
