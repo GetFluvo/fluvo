@@ -12,8 +12,14 @@ module is that normalisation layer plus a frame-to-frame comparator:
 
 * :func:`compare_frames` — pure, ``DataFrame`` in / results out. No Odoo
   connection, no file I/O, so the whole trap table below is unit-testable offline.
-* :func:`run_compare` — the thin connector: read the workbook, export the model,
+* :func:`run_compare` — the thin connector: read the source, export the model,
   look up the field types, render.
+
+The two sides are symmetric, so the source does not have to be a spreadsheet.
+:func:`read_source_file` reads a workbook; :func:`read_source_odoo` reads a second
+Odoo instance over RPC (``--against-connection``, issue #350), which is the
+overlap check a migration needs — old instance against new, no intermediate file.
+Same comparator either way; only the reader differs.
 
 The traps it closes, each of which a naive ``str(a) == str(b)`` gets wrong:
 
@@ -867,6 +873,87 @@ def read_source_file(
     return typed.select(pl.all().cast(pl.String, strict=False))
 
 
+def _export_frame(
+    config: str | dict[str, Any],
+    model: str,
+    fields: list[str],
+    *,
+    domain: list[Any] | None = None,
+    context: dict[str, Any] | None = None,
+    side: str = "Odoo",
+) -> pl.DataFrame:
+    """Export one Odoo model into an all-text frame.
+
+    Everything is cast to ``String`` because the comparator canonicalises text:
+    the typed values :func:`~fluvo.dataframe.export_dataframe` returns would make
+    each kind need its own code path for no gain.
+
+    Args:
+        config: A connection config file path, or a config dict.
+        model: The Odoo model to export.
+        fields: Field specifiers, in Fluvo's export syntax.
+        domain: An Odoo search domain.
+        context: An Odoo context.
+        side: Named in the error message, so a failure says *which* Odoo failed.
+
+    Returns:
+        pl.DataFrame: All columns as ``String``.
+
+    Raises:
+        CompareError: If the export fails.
+    """
+    from ..dataframe import FluvoError, export_dataframe
+
+    try:
+        frame = export_dataframe(
+            config, model, fields, domain=domain or [], context=context or {}
+        )
+    except FluvoError as exc:
+        raise CompareError(f"{side}: {exc}") from exc
+    return frame.select(pl.all().cast(pl.String, strict=False))
+
+
+def read_source_odoo(
+    config: str | dict[str, Any],
+    model: str,
+    fields: list[str],
+    *,
+    domain: list[Any] | None = None,
+    context: dict[str, Any] | None = None,
+) -> pl.DataFrame:
+    """Read the comparison's source side from a second Odoo instance.
+
+    The spreadsheet adapter's counterpart (issue #350). Comparing two live
+    instances was always possible — ``fluvo export`` one side, then compare the
+    file — and this only removes the intermediate file.
+
+    One thing it is **not** is a locale question. Odoo writes dot decimals and ISO
+    dates whatever the user's language, so a caller comparing two Odoo instances
+    wants :data:`ODOO_LOCALE` on *both* sides; :func:`run_compare` sets that.
+
+    A failing export propagates :exc:`CompareError` from :func:`_export_frame`,
+    naming the source side so it is clear which of the two instances failed.
+
+    Args:
+        config: Connection config path or dict for the **source** instance.
+        model: The model to read, same name as on the target.
+        fields: The key and compared field specifiers.
+        domain: An Odoo search domain limiting the source records.
+        context: An Odoo context for the source read.
+
+    Returns:
+        pl.DataFrame: All columns as ``String``.
+    """
+    return _export_frame(
+        config,
+        model,
+        list(dict.fromkeys(fields)),
+        domain=domain,
+        context=context,
+        side="source Odoo",
+    )
+
+
 def apply_column_map(df: pl.DataFrame, mapping: dict[str, str]) -> pl.DataFrame:
     """Rename spreadsheet columns to the Odoo field names they correspond to.
 
@@ -1164,12 +1251,63 @@ def _resolve_fields(
     return names
 
 
+def _source_fields_check(
+    config: str | dict[str, Any],
+    model: str,
+    names: list[str],
+    target_fields: dict[str, Any],
+) -> None:
+    """Check the source Odoo declares what is being compared, and agrees on types.
+
+    A migration's whole point is that the two instances differ, so a field missing
+    on the source is a normal, reportable situation rather than a crash — and a
+    field that is an integer on one side and a char on the other is exactly the
+    kind of thing a comparison should say out loud before producing numbers.
+
+    Args:
+        config: Connection config for the source instance.
+        model: The model being compared.
+        names: Key and field specifiers.
+        target_fields: ``fields_get()`` of the target, for the type cross-check.
+
+    Raises:
+        CompareError: If the source model cannot be read, or lacks a field.
+    """
+    try:
+        source_fields = _connect(config).get_model(model).fields_get()
+    except Exception as exc:
+        raise CompareError(
+            f"Could not read the fields of '{model}' on the source Odoo: {exc}"
+        ) from exc
+
+    bases = list(dict.fromkeys(n.split("/")[0] for n in names))
+    missing = [b for b in bases if b not in source_fields]
+    if missing:
+        raise CompareError(
+            f"The source Odoo's '{model}' has no field(s) {missing}. The two "
+            "instances differ there, so there is nothing to compare: drop them "
+            "from --key/--fields, or compare the instances' own field names with "
+            "two separate runs."
+        )
+    for base in bases:
+        here = str(source_fields[base].get("type", ""))
+        there = str(target_fields.get(base, {}).get("type", ""))
+        if there and here != there:
+            log.warning(
+                f"Field '{base}' is '{here}' on the source Odoo and '{there}' on "
+                f"the target. Comparing it as the target's type."
+            )
+
+
 def run_compare(  # noqa: C901
     config: str | dict[str, Any],
     model: str,
-    file: str,
+    file: str | None,
     key: str,
     *,
+    against_connection: str | dict[str, Any] | None = None,
+    against_domain: list[Any] | None = None,
+    against_context: dict[str, Any] | None = None,
     fields: str | None = None,
     column_map: dict[str, str] | None = None,
     domain: list[Any] | None = None,
@@ -1181,18 +1319,35 @@ def run_compare(  # noqa: C901
     output: str | None = None,
     write_fixes: str | None = None,
 ) -> CompareResult:
-    """Compare one Odoo model against one spreadsheet, and report.
+    """Compare one Odoo model against a spreadsheet or a second Odoo, and report.
+
+    Exactly one source must be given: ``file`` for a workbook or delimited file,
+    or ``against_connection`` for a second Odoo instance (issue #350).
+
+    When the source is an Odoo instance, both sides are read with
+    :data:`ODOO_LOCALE` and ISO dates regardless of ``options`` — Odoo writes dot
+    decimals and ISO dates whatever the user's language, so a spreadsheet locale
+    would be the wrong question to ask.
 
     Args:
-        config: A connection config file path, or a config dict.
-        model: The Odoo model to compare against.
-        file: Path to the workbook or delimited file.
+        config: A connection config file path, or a config dict, for the target.
+        model: The Odoo model to compare against, on both sides.
+        file: Path to the workbook or delimited source file, or None when
+            ``against_connection`` names a source Odoo instead.
         key: Comma-separated business key column(s) present on both sides.
+        against_connection: Connection config path or dict for a source **Odoo**
+            instance, instead of ``file``.
+        against_domain: Odoo search domain for the source read. Defaults to
+            ``domain``, so one filter covers both sides; pass ``[]`` for no
+            filter on the source.
+        against_context: Odoo context for the source read. Defaults to ``context``.
         fields: Comma-separated fields to compare. Defaults to the file's columns
-            that the model declares as fields.
+            that the model declares as fields, and is **required** with
+            ``against_connection``, where there are no file columns to infer from.
         column_map: ``{spreadsheet_column: odoo_field}`` renames applied first.
-        domain: Odoo search domain limiting the exported records.
-        context: Odoo context for the export (e.g. ``{"lang": "nl_NL"}``).
+            Not applicable to an Odoo source, which already uses field names.
+        domain: Odoo search domain limiting the target records.
+        context: Odoo context for the target export (e.g. ``{"lang": "nl_NL"}``).
         delimiter: Field separator, for a delimited source file.
         sheet: Worksheet name, for a workbook.
         options: Locale and comparison settings.
@@ -1205,20 +1360,37 @@ def run_compare(  # noqa: C901
         CompareResult: The buckets and the counts.
 
     Raises:
-        CompareError: If the model has no such fields, or the export fails.
+        CompareError: If no source or both sources are given, if the model has no
+            such fields, or if either export fails.
     """
     from rich.console import Console
 
     from .internal.ui import _show_error_panel
+
+    if (file is None) == (against_connection is None):
+        raise CompareError(
+            "Give exactly one source: a file to compare against, or "
+            "--against-connection for a second Odoo instance."
+        )
 
     options = options or CompareOptions()
     key_names = [k.strip() for k in key.split(",") if k.strip()]
     if not key_names:
         raise CompareError("--key needs at least one column name.")
 
-    source = read_source_file(file, delimiter=delimiter, sheet=sheet)
-    if column_map:
-        source = apply_column_map(source, column_map)
+    source_label = "file" if file is not None else "source Odoo"
+    target_label = "Odoo" if file is not None else "target Odoo"
+
+    source: pl.DataFrame | None = None
+    if file is not None:
+        source = read_source_file(file, delimiter=delimiter, sheet=sheet)
+        if column_map:
+            source = apply_column_map(source, column_map)
+    elif column_map:
+        raise CompareError(
+            "--map renames spreadsheet columns, and an Odoo source already uses "
+            "field names. Drop --map, or name the fields in --fields."
+        )
 
     connection = _connect(config)
     try:
@@ -1226,13 +1398,38 @@ def run_compare(  # noqa: C901
     except Exception as exc:
         raise CompareError(f"Could not read the fields of '{model}': {exc}") from exc
 
-    field_names = _resolve_fields(fields, source.columns, key_names, odoo_fields)
+    if source is None and not fields:
+        raise CompareError(
+            "--fields is required when comparing two Odoo instances: there are no "
+            "file columns to infer from, and comparing every field of a model "
+            "reports churn (write_date, computed values) rather than drift."
+        )
+    field_names = _resolve_fields(
+        fields, source.columns if source is not None else [], key_names, odoo_fields
+    )
     unknown = [n for n in key_names + field_names if n.split("/")[0] not in odoo_fields]
     if unknown:
         raise CompareError(
             f"Model '{model}' has no field(s) {unknown}. Check the spelling, or use "
             "--map to pair the spreadsheet's column with the Odoo field."
         )
+
+    if against_connection is not None:
+        _source_fields_check(
+            against_connection, model, key_names + field_names, odoo_fields
+        )
+        source = read_source_odoo(
+            against_connection,
+            model,
+            [*key_names, *field_names],
+            domain=against_domain if against_domain is not None else domain,
+            context=against_context if against_context is not None else context,
+        )
+        # Both sides now speak Odoo, so the spreadsheet locale is the wrong
+        # question: a dot is a decimal point and a date is ISO, on both sides.
+        options = replace(options, locale=ODOO_LOCALE, date_order="iso")
+    if source is None:  # pragma: no cover - the XOR check above rules this out
+        raise CompareError("No source side to compare.")
 
     # 'id' is exported alongside so a fix file can address each record, even when
     # the user did not ask for it. '.id' goes with it: when a selection or binary
@@ -1249,19 +1446,14 @@ def run_compare(  # noqa: C901
     if not mixes_subfields:
         export_fields.insert(1, ".id")
     export_fields = list(dict.fromkeys(export_fields))
-    from ..dataframe import FluvoError, export_dataframe
-
-    try:
-        target = export_dataframe(
-            config,
-            model,
-            export_fields,
-            domain=domain or [],
-            context=context or {},
-        )
-    except FluvoError as exc:
-        raise CompareError(str(exc)) from exc
-    target = target.select(pl.all().cast(pl.String, strict=False))
+    target = _export_frame(
+        config,
+        model,
+        export_fields,
+        domain=domain,
+        context=context,
+        side=target_label,
+    )
 
     specs = build_field_specs(field_names, odoo_fields)
     key_specs = build_field_specs(key_names, odoo_fields)
@@ -1276,14 +1468,28 @@ def run_compare(  # noqa: C901
 
     fmt = fmt.lower()
     if fmt == "json":
-        Console().print_json(to_json(result, model))
+        Console().print_json(
+            to_json(result, model, source_label=source_label, target_label=target_label)
+        )
     elif fmt == "markdown":
-        Console().print(to_markdown(result, model))
+        Console().print(
+            to_markdown(
+                result, model, source_label=source_label, target_label=target_label
+            )
+        )
     else:
-        render_table(result, model)
+        render_table(
+            result, model, source_label=source_label, target_label=target_label
+        )
     if output:
         text = (
-            to_markdown(result, model) if fmt == "markdown" else to_json(result, model)
+            to_markdown(
+                result, model, source_label=source_label, target_label=target_label
+            )
+            if fmt == "markdown"
+            else to_json(
+                result, model, source_label=source_label, target_label=target_label
+            )
         )
         with open(output, "w", encoding="utf-8") as handle:
             handle.write(text)
