@@ -514,32 +514,41 @@ def _clean_and_transform_batch(  # noqa: C901
     return casted_df.select(list(polars_schema.keys()))
 
 
+#: Temporary join column, so enrichment never depends on the source column's dtype.
+_RES_ID_COLUMN = "__fluvo_res_id"
+
+
 def _enrich_main_df_with_xml_ids(
     df: pl.DataFrame, connection: Any, model_name: str
 ) -> pl.DataFrame:
-    """Enriches a DataFrame with XML IDs for the main records.
+    """Replace the batch's numeric record ids with their external ids.
 
-    This function takes a DataFrame containing a '.id' column with numeric
-    database IDs, fetches their corresponding external XML IDs from Odoo,
-    and uses them to populate the 'id' column, preserving the '.id' column.
+    The database ids are read from ``.id`` when the caller asked for that
+    column, and from ``id`` itself otherwise — the latter is the case the read
+    path reaches when nothing but a ``selection`` or ``binary`` field in the
+    header forced it (#339), where ``id`` would otherwise be emitted as a
+    database id and silently create duplicates on re-import.
 
     Args:
-        df: The Polars DataFrame to enrich. Must contain an '.id' column.
+        df: The Polars DataFrame to enrich. Must contain ``.id`` or ``id``.
         connection: The active Odoo connection object.
         model_name: The name of the Odoo model being exported.
 
     Returns:
-        The enriched DataFrame with the 'id' column populated with XML IDs
-        and the '.id' column preserved.
+        pl.DataFrame: The enriched frame -- ``id`` holds external ids, and no
+        column is added or removed. ``.id``, when present, is preserved.
     """
-    if ".id" not in df.columns:
-        log.warning("'.id' column not found, cannot perform main XML ID enrichment.")
+    source_column = ".id" if ".id" in df.columns else "id"
+    if source_column not in df.columns:
+        log.warning(
+            "Neither '.id' nor 'id' is present; cannot perform main XML ID enrichment."
+        )
         return df
 
-    db_ids = df.get_column(".id").unique().drop_nulls().to_list()
+    ids = df.get_column(source_column).cast(pl.Int64, strict=False)
+    db_ids = ids.unique().drop_nulls().to_list()
     if not db_ids:
         log.debug("No database IDs found to enrich; ensuring 'id' is empty.")
-        # Overwrite 'id' with nulls, keep '.id'
         return df.with_columns(pl.lit(None, dtype=pl.String).alias("id"))
 
     log.info(f"Fetching XML IDs for {len(db_ids)} main records...")
@@ -551,7 +560,11 @@ def _enrich_main_df_with_xml_ids(
     )
 
     if not xml_id_data:
-        log.warning(f"No XML IDs found for the exported {model_name} records.")
+        log.warning(
+            f"No XML IDs found for the exported {model_name} records. Their 'id' "
+            "column is empty: re-importing those rows creates new records rather "
+            "than updating them."
+        )
         return df.with_columns(pl.lit(None, dtype=pl.String).alias("id"))
 
     df_xml_ids = (
@@ -563,9 +576,22 @@ def _enrich_main_df_with_xml_ids(
         .unique(subset=["res_id"], keep="first")
     )
 
-    # Join to get the xml_id, overwrite 'id', and drop temporary columns.
-    df_enriched = df.join(df_xml_ids, left_on=".id", right_on="res_id", how="left")
-    return df_enriched.with_columns(pl.col("xml_id").alias("id")).drop("xml_id")
+    # Join on a temporary column so 'id' can be the source and the target.
+    df_enriched = (
+        df.with_columns(ids.alias(_RES_ID_COLUMN))
+        .join(df_xml_ids, left_on=_RES_ID_COLUMN, right_on="res_id", how="left")
+        .with_columns(pl.col("xml_id").alias("id"))
+        .drop("xml_id", _RES_ID_COLUMN, strict=False)
+        .select(df.columns)
+    )
+    missing = df_enriched.get_column("id").null_count()
+    if missing:
+        log.warning(
+            f"{missing} record(s) in this batch have no external id, so their "
+            "'id' column is empty. Re-importing those rows creates new records "
+            "rather than updating them."
+        )
+    return df_enriched
 
 
 def _process_export_batches(  # noqa: C901, D417
@@ -774,26 +800,50 @@ def _determine_export_strategy(
         return None, None, None, False, False, False
 
     technical_types = {"selection", "binary"}
-    has_technical_fields = any(
-        info.get("type") in technical_types for info in fields_info.values()
-    )
+    technical_fields = [
+        name
+        for name, info in fields_info.items()
+        if info.get("type") in technical_types
+    ]
+    has_technical_fields = bool(technical_fields)
     is_hybrid = has_read_specifiers and has_xml_id_specifiers
     force_read_method = (
         technical_names or has_read_specifiers or is_hybrid or has_technical_fields
     )
 
-    # --- New logic for main record XML ID enrichment ---
-    enrich_main_xml_id = ".id" in header and "id" in header and force_read_method
+    # --- Main record XML ID enrichment ---
+    # 'id' must come back as an *external* id whenever the caller asked for 'id'
+    # and the read path is in play, because the read path returns the database id
+    # (#339). Before, this was gated on '.id' also being in the header, which
+    # left the common case silent: a 'selection' or 'binary' field anywhere in
+    # the header forces the read path on its own, so `--fields id,...,state`
+    # emitted database ids, and re-importing that file created duplicates instead
+    # of updating. --technical-names is the one case where raw database values
+    # are the explicit request, so it keeps the old behaviour.
+    enrich_main_xml_id = (
+        "id" in header
+        and force_read_method
+        and (".id" in header or not technical_names)
+    )
 
     if enrich_main_xml_id:
+        source = ".id" if ".id" in header else "id"
+        reason = (
+            f"field(s) {technical_fields} force the read method"
+            if has_technical_fields and not technical_names and not has_read_specifiers
+            else "the read method is in use"
+        )
         log.info(
-            "Main record XML ID enrichment activated. "
-            "'.id' will be used to fetch and populate 'id'."
+            f"Main record XML ID enrichment activated ({reason}): '{source}' will "
+            "be used to fetch and populate 'id' with external ids."
         )
     elif is_hybrid:
         log.info("Hybrid export mode activated. Using 'read' with XML ID enrichment.")
     elif has_technical_fields:
-        log.info("Read method auto-enabled for 'selection' or 'binary' fields.")
+        log.info(
+            f"Read method auto-enabled for 'selection' or 'binary' field(s) "
+            f"{technical_fields}."
+        )
     elif force_read_method:
         log.info("Exporting using 'read' method for raw database values.")
     else:
