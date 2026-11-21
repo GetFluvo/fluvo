@@ -192,3 +192,197 @@ def test_run_assess_includes_company_distribution(mock_connect: MagicMock) -> No
         "company_name": "Other",
         "count": 0,
     }
+
+
+# --------------------------------------------------------------------------- #
+# --profile: value-level profiling (issue #349)
+# --------------------------------------------------------------------------- #
+PROFILE_FIELDS: dict[str, dict[str, Any]] = {
+    "id": {"type": "integer"},
+    "name": {"type": "char"},
+    "quantity": {"type": "float"},
+    "sold_on": {"type": "date"},
+    "state": {"type": "selection"},
+    "quantity_uom_id": {"type": "many2one", "relation": "uom.uom"},
+    "category_id": {"type": "many2one", "relation": "product.category"},
+    "notes": {"type": "text"},
+    "photo": {"type": "binary"},
+    "tag_ids": {"type": "many2many", "relation": "x.tag"},
+}
+
+
+def test_select_profile_fields_picks_roles_and_skips_the_expensive_types() -> None:
+    """Binaries, text and x2many are excluded; only qualifier m2o is read."""
+    numeric, dates, enums, qualifiers = assess.select_profile_fields(PROFILE_FIELDS)
+    assert numeric == ["id", "quantity"]
+    assert dates == ["sold_on"]
+    assert enums == ["name", "state"]
+    # category_id is a many2one too, but its name does not read as a qualifier.
+    assert qualifiers == ["quantity_uom_id"]
+
+
+def test_rows_to_frame_flattens_false_and_many2one_tuples() -> None:
+    """Odoo's False-for-unset and [id, name] many2one become plain strings."""
+    rows: list[dict[str, Any]] = [
+        {"quantity": 1.5, "quantity_uom_id": [7, "Units"], "name": "a"},
+        {"quantity": False, "quantity_uom_id": False, "name": False},
+    ]
+    frame = assess.rows_to_frame(rows, ["quantity", "quantity_uom_id", "name"])
+    assert frame.to_dicts() == [
+        {"quantity": "1.5", "quantity_uom_id": "Units", "name": "a"},
+        {"quantity": None, "quantity_uom_id": None, "name": None},
+    ]
+
+
+def _profile_conn(rows: list[dict[str, Any]], count: int) -> MagicMock:
+    """A fake connection whose search_read serves the given rows.
+
+    One model mock is reused across get_model calls so a test can assert on
+    how search_read was called.
+    """
+    conn = MagicMock()
+    model = MagicMock()
+    model.fields_get.return_value = PROFILE_FIELDS
+    model.search_count.return_value = count
+    model.search_read.return_value = rows
+    conn.get_model.return_value = model
+    return conn
+
+
+def _mixed_unit_rows() -> list[dict[str, Any]]:
+    """Synthetic rows whose quantity column holds two unit populations."""
+    rows: list[dict[str, Any]] = []
+    for i in range(60):
+        rows.append(
+            {
+                "id": i,
+                "quantity": round(0.5 + i * 0.1, 2),
+                "quantity_uom_id": False,
+                "name": "alpha",
+                "state": "done",
+                "sold_on": "2024-01-05",
+                "category_id": [1, "alpha"],
+            }
+        )
+    for i in range(60):
+        rows.append(
+            {
+                "id": 60 + i,
+                "quantity": 500.0 + i * 50,
+                "quantity_uom_id": False,
+                "name": "beta",
+                "state": "done",
+                "sold_on": "2024-01-05",
+                "category_id": [2, "beta"],
+            }
+        )
+    return rows
+
+
+@patch("fluvo.lib.assess._connect")
+def test_run_assess_profile_flags_the_mixed_unit_column(
+    mock_connect: MagicMock,
+) -> None:
+    """--profile surfaces a two-population numeric column and its empty qualifier."""
+    mock_connect.return_value = _profile_conn(_mixed_unit_rows(), 120)
+    out = assess.run_assess("c.conf", models=["x.model"], profile=True, fmt="table")
+    profile = out[0]["profile"]
+    assert profile["sampled"] == 120
+    assert profile["sampled_all"] is True
+    assert "quantity" in profile["flagged"]
+    quantity = next(r for r in profile["columns"] if r["column"] == "quantity")
+    assert "multi-population" in quantity["flags"]
+    # The unit field is empty on every row the value is set.
+    assert profile["qualifiers"][0]["qualifier_column"] == "quantity_uom_id"
+
+
+@patch("fluvo.lib.assess._connect")
+def test_run_assess_without_profile_reads_no_values(mock_connect: MagicMock) -> None:
+    """Profiling is opt-in: the default run never calls search_read."""
+    conn = _profile_conn(_mixed_unit_rows(), 120)
+    mock_connect.return_value = conn
+    out = assess.run_assess("c.conf", models=["x.model"], fmt="table")
+    assert "profile" not in out[0]
+    assert not conn.get_model("x.model").search_read.called
+
+
+@patch("fluvo.lib.assess._connect")
+def test_run_assess_profile_respects_the_row_limit(mock_connect: MagicMock) -> None:
+    """--profile-limit is passed to search_read and recorded as a sample."""
+    conn = _profile_conn(_mixed_unit_rows()[:50], 5000)
+    mock_connect.return_value = conn
+    out = assess.run_assess(
+        "c.conf", models=["x.model"], profile=True, profile_limit=50
+    )
+    profile = out[0]["profile"]
+    assert profile["sampled"] == 50
+    assert profile["total"] == 5000
+    # A sampled profile must say so; a fill rate from 1% of rows is an estimate.
+    assert profile["sampled_all"] is False
+    _, kwargs = conn.get_model("x.model").search_read.call_args
+    assert kwargs["limit"] == 50
+
+
+@patch("fluvo.lib.assess._connect")
+def test_run_assess_profile_group_by_is_dropped_when_absent(
+    mock_connect: MagicMock,
+) -> None:
+    """A --group-by field the model lacks is ignored rather than failing the run."""
+    mock_connect.return_value = _profile_conn(_mixed_unit_rows(), 120)
+    out = assess.run_assess(
+        "c.conf", models=["x.model"], profile=True, group_by="no_such_field"
+    )
+    assert out[0]["profile"]["group_by"] is None
+
+
+@patch("fluvo.lib.assess._connect")
+def test_run_assess_profile_survives_an_unreadable_model(
+    mock_connect: MagicMock,
+) -> None:
+    """A search_read failure degrades to no profile, not a failed assessment."""
+    conn = MagicMock()
+
+    def get_model(name: str) -> MagicMock:
+        m = MagicMock()
+        m.fields_get.return_value = PROFILE_FIELDS
+        m.search_count.return_value = 10
+        m.search_read.side_effect = Exception("access denied")
+        return m
+
+    conn.get_model.side_effect = get_model
+    mock_connect.return_value = conn
+    out = assess.run_assess("c.conf", models=["x.model"], profile=True)
+    assert "profile" not in out[0]
+    assert out[0]["model"] == "x.model"
+
+
+@patch("fluvo.lib.assess._connect")
+def test_run_assess_profile_reaches_the_markdown_report(
+    mock_connect: MagicMock,
+) -> None:
+    """The profiling findings render into the Markdown handout."""
+    mock_connect.return_value = _profile_conn(_mixed_unit_rows(), 120)
+    out = assess.run_assess("c.conf", models=["x.model"], profile=True, fmt="markdown")
+    md = assess.to_markdown(out)
+    assert "## Value profiling" in md
+    assert "multi-population" in md
+    assert "`quantity`" in md
+
+
+@patch("fluvo.lib.assess._connect")
+def test_run_assess_profile_reaches_the_json_report(mock_connect: MagicMock) -> None:
+    """The profile is JSON-serialisable, so --output json carries it."""
+    mock_connect.return_value = _profile_conn(_mixed_unit_rows(), 120)
+    out = assess.run_assess("c.conf", models=["x.model"], profile=True, fmt="json")
+    doc = json.loads(assess.to_json(out))
+    assert doc["assessment"][0]["profile"]["flagged"] == ["quantity"]
+
+
+def test_profile_findings_is_empty_without_a_profile() -> None:
+    """An assessment with no profile contributes no findings."""
+    assert assess.profile_findings([{"model": "x", "risks": {}}]) == []
+
+
+def test_profile_markdown_is_empty_without_a_profile() -> None:
+    """No profile means no section, rather than an empty heading."""
+    assert assess.profile_markdown([{"model": "x", "risks": {}}]) == ""
