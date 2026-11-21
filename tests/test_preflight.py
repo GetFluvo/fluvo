@@ -1572,3 +1572,90 @@ class TestCompanyColumnsCheck:
         assert ok is True
         assert "company_fields" not in plan
         mock_conn.assert_not_called()  # no company resolution needed
+
+
+class TestFieldsCacheSelfHeal:
+    """A stale fields_get cache must self-heal, not reject a field that exists (#356).
+
+    The fields cache has no server-side invalidation, so a module installed after
+    the cache file was written is invisible to it. When a header needs a field the
+    cached schema lacks, the fetch must refetch once rather than hard-stop the
+    import on a field ``fields_get`` returns perfectly well.
+    """
+
+    #: A schema as it was cached *before* the module adding ``parts_code`` landed.
+    STALE_CACHE: ClassVar[dict[str, Any]] = {"name": {"type": "char"}}
+    #: The live schema the server returns now, with the new field present.
+    FRESH: ClassVar[dict[str, Any]] = {
+        "name": {"type": "char"},
+        "parts_code": {"type": "char"},
+    }
+
+    def test_stale_cache_refetches_once(
+        self, mock_cache: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """A needed field absent from the cache triggers one refetch + re-save."""
+        mock_cache.load_fields_get_cache.return_value = dict(self.STALE_CACHE)
+        mock_conf_lib.return_value.get_model.return_value.fields_get.return_value = (
+            dict(self.FRESH)
+        )
+
+        result = preflight._get_odoo_fields(
+            "conn.conf", "x.model", expected_fields=["parts_code"]
+        )
+
+        assert result == self.FRESH
+        assert "parts_code" in (result or {})
+        mock_conf_lib.assert_called_once()  # it refetched instead of trusting cache
+        mock_cache.save_fields_get_cache.assert_called_once()  # stale cache overwritten
+
+    def test_fresh_cache_is_trusted(
+        self, mock_cache: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """When the cache already has every needed field, no refetch happens."""
+        mock_cache.load_fields_get_cache.return_value = dict(self.FRESH)
+
+        result = preflight._get_odoo_fields(
+            "conn.conf", "x.model", expected_fields=["name", "parts_code"]
+        )
+
+        assert result == self.FRESH
+        mock_conf_lib.assert_not_called()  # cache was sufficient
+
+    def test_no_expected_fields_keeps_cache_fast_path(
+        self, mock_cache: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """Without expected fields the old cache-hit behaviour is unchanged."""
+        mock_cache.load_fields_get_cache.return_value = dict(self.STALE_CACHE)
+
+        result = preflight._get_odoo_fields("conn.conf", "x.model")
+
+        assert result == self.STALE_CACHE
+        mock_conf_lib.assert_not_called()
+
+    @patch("fluvo.lib.preflight._get_csv_header")
+    def test_import_does_not_reject_field_behind_stale_cache(
+        self,
+        mock_header: MagicMock,
+        mock_cache: MagicMock,
+        mock_conf_lib: MagicMock,
+        mock_show_error_panel: MagicMock,
+    ) -> None:
+        """End-to-end: validation passes once the stale cache self-heals."""
+        mock_header.return_value = ["name", "parts_code"]
+        mock_cache.load_fields_get_cache.return_value = dict(self.STALE_CACHE)
+        mock_conf_lib.return_value.get_model.return_value.fields_get.return_value = (
+            dict(self.FRESH)
+        )
+
+        ok = preflight.deferral_and_strategy_check(
+            PreflightMode.FAIL_MODE,
+            "x.model",
+            "import.csv",
+            "conn.conf",
+            {},
+            separator=",",
+        )
+
+        assert ok is True  # the field that exists was not rejected
+        mock_show_error_panel.assert_not_called()  # no "not a valid field" panel

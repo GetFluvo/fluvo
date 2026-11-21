@@ -573,12 +573,21 @@ def _extract_odoo_error_message(error: Exception) -> str:
     return first_line[:300]
 
 
-def _get_odoo_fields(config: str | dict[str, Any], model: str) -> dict[str, Any] | None:
+def _get_odoo_fields(
+    config: str | dict[str, Any],
+    model: str,
+    expected_fields: list[str] | None = None,
+) -> dict[str, Any] | None:
     """Fetches the field schema for a given model from Odoo.
 
     Args:
         config: The path to the connection configuration file or a config dict.
         model: The target Odoo model name.
+        expected_fields: Base field names the caller is about to validate against
+            this schema. A cached schema that is missing one of them is treated as
+            stale (a module providing the field was installed after the cache was
+            written) and refetched once, rather than used to reject a field that
+            exists on the live model (#356).
 
     Returns:
         A dictionary of the model's fields, or None on failure.
@@ -587,9 +596,25 @@ def _get_odoo_fields(config: str | dict[str, Any], model: str) -> dict[str, Any]
     if isinstance(config, str):
         cached_fields = cache.load_fields_get_cache(config, model)
         if cached_fields:
-            return cached_fields
+            # Self-heal a stale cache. The fields cache has no server-side
+            # invalidation, so a module installed after the file was written is
+            # invisible to it forever. If a field the caller needs is absent from
+            # the cached schema, the cache is stale — not the field — so refetch
+            # once (overwriting the cache below) instead of hard-stopping the
+            # import on a field that fields_get returns perfectly well (#356).
+            stale = (
+                [f for f in expected_fields if f not in cached_fields]
+                if expected_fields
+                else []
+            )
+            if not stale:
+                return cached_fields
+            log.info(
+                f"Cached fields for '{model}' are missing {stale!r}; the schema "
+                "predates a module install. Refetching from Odoo to self-heal."
+            )
 
-    # 2. If cache miss, fetch from Odoo
+    # 2. If cache miss (or a stale-cache refetch), fetch from Odoo
     log.info(f"Cache miss for '{model}' fields, fetching from Odoo...")
     try:
         connection_obj: Any
@@ -677,6 +702,11 @@ def _validate_header(  # noqa: C901
         error_message = "The following columns do not exist on the Odoo model:\n"
         for field in missing_fields:
             error_message += f"  - '{field}' is not a valid field on model '{model}'\n"
+        error_message += (
+            "\nIf a field does exist in Odoo, the module providing it may not be "
+            "installed. If it was installed recently, re-run with --no-cache to "
+            "bypass a cached schema."
+        )
         _show_error_panel("Invalid Fields Found", error_message)
         return False
 
@@ -973,7 +1003,10 @@ def deferral_and_strategy_check(
     ignore_list = kwargs.get("ignore", [])
     header_to_validate = [h for h in csv_header if h not in ignore_list]
 
-    odoo_fields = _get_odoo_fields(config, model)
+    # Pass the base field names so a cache written before a module install
+    # self-heals instead of falsely rejecting a field that exists (#356).
+    expected = [_base_field_name(h) for h in header_to_validate]
+    odoo_fields = _get_odoo_fields(config, model, expected_fields=expected)
     if not odoo_fields:
         return False
 
