@@ -4,6 +4,9 @@
 
 > *Does what's in Odoo match this file?*
 
+— and, with `--against-connection`, the same question about
+[two live Odoo instances](#comparing-two-odoo-instances).
+
 It is **read-only**. It never writes to Odoo. It can hand you a file that
 `fluvo import` would load, but loading it stays a separate, deliberate step.
 
@@ -114,6 +117,52 @@ When the sheet's headers are not Odoo field names:
 
 With `--fields` omitted, every column of the file that the model declares as a
 field is compared.
+
+## Comparing two Odoo instances
+
+A migration asks the same question with two live systems instead of a file: *did
+everything arrive, and did it arrive unchanged?* You can always answer it with
+`fluvo export` followed by `fluvo compare --file`, and `--against-connection`
+removes the intermediate file:
+
+```bash
+fluvo compare \
+  --connection-file conf/new.conf \
+  --against-connection conf/old.conf \
+  --model res.partner \
+  --key ref \
+  --fields name,street,city,vat,country_id
+```
+
+Both sides are read over RPC. The source instance is the one named by
+`--against-connection`, so *only in source Odoo* means **not migrated**, and
+*only in target Odoo* means **created in the new system**.
+
+Three differences from the file case:
+
+**`--fields` is required.** There are no file columns to infer from, and comparing
+every field of a model reports churn — `write_date`, computed values, sequence
+numbers — instead of drift.
+
+**The locale options do not apply,** and passing them is an error rather than a
+no-op. Odoo writes dot decimals and ISO dates whatever the user's language, so
+both sides are read that way.
+
+**Each side can have its own filter.** `--against-domain` and `--against-context`
+default to `--domain` and `--context`, which is usually what you want; pass
+`--against-domain "[]"` to leave the source unfiltered.
+
+An older source often needs a different transport, which `--against-protocol`
+covers:
+
+```bash
+fluvo compare ... --protocol jsonrpc --against-protocol xmlrpc
+```
+
+A field the source instance does not have is reported as a setup error rather
+than compared against nothing — the two schemas differing is exactly what you are
+trying to find out about. A field whose *type* differs between the instances is
+compared as the target's type, with a warning.
 
 ## Then fixing
 
