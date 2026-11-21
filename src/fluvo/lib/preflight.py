@@ -295,7 +295,7 @@ def company_context_check(
     header = _get_csv_header(filename, separator)
     if not header:
         return True  # header problems are reported by other checks
-    odoo_fields = _get_odoo_fields(config, model)
+    odoo_fields = _fields_for_header(config, model, header)
     if not odoo_fields:
         return True  # connection / field errors are reported by other checks
 
@@ -648,6 +648,31 @@ def _get_odoo_fields(
         return None
 
 
+def _fields_for_header(
+    config: str | dict[str, Any], model: str, header: list[str]
+) -> dict[str, Any] | None:
+    """Fetch a model's schema, self-healing a cache that predates its fields.
+
+    Every preflight check reads the CSV header, then decides per column whether
+    that column is a field on the model. A ``fields_get`` cache written before a
+    module install cannot see the new field, so without this the check would act
+    on a stale schema (#356). Passing the header's base field names lets
+    :func:`_get_odoo_fields` refetch once when the cache is missing one of them,
+    which heals every caller uniformly instead of one code path at a time.
+
+    Args:
+        config: Connection config path or dict.
+        model: The target Odoo model name.
+        header: The source CSV header (raw column names).
+
+    Returns:
+        dict[str, Any] | None: The model's fields, or None on failure.
+    """
+    return _get_odoo_fields(
+        config, model, expected_fields=[_base_field_name(h) for h in header]
+    )
+
+
 def _get_csv_header(filename: str, separator: str) -> list[str] | None:
     """Reads the header from a CSV file.
 
@@ -703,9 +728,8 @@ def _validate_header(  # noqa: C901
         for field in missing_fields:
             error_message += f"  - '{field}' is not a valid field on model '{model}'\n"
         error_message += (
-            "\nIf a field does exist in Odoo, the module providing it may not be "
-            "installed. If it was installed recently, re-run with --no-cache to "
-            "bypass a cached schema."
+            "\nIf a field does exist in Odoo, the module providing it is not "
+            "installed on this database."
         )
         _show_error_panel("Invalid Fields Found", error_message)
         return False
@@ -1003,10 +1027,9 @@ def deferral_and_strategy_check(
     ignore_list = kwargs.get("ignore", [])
     header_to_validate = [h for h in csv_header if h not in ignore_list]
 
-    # Pass the base field names so a cache written before a module install
-    # self-heals instead of falsely rejecting a field that exists (#356).
-    expected = [_base_field_name(h) for h in header_to_validate]
-    odoo_fields = _get_odoo_fields(config, model, expected_fields=expected)
+    # Self-heal a cache written before a module install, instead of falsely
+    # rejecting a field that exists (#356).
+    odoo_fields = _fields_for_header(config, model, header_to_validate)
     if not odoo_fields:
         return False
 
@@ -1446,7 +1469,7 @@ def reference_check(  # noqa: C901
         return bool(check_refs != "fail")
 
     # Get Odoo fields
-    odoo_fields = _get_odoo_fields(config, model)
+    odoo_fields = _fields_for_header(config, model, csv_header)
     if not odoo_fields:
         return bool(check_refs != "fail")
 
@@ -1638,7 +1661,7 @@ def structured_value_check(  # noqa: C901
     header = _get_csv_header(filename, separator)
     if not header:
         return True  # header problems are reported by other checks
-    odoo_fields = _get_odoo_fields(config, model)
+    odoo_fields = _fields_for_header(config, model, header)
     if not odoo_fields:
         return True  # connection / field errors are reported by other checks
 
@@ -1712,7 +1735,7 @@ def translation_columns_check(  # noqa: C901
     at_columns = [c for c in header if "@" in c]
     if not at_columns:
         return True
-    odoo_fields = _get_odoo_fields(config, model)
+    odoo_fields = _fields_for_header(config, model, header)
     if not odoo_fields:
         return True
 
@@ -1857,7 +1880,7 @@ def company_columns_check(  # noqa: C901
     at_columns = [c for c in header if "@" in c]
     if not at_columns:
         return True
-    odoo_fields = _get_odoo_fields(config, model)
+    odoo_fields = _fields_for_header(config, model, header)
     if not odoo_fields:
         return True
 

@@ -1633,6 +1633,28 @@ class TestFieldsCacheSelfHeal:
         assert result == self.STALE_CACHE
         mock_conf_lib.assert_not_called()
 
+    def test_fields_for_header_heals_on_base_name(
+        self, mock_cache: MagicMock, mock_conf_lib: MagicMock
+    ) -> None:
+        """The shared helper strips suffixes to its base name before the check.
+
+        A ``parent_id/id`` column must heal on the ``parent_id`` field, not on the
+        literal column, so the staleness check matches what ``_validate_header``
+        later validates.
+        """
+        mock_cache.load_fields_get_cache.return_value = {"name": {"type": "char"}}
+        mock_conf_lib.return_value.get_model.return_value.fields_get.return_value = {
+            "name": {"type": "char"},
+            "parent_id": {"type": "many2one"},
+        }
+
+        result = preflight._fields_for_header(
+            "conn.conf", "x.model", ["name", "parent_id/id"]
+        )
+
+        assert "parent_id" in (result or {})
+        mock_conf_lib.assert_called_once()  # refetched on the missing base field
+
     @patch("fluvo.lib.preflight._get_csv_header")
     def test_import_does_not_reject_field_behind_stale_cache(
         self,
