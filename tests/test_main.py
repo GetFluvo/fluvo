@@ -2141,8 +2141,37 @@ def test_import_invalid_context_aborts(
                 "{invalid",
             ],
         )
-        assert result.exit_code == 0
+        # Invalid --context is a usage error: non-zero exit (so a flow step fails
+        # and `exit codes automation can trust`), and run_import never runs (#381).
+        assert result.exit_code == 2
         mock_run_import.assert_not_called()
+
+
+@patch("fluvo.__main__.run_import")
+def test_import_context_accepts_json_booleans(
+    mock_run_import: MagicMock, runner: CliRunner
+) -> None:
+    """--context accepts a JSON string (true/false), as --help documents (#382)."""
+    with runner.isolated_filesystem():
+        _conn()
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection-file",
+                "conn.conf",
+                "--file",
+                "my.csv",
+                "--model",
+                "res.partner",
+                "--context",
+                '{"tracking_disable": true, "create_product_product": false}',
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        passed = mock_run_import.call_args.kwargs["context"]
+        assert passed["tracking_disable"] is True
+        assert passed["create_product_product"] is False
 
 
 @patch("fluvo.__main__.run_import")
@@ -2723,7 +2752,7 @@ def test_write_invalid_context_aborts(
                 "{invalid",
             ],
         )
-        assert result.exit_code == 0
+        assert result.exit_code == 2
         mock_run_write.assert_not_called()
 
 
@@ -3343,8 +3372,9 @@ def test_vat_validate_invalid_domain_aborts(
                 "[invalid",
             ],
         )
-        assert result.exit_code == 0
-        assert "Invalid domain format" in result.output
+        # An invalid --domain is a usage error: non-zero exit, not a silent no-op.
+        assert result.exit_code == 2
+        assert "--domain must be" in result.output
         mock_fn.assert_not_called()
 
 
