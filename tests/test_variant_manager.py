@@ -199,7 +199,7 @@ def test_cli_rejects_an_invalid_domain(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code != 0
-    assert "Invalid --domain" in result.output
+    assert "--domain must be" in result.output
 
 
 # --- post-import guardrail (#188) ---

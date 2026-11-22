@@ -1,6 +1,7 @@
 """Command-line interface for fluvo."""
 
 import ast
+import json
 import os
 import shlex
 from importlib.metadata import version as get_version
@@ -860,16 +861,7 @@ def create_missing_variants_cmd(
     API does not, so templates can import with no variants (#188). This finds
     them and creates the missing default variant.
     """
-    parsed_domain: list[Any] | None = None
-    if domain:
-        try:
-            parsed_domain = ast.literal_eval(domain)
-        except (ValueError, SyntaxError) as exc:
-            raise click.BadParameter(f"Invalid --domain: {exc}") from exc
-        if not isinstance(parsed_domain, list):
-            raise click.BadParameter(
-                "--domain must be a list, e.g. \"[('categ_id', '=', 5)]\"."
-            )
+    parsed_domain: list[Any] | None = _literal_option(domain, "--domain", list)
     success = run_create_missing_variants(
         config=connection_file,
         domain=parsed_domain,
@@ -1179,8 +1171,6 @@ def vat_validate_cmd(
     max_records: int | None,
 ) -> None:
     """Validate VAT numbers against VIES in batches with optional notifications."""
-    import ast
-
     from rich.console import Console
     from rich.table import Table
 
@@ -1190,13 +1180,7 @@ def vat_validate_cmd(
     if notify_users:
         notify_user_ids = [int(u.strip()) for u in notify_users.split(",") if u.strip()]
 
-    parsed_domain: list[Any] | None = None
-    if domain:
-        try:
-            parsed_domain = ast.literal_eval(domain)
-        except (ValueError, SyntaxError) as e:
-            console.print(f"[red]Invalid domain format: {e}[/red]")
-            return
+    parsed_domain: list[Any] | None = _literal_option(domain, "--domain", list)
 
     console.print(f"Starting VIES validation (batch size: {batch_size})...")
 
@@ -1588,11 +1572,7 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
     else:
         kwargs["config"] = connection_file
 
-    try:
-        kwargs["context"] = ast.literal_eval(kwargs.get("context", "{}"))
-    except (ValueError, SyntaxError) as e:
-        log.error(f"Invalid --context dictionary provided: {e}")
-        return
+    kwargs["context"] = _literal_option(kwargs.get("context"), "--context", dict) or {}
 
     context = kwargs.get("context", {})
 
@@ -2016,11 +1996,7 @@ def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
 def write_cmd(connection_file: str, **kwargs: Any) -> None:
     """Runs the batch update (write) process."""
     kwargs["config"] = connection_file
-    try:
-        kwargs["context"] = ast.literal_eval(kwargs.get("context", "{}"))
-    except (ValueError, SyntaxError) as e:
-        log.error(f"Invalid --context dictionary provided: {e}")
-        return
+    kwargs["context"] = _literal_option(kwargs.get("context"), "--context", dict) or {}
 
     # Add extra mail tracking suppression flags if tracking_disable is set
     context = kwargs.get("context", {})
@@ -2154,7 +2130,14 @@ def assess_cmd(
 
 
 def _literal_option(raw: str | None, option: str, expected: type) -> Any:
-    """Parse a Python-literal CLI option, failing before any connection is made.
+    """Parse a JSON-or-Python-literal CLI option, failing before any connection.
+
+    Accepts both JSON (``{"active_test": false}``) and Python literals
+    (``{'active_test': False}``): JSON is tried first so the documented "JSON
+    string" form works (#382), with an ``ast.literal_eval`` fallback for the
+    Python-dict/tuple form used throughout the examples and docs. A malformed
+    value raises ``click.BadParameter`` — a non-zero exit the flow runner records
+    as a failed step — rather than being silently ignored (#381).
 
     Args:
         raw: The option's raw string value, or None if it was not given.
@@ -2170,12 +2153,16 @@ def _literal_option(raw: str | None, option: str, expected: type) -> Any:
     if raw is None:
         return None
     kind = "an Odoo domain list literal" if expected is list else "a dict literal"
+    msg = f"{option} must be {kind} (JSON or Python), got '{raw}'."
     try:
-        value = ast.literal_eval(raw)
-    except (ValueError, SyntaxError) as exc:
-        raise click.BadParameter(f"{option} must be {kind}, got '{raw}'.") from exc
+        value = json.loads(raw)
+    except (ValueError, TypeError):
+        try:
+            value = ast.literal_eval(raw)
+        except (ValueError, SyntaxError) as exc:
+            raise click.BadParameter(msg) from exc
     if not isinstance(value, expected):
-        raise click.BadParameter(f"{option} must be {kind}, got '{raw}'.")
+        raise click.BadParameter(msg)
     return value
 
 
