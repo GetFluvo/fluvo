@@ -6,12 +6,60 @@ import pytest
 
 from fluvo.import_threaded import (
     _convert_external_id_field,
+    _execute_o2m_batch,
     _extract_access_error_message,
     _handle_create_error,
     _prepare_pass_2_data,
     _process_external_id_fields,
     _resolve_external_id_for_pass2,
 )
+
+# --- _execute_o2m_batch (#368): continuation rows belong to their parent -------
+
+# A parent row carries the 'id'; continuation rows (empty 'id') hold the o2m
+# lines. Odoo's load() returns one id per parent.
+_O2M_HEADER = ["id", "name", "line_ids/account_id/id", "line_ids/debit"]
+_O2M_GROUP = [
+    ["move_1", "INV/001", "acc_receivable", "100"],  # parent
+    ["", "", "acc_income", "0"],  # continuation line 1 (no id)
+    ["", "", "acc_tax", "0"],  # continuation line 2 (no id)
+]
+
+
+def test_o2m_success_does_not_fail_continuation_rows() -> None:
+    """A created parent's line rows are not counted/written as failures (#368)."""
+    model = MagicMock()
+    model.load.return_value = {"ids": [42], "messages": []}  # one id for the parent
+    result = _execute_o2m_batch(model, _O2M_GROUP, _O2M_HEADER, 0, {}, [])
+    # The parent is mapped; the two line rows are neither created nor failed.
+    assert result["failed_lines"] == []
+    assert result["success"] is True
+    assert len(result["id_map"]) == 1
+    assert next(iter(result["id_map"].values())) == 42
+
+
+def test_o2m_parent_failure_writes_whole_group_to_fail_file() -> None:
+    """When the parent fails, the whole group goes to the fail file (#368)."""
+    model = MagicMock()
+    model.load.return_value = {
+        "ids": [],
+        "messages": [{"type": "error", "message": "bad account"}],
+    }
+    result = _execute_o2m_batch(model, _O2M_GROUP, _O2M_HEADER, 0, {}, [])
+    assert result["id_map"] == {}
+    assert result["success"] is False
+    # Parent + both continuation rows so a --fail re-run can rebuild the record.
+    assert len(result["failed_lines"]) == 3
+    assert all("bad account" in row[-1] for row in result["failed_lines"])
+
+
+def test_o2m_load_exception_fails_whole_group() -> None:
+    """A load() exception fails the entire group, not just one row (#368)."""
+    model = MagicMock()
+    model.load.side_effect = RuntimeError("boom")
+    result = _execute_o2m_batch(model, _O2M_GROUP, _O2M_HEADER, 0, {}, [])
+    assert result["id_map"] == {}
+    assert len(result["failed_lines"]) == 3
 
 
 # --- _resolve_external_id_for_pass2 ---
