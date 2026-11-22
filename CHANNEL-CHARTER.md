@@ -17,8 +17,12 @@ of your next pitch, knowing your toolchain?**
 ## What we commit to
 
 1. **We do not hold the end-client relationship on your projects.** Where you brought
-   the project, you are the contracting party and the client's point of contact. If we
-   are involved at all, we are behind you.
+   the project, the client is yours and you are their point of contact for the
+   implementation. You choose how we take part in the migration: as your
+   subcontractor, under your name, invoicing you; or, only if you ask, contracting and
+   invoicing the migration part directly with your client and handling the day-to-day
+   migration contact, so you do not have to relay every question. Either way we never
+   take over the implementation relationship.
 
 2. **We do not bid against you on work you brought us into.** If you ask us for help on
    a project — an assessment, a tricky model, assurance on a cutover — we will not
@@ -53,6 +57,8 @@ To keep this honest, here is what we do not promise to stay away from:
 - **Direct migration work where no partner is engaged**, when a referral is not what
   the customer wants. This funds the open core.
 - **Data migration as a subcontractor**, under your name, on your project, when you ask.
+- **A direct contract for the migration part of your project**, with your client, when
+  you ask. Commitments 1 and 2 still apply: the client stays yours.
 - **Sponsored connector development** — you pay for a source system to be supported,
   and the connector ships in the open core where everyone, including your competitors,
   can use it. That is the deal, stated up front.
