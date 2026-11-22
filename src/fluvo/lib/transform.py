@@ -505,6 +505,78 @@ class Processor:
             write_file(**info_copy)
             init = False
 
+    def write_flow_file(
+        self,
+        flow_file: str,
+        flow_name: str = "generated",
+    ) -> None:
+        """Emit a ``flows.yml`` with one step per queued output file.
+
+        An alternative to :meth:`write_to_file`'s shell script: the generated
+        transform plugs straight into ``fluvo --flow-file`` without a hand-written
+        ``load.sh``. Call this instead of, or alongside, ``write_to_file`` (#373).
+
+        Each queued file becomes one ``import`` (or ``export``) step whose ``with:``
+        keys are the target command's click parameter names (e.g. ``filename`` for
+        ``--file``, ``batch_size`` for ``--size``), so the flow runner accepts them
+        directly. The ``--fail`` retry pass that ``write_to_file`` adds to the shell
+        is not emitted; the flow runner handles fail files on its own.
+
+        Args:
+            flow_file: Path to write the ``flows.yml`` to (overwritten).
+            flow_name: Name of the single generated flow.
+
+        Raises:
+            ImportError: If PyYAML (the ``fluvo[flows]`` extra) is not installed.
+        """
+        try:
+            import yaml
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise ImportError(
+                "Writing flow files requires PyYAML, which is not installed. "
+                "Install it with:  pip install 'fluvo[flows]'"
+            ) from exc
+
+        steps: list[dict[str, Any]] = []
+        for _, info in self.file_to_write.items():
+            command = info.get("command", "import")
+            model = info.get("model", "auto")
+            filename = info.get("filename")
+            if model == "auto" and filename:
+                model = os.path.basename(filename).replace(".csv", "").replace("_", ".")
+
+            with_: dict[str, Any] = {}
+            conf = info.get("config") or self.config_file
+            if conf:
+                with_["connection_file"] = conf
+            # --file is the param 'filename' for import, 'output' for export.
+            if filename:
+                with_["output" if command == "export" else "filename"] = filename
+            with_["model"] = model
+
+            # Map the queued params to click parameter names, present ones only.
+            param_map = {
+                "worker": "worker",
+                "batch_size": "batch_size",
+                "separator": "separator",
+                "sep": "separator",
+                "encoding": "encoding",
+                "groupby": "groupby",
+                "ignore": "ignore",
+                "context": "context",
+                "fields": "fields",
+                "domain": "domain",
+            }
+            for src, dest in param_map.items():
+                if info.get(src) not in (None, ""):
+                    with_[dest] = info[src]
+
+            steps.append({"run": command, "with": with_})
+
+        doc = {"version": 1, "flows": [{"name": flow_name, "steps": steps}]}
+        with open(flow_file, "w", encoding="utf-8") as f:
+            yaml.safe_dump(doc, f, sort_keys=False, default_flow_style=False)
+
     def join_file(
         self,
         filename: str,
