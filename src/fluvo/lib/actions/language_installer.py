@@ -81,7 +81,15 @@ def run_language_installation(config: str, languages: list[str]) -> bool:
                         "overwrite": False,
                     }
 
-                wizard_id = installer_model.create(wizard_vals)
+                created = installer_model.create(wizard_vals)
+                # ``create`` returns a scalar id over XML-RPC/JSON-RPC but a
+                # one-element list over json2 (Odoo 19+, ``@api.model_create_multi``
+                # semantics). Normalise so ``lang_install`` always receives a flat
+                # ``[id]`` — passing ``[[id]]`` raises "unhashable type: 'list'"
+                # when Odoo uses the ids as a set/dict key (#370).
+                wizard_id = (
+                    created[0] if isinstance(created, (list, tuple)) else created
+                )
                 installer_model.lang_install([wizard_id])
                 log.info(f"Successfully installed language '{lang_code}'.")
 

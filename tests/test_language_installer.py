@@ -105,6 +105,38 @@ class TestLanguageInstaller:
 
     @patch("fluvo.lib.odoo_lib.get_odoo_version")
     @patch("fluvo.lib.conf_lib.get_connection_from_config")
+    def test_create_list_return_is_flattened_for_lang_install(
+        self, mock_get_conn: MagicMock, mock_get_version: MagicMock
+    ) -> None:
+        """json2 ``create`` returns a list, which must be flattened for lang_install.
+
+        A json2 ``create`` returns ``[id]``; lang_install must get ``[id]``, not
+        ``[[id]]`` (the nested list raised "unhashable type: 'list'" on Odoo 20) (#370).
+        """
+        mock_get_version.return_value = 20
+
+        mock_lang_model = MagicMock()
+        mock_installer_model = MagicMock()
+        mock_lang_model.search.return_value = [42]
+        # json2 create returns a one-element list rather than a scalar id.
+        mock_installer_model.create.return_value = [123]
+
+        def get_model_side_effect(model_name: str) -> Any:
+            if model_name == "res.lang":
+                return mock_lang_model
+            if model_name == "base.language.install":
+                return mock_installer_model
+            return MagicMock()
+
+        mock_get_conn.return_value.get_model.side_effect = get_model_side_effect
+
+        result = run_language_installation("dummy.conf", ["de_DE"])
+
+        assert result is True
+        mock_installer_model.lang_install.assert_called_once_with([123])
+
+    @patch("fluvo.lib.odoo_lib.get_odoo_version")
+    @patch("fluvo.lib.conf_lib.get_connection_from_config")
     def test_installation_fails_if_language_not_found(
         self, mock_get_conn: MagicMock, mock_get_version: MagicMock
     ) -> None:
