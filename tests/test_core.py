@@ -128,8 +128,8 @@ def test_default_exit_code_is_one() -> None:
 
 
 def test_connect_error_does_not_shadow_builtin() -> None:
-    """ConnectError is deliberately not the built-in ConnectionError."""
-    assert ConnectError is not ConnectionError
+    """ConnectError is deliberately not, and does not subclass, the built-in."""
+    assert ConnectError.__name__ == "ConnectError"
     assert not issubclass(ConnectError, ConnectionError)
 
 

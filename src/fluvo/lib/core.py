@@ -232,7 +232,6 @@ class RunReporter(Protocol):
         Args:
             name: A short, stable phase label (e.g. ``"reading source"``).
         """
-        ...
 
     def on_progress(
         self, done: int, total: int, stats: ReconStats | None = None
@@ -245,7 +244,6 @@ class RunReporter(Protocol):
             stats: The running reconciliation counters, when the phase produces
                 them (the import engine); None for phases that do not.
         """
-        ...
 
     def on_message(self, level: str, text: str) -> None:
         """Surface a human-readable message.
@@ -254,7 +252,6 @@ class RunReporter(Protocol):
             level: A severity label (``"info"``, ``"warning"``, ``"error"``).
             text: The message.
         """
-        ...
 
 
 class NullReporter:
