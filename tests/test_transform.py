@@ -16,6 +16,7 @@ from fluvo.lib.internal.exceptions import SkippingError
 from fluvo.lib.transform import (
     MapperRepr,
     Processor,
+    ProductProcessor,
     ProductProcessorV9,
     ProductProcessorV10,
 )
@@ -352,9 +353,9 @@ def test_process_m2m_method() -> None:
 
 
 def test_product_processor_v10() -> None:
-    """Tests the ProductProcessorV10 methods."""
+    """Tests the ProductProcessor methods."""
     df = pl.DataFrame({"Color": ["Blue"], "Size": ["L"]})
-    processor = ProductProcessorV10(mapping={}, dataframe=df)
+    processor = ProductProcessor(mapping={}, dataframe=df)
     processor.process_attribute_data(
         attributes_list=["Color", "Size"],
         attribute_prefix="pa",
@@ -784,3 +785,10 @@ def test_write_to_file_writes_data_csv(tmp_path: Path) -> None:
     assert "name" in content and "Widget" in content and "Gadget" in content
     assert load.exists()
     assert "fluvo import" in load.read_text()
+
+
+def test_product_processor_v10_is_deprecated_alias() -> None:
+    """ProductProcessorV10 still works but warns and is-a ProductProcessor (#371)."""
+    with pytest.warns(DeprecationWarning, match="use ProductProcessor"):
+        processor = ProductProcessorV10(mapping={}, dataframe=pl.DataFrame())
+    assert isinstance(processor, ProductProcessor)

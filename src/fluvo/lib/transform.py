@@ -2,6 +2,7 @@
 
 import inspect
 import os
+import warnings
 from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from typing import (
@@ -769,7 +770,7 @@ class Processor:
         return temp_processor._process_mapping(mapping, null_values=null_values)
 
 
-class ProductProcessorV10(Processor):
+class ProductProcessor(Processor):
     """Processor for the modern (Odoo v13+) product attribute model."""
 
     def process_attribute_data(
@@ -853,6 +854,24 @@ class ProductProcessorV10(Processor):
             )
         )
         self._add_data(unique_values, filename_out, import_args)
+
+
+class ProductProcessorV10(ProductProcessor):
+    """Deprecated alias for :class:`ProductProcessor`.
+
+    The ``V10`` suffix misled about which Odoo versions this targets (it is the
+    modern v13+ flow). Kept as a subclass so existing imports and ``isinstance``
+    checks keep working; it emits a ``DeprecationWarning`` on instantiation and
+    will be removed in a future release (#371).
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        warnings.warn(
+            "ProductProcessorV10 is deprecated; use ProductProcessor instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)
 
 
 class ProductProcessorV9(Processor):

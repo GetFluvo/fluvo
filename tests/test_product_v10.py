@@ -10,7 +10,7 @@ import os
 import polars as pl
 
 from fluvo.lib import mapper
-from fluvo.lib.transform import ProductProcessorV10
+from fluvo.lib.transform import ProductProcessor
 
 # --- Configuration ---
 TEMPLATE_PREFIX = "PRODUCT_TEMPLATE"
@@ -84,7 +84,7 @@ source_df = pl.read_csv(source_file, separator=",")
 
 # STEP 1: Parent Categories
 print("Generating data for product categories (parents)...")
-parent_categ_processor = ProductProcessorV10(
+parent_categ_processor = ProductProcessor(
     mapping=categ_parent_map, dataframe=source_df.clone()
 )
 parent_categ_processor.process(
@@ -95,9 +95,7 @@ parent_categ_processor.process(
 
 # STEP 2: Child Categories
 print("Generating data for product categories (children)...")
-child_categ_processor = ProductProcessorV10(
-    mapping=categ_map, dataframe=source_df.clone()
-)
+child_categ_processor = ProductProcessor(mapping=categ_map, dataframe=source_df.clone())
 child_categ_processor.process(
     filename_out=os.path.join("data", "product.category.csv"),
     params={"model": "product.category", "worker": 1, "batch_size": 20},
@@ -106,9 +104,7 @@ child_categ_processor.process(
 
 # STEP 3: Product Templates
 print("Generating data for product templates...")
-template_processor = ProductProcessorV10(
-    mapping=template_map, dataframe=source_df.clone()
-)
+template_processor = ProductProcessor(mapping=template_map, dataframe=source_df.clone())
 template_processor.process(
     filename_out=os.path.join("data", "product.template.csv"),
     params={
@@ -123,7 +119,7 @@ template_processor.process(
 # STEP 4: Product Attributes
 print("Generating data for product attributes...")
 # Provide an empty mapping to satisfy the constructor
-attribute_processor = ProductProcessorV10(mapping={}, dataframe=source_df.clone())
+attribute_processor = ProductProcessor(mapping={}, dataframe=source_df.clone())
 attribute_processor.process_attribute_data(
     attribute_list,
     ATTRIBUTE_PREFIX,
@@ -151,7 +147,7 @@ simple_value_mapping = {
 }
 
 # The Processor now takes the simple mapping.
-attr_value_processor = ProductProcessorV10(
+attr_value_processor = ProductProcessor(
     mapping=simple_value_mapping, dataframe=source_df.clone()
 )
 
@@ -193,7 +189,7 @@ context_with_update = context.copy()
 context_with_update["update_many2many"] = True
 
 # The Processor now takes the new, simple mapping.
-line_processor = ProductProcessorV10(
+line_processor = ProductProcessor(
     mapping=simple_line_mapping, dataframe=source_df.clone()
 )
 
@@ -213,7 +209,7 @@ line_processor.process(
 
 # STEP 7: Product Variants
 print("Generating data for product variants...")
-product_processor = ProductProcessorV10(
+product_processor = ProductProcessor(
     mapping=product_mapping, dataframe=source_df.clone()
 )
 product_processor.process(
