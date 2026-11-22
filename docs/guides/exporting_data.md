@@ -47,6 +47,17 @@ The tool will automatically use the high-performance **`read` method** if any of
 Otherwise, it defaults to the human-readable `export_data` method.
 
 ```{note}
+**The `id` column always holds the external ID**, whichever method is used. The
+`read` method returns database IDs, so when something switches the export to it —
+a `selection` field is the usual culprit, and you never asked for raw IDs — Fluvo
+looks the external IDs back up before writing. This matters because `id` is the
+match key on import: a database ID there would make a re-import *create
+duplicates* instead of updating. The one exception is `--technical-names`, where
+raw database values are the explicit request. A record with no external ID gets an
+empty `id`, and the export logs how many.
+```
+
+```{note}
 Both export methods honour the `--context` you pass — including `lang` for translated fields. (Earlier versions ignored the context on the `read` path, so a `--context "{'lang': 'nl_NL'}"` combined with `.id`/`field/.id` or a technical field silently returned default-language values; that path now respects it.)
 ```
 
@@ -184,7 +195,7 @@ It now has special syntax for handling different ID formats, making it powerful 
 
 | Specifier | Mode Used | Resulting Value | Example |
 | :--- | :--- | :--- | :--- |
-| `id` | `export_data` | The record's XML ID (External ID) | `__export__.res_partner_123` |
+| `id` | either | The record's XML ID (External ID) | `__export__.res_partner_123` |
 | `.id` | `read` | The record's database ID (integer) | `123` |
 | `field/id` | `export_data` | The related record's XML ID | `__export__.res_country_5` |
 | `field/.id` | `read` | The related record's database ID (integer) | `5` |
