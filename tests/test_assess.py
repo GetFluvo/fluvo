@@ -185,22 +185,46 @@ def test_assess_cli_maps_core_error_to_panel_and_exit(
     assert "Traceback" not in result.output
 
 
-def test_company_distribution_parses_read_group() -> None:
-    """_company_distribution turns read_group output into per-company counts."""
+def test_company_distribution_counts_per_company() -> None:
+    """_company_distribution counts records per company (incl. zero and shared)."""
     conn = MagicMock()
-    model = MagicMock()
-    model.read_group.return_value = [
-        {"company_id": [1, "My Company"], "company_id_count": 4200},
-        {"company_id": [2, "Company Two"], "company_id_count": 0},
-        {"company_id": False, "company_id_count": 12},  # company-less/shared
+    company_model = MagicMock()
+    company_model.search_read.return_value = [
+        {"id": 1, "name": "My Company"},
+        {"id": 2, "name": "Company Two"},
     ]
-    conn.get_model.return_value = model
+    target_model = MagicMock()
+    # search_count is called per company, then once for shared (company_id = False).
+    target_model.search_count.side_effect = [4200, 0, 12]
+
+    def get_model(name: str) -> MagicMock:
+        return company_model if name == "res.company" else target_model
+
+    conn.get_model.side_effect = get_model
     dist = assess._company_distribution(conn, "res.partner")
     assert dist == [
         {"company_id": 1, "company_name": "My Company", "count": 4200},
         {"company_id": 2, "company_name": "Company Two", "count": 0},
         {"company_id": None, "company_name": "(no company)", "count": 12},
     ]
+    # The shared bucket is only appended when some records have no company.
+    assert target_model.search_count.call_args_list[-1][0][0] == [
+        ("company_id", "=", False)
+    ]
+
+
+def test_company_distribution_omits_shared_bucket_when_empty() -> None:
+    """No company-less records → no trailing ``(no company)`` entry."""
+    conn = MagicMock()
+    company_model = MagicMock()
+    company_model.search_read.return_value = [{"id": 1, "name": "Solo"}]
+    target_model = MagicMock()
+    target_model.search_count.side_effect = [7, 0]  # company 1, then shared=0
+    conn.get_model.side_effect = (
+        lambda name: company_model if name == "res.company" else target_model
+    )
+    dist = assess._company_distribution(conn, "res.partner")
+    assert dist == [{"company_id": 1, "company_name": "Solo", "count": 7}]
 
 
 def test_company_audit_str() -> None:
@@ -224,12 +248,17 @@ def test_run_assess_includes_company_distribution(mock_connect: MagicMock) -> No
 
     def get_model(name: str) -> MagicMock:
         m = MagicMock()
+        if name == "res.company":
+            m.search_read.return_value = [
+                {"id": 1, "name": "Main"},
+                {"id": 2, "name": "Other"},
+            ]
+            return m
         m.fields_get.return_value = company_fields
-        m.search_count.return_value = 5
-        m.read_group.return_value = [
-            {"company_id": [1, "Main"], "company_id_count": 5},
-            {"company_id": [2, "Other"], "company_id_count": 0},
-        ]
+        # Each get_model(model) returns a fresh mock: the row-count call and the
+        # per-company counts inside _company_distribution each consume this list
+        # independently from index 0 — co 1 = 5, co 2 = 0, shared = 0.
+        m.search_count.side_effect = [5, 0, 0]
         return m
 
     conn.get_model.side_effect = get_model

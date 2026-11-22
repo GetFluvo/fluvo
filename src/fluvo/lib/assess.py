@@ -581,36 +581,52 @@ def _company_distribution(conn: Any, model: str) -> list[dict[str, Any]] | None:
     a company with a suspicious 0, or all records under a single company on a
     multi-company database, stands out at a glance.
 
+    Implemented with ``res.company`` + one ``search_count`` per company rather than
+    ``read_group``: ``read_group``'s signature and return shape changed in Odoo 20
+    (positional ``(domain, groupby, aggregates)`` returning tuples, vs the older
+    ``(domain, fields, groupby)`` returning ``{field: [id, name], field_count: n}``
+    dicts), and ``formatted_read_group`` lives in the optional ``web`` addon. The
+    ``search``/``search_count`` RPC signatures are stable across every supported
+    version, so this stays version-proof (#378). It also lists companies with a
+    *zero* count — exactly the migration smell the audit is meant to catch, which
+    ``read_group`` (empty groups omitted) could never show.
+
     Args:
         conn: An open Odoo connection.
         model: A model that has a ``company_id`` field.
 
     Returns:
         list[dict[str, Any]] | None: One entry per company (``company_id``,
-        ``company_name``, ``count``; a ``None`` id means company-less/shared
-        records), or None if the grouping could not be read.
+        ``company_name``, ``count`` — including companies with zero records), plus a
+        trailing ``None``-id entry for company-less/shared records when any exist, or
+        None if the counts could not be read.
     """
     try:
-        groups = conn.get_model(model).read_group([], ["company_id"], ["company_id"])
+        companies = conn.get_model("res.company").search_read([], ["id", "name"])
     except Exception as e:  # pragma: no cover - environment-dependent
-        log.debug(f"Could not read company distribution for '{model}': {e}")
+        log.debug(f"Could not read companies for '{model}' distribution: {e}")
         return None
+    model_obj = conn.get_model(model)
     dist: list[dict[str, Any]] = []
-    for g in groups:
-        ref = g.get("company_id")
-        count = int(g.get("company_id_count", 0))
-        if isinstance(ref, (list, tuple)) and ref:
+    try:
+        for company in companies:
+            cid = int(company["id"])
+            count = int(model_obj.search_count([("company_id", "=", cid)]))
             dist.append(
                 {
-                    "company_id": int(ref[0]),
-                    "company_name": str(ref[1]) if len(ref) > 1 else None,
+                    "company_id": cid,
+                    "company_name": company.get("name"),
                     "count": count,
                 }
             )
-        else:
-            dist.append(
-                {"company_id": None, "company_name": "(no company)", "count": count}
-            )
+        shared = int(model_obj.search_count([("company_id", "=", False)]))
+    except Exception as e:  # pragma: no cover - environment-dependent
+        log.debug(f"Could not count company distribution for '{model}': {e}")
+        return None
+    if shared:
+        dist.append(
+            {"company_id": None, "company_name": "(no company)", "count": shared}
+        )
     return dist
 
 
