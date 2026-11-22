@@ -665,6 +665,56 @@ class Processor:
             self.dataframe, [spec], self.config_file
         )
 
+    def resolve_xmlid(
+        self,
+        source_column: str,
+        model: str,
+        prefix: str | None = None,
+        out_column: str = "res_id",
+        on_missing: str = "error",
+        drop_source: bool = False,
+    ) -> None:
+        """Resolve a column of external ids to integer ``res_id`` values.
+
+        For a ``Many2oneReference`` target (``mail.message`` / ``ir.attachment``
+        ``res_id``) Odoo's ``load`` wants a plain integer in a column named
+        ``res_id`` — ``res_id/id`` does not work. This adds that integer column
+        from one live ``ir.model.data`` query (no cache, so records imported in an
+        earlier step of the same run resolve). Call it in your transform script,
+        then map the produced ``out_column`` (#375).
+
+        Args:
+            source_column: Column holding the external ids. With ``prefix`` it holds
+                bare names; without it, full ``module.name`` ids.
+            model: The target model the ids point at (e.g. ``res.partner``).
+            prefix: The id module when the column holds bare names; None to parse
+                ``module.name`` from each value.
+            out_column: Name of the integer column to add (default ``res_id``).
+            on_missing: ``"error"`` (raise, listing unresolved ids) or ``"keep"``
+                (leave the row's ``out_column`` null).
+            drop_source: Drop ``source_column`` after resolving.
+
+        Raises:
+            ValueError: If the Processor has no connection config.
+        """
+        if self.config_file is None:
+            raise ValueError(
+                "resolve_xmlid() needs an Odoo connection config; construct the "
+                "Processor with a config file."
+            )
+        from . import relational_import
+
+        self.dataframe = relational_import.resolve_xmlids_in_df(
+            self.dataframe,
+            self.config_file,
+            source_column=source_column,
+            model=model,
+            prefix=prefix,
+            out_column=out_column,
+            on_missing=on_missing,
+            drop_source=drop_source,
+        )
+
     def _add_data(
         self,
         dataframe: pl.DataFrame,
