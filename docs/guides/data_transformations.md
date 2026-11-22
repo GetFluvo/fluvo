@@ -259,20 +259,20 @@ Importing product variants (e.g., a T-shirt that comes in different colors and s
 
 This is the recommended approach for all modern Odoo versions. Odoo can now automatically create product variants if you provide the attribute values directly.
 
-* **Processor Class**: `ProductProcessorV10`
+* **Processor Class**: `ProductProcessor`
 * **Key Mapper**: `mapper.m2m_template_attribute_value`
 
 **How it Works:**
-You provide the attribute values (e.g., "Blue", "L") as a comma-separated string. The `ProductProcessorV10` sets `create_variant: 'Dynamically'` on the attribute, telling Odoo to find or create the corresponding `product.attribute.value` records and link them to the product template automatically.
+You provide the attribute values (e.g., "Blue", "L") as a comma-separated string. The `ProductProcessor` sets `create_variant: 'Dynamically'` on the attribute, telling Odoo to find or create the corresponding `product.attribute.value` records and link them to the product template automatically.
 
 #### Example Transformation Script (Modern)
 ```python
 # In your transform.py
 from fluvo.lib import mapper
-from fluvo.lib.transform import ProductProcessorV10
+from fluvo.lib.transform import ProductProcessor
 
 # Initialize the modern processor
-processor = ProductProcessorV10('origin/products.csv')
+processor = ProductProcessor('origin/products.csv')
 
 # --- 1. Create the product.attribute records ---
 # This step tells Odoo which attributes can create variants
