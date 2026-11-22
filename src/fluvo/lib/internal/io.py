@@ -47,7 +47,7 @@ def _build_import_command(
     command_parts = [
         "fluvo",
         "import",
-        "--config",
+        "--connection-file",
         shlex.quote(kwargs.get("conf_file", "conf/connection.conf")),
         "--file",
         shlex.quote(filename),
@@ -76,9 +76,9 @@ def _build_export_command(filename: str, model: str, **kwargs: Any) -> list[str]
     return [
         "fluvo",
         "export",
-        "--config",
+        "--connection-file",
         shlex.quote(kwargs.get("conf_file", "conf/connection.conf")),
-        "--file",
+        "--output",
         shlex.quote(filename),
         "--model",
         shlex.quote(model),
