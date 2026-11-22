@@ -60,6 +60,7 @@ import polars as pl
 
 from ..logging_config import log
 from . import conf_lib
+from .core import FluvoError
 from .mangling import ANGLO, DUTCH, Locale
 
 __all__ = [
@@ -130,8 +131,13 @@ _DATE_FORMATS = {
 }
 
 
-class CompareError(RuntimeError):
-    """A comparison could not be set up or run."""
+class CompareError(FluvoError):
+    """A comparison could not be set up or run.
+
+    Part of the core error taxonomy (:class:`fluvo.lib.core.FluvoError`); it
+    remains a :class:`RuntimeError` through that base, so existing handlers are
+    unaffected.
+    """
 
 
 @dataclass(frozen=True)
