@@ -33,13 +33,19 @@ Everything in the previous "Near-term" list has landed, as of **0.1.0**:
   units — mixed and ambiguous date formats, and categories that differ only by case or
   whitespace. Read-only: it never writes.
 
-- **`fluvo compare`** ([#298](https://github.com/GetFluvo/fluvo/issues/298)) — diff a live
-  Odoo model against a spreadsheet, so you can see what a run would change, or check
-  what it did.
+- **`fluvo compare`** ([#298](https://github.com/GetFluvo/fluvo/issues/298),
+  [#350](https://github.com/GetFluvo/fluvo/issues/350)) — diff a live Odoo model against a
+  spreadsheet, or against another Odoo instance in a single run, so you can see what a run
+  would change, or check what it did.
 
 - **Excel-mangling repair** ([#332](https://github.com/GetFluvo/fluvo/issues/332)) — detect
   and fix reference columns a spreadsheet has silently rewritten (scientific notation,
   dropped leading zeros, dates) before they reach Odoo.
+
+- **Correct external ids in every export header** ([#339](https://github.com/GetFluvo/fluvo/issues/339)) —
+  a bare `id` column now stays the external id even when a selection or binary field is
+  present in the header. Previously it silently returned the database id instead, so
+  re-importing the file created duplicates rather than updating.
 
 ## Near-term
 
@@ -51,11 +57,6 @@ Everything in the previous "Near-term" list has landed, as of **0.1.0**:
 - **Narrower Pass 2** ([#226](https://github.com/GetFluvo/fluvo/issues/226)) — stop
   deferring m2m/o2m values that point at records which already exist. Less deferral
   means fewer passes, less state carried between them, and a faster run.
-
-- **A lone `id` in an export header** ([#339](https://github.com/GetFluvo/fluvo/issues/339)) —
-  a selection or binary field anywhere in the header currently makes a bare `id` column
-  come back as the database id instead of the external id, with no warning. Re-importing
-  that file then creates duplicates instead of updating — silent in both directions.
 
 ## Ongoing
 
