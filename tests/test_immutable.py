@@ -168,6 +168,32 @@ def test_recon_stats_reasons() -> None:
     assert st.unexplained == 1
 
 
+def test_new_line_on_posted_move_is_guarded_by_parent() -> None:
+    """Lines aimed at a posted move are skipped even when they are new."""
+    db = _DB()
+    db.add("account.move", "t.posted", state="posted")
+    draft = db.add("account.move", "t.draft", state="draft")
+    posted_id = db.imd[("account.move", "t", "posted")]
+    db.add("account.move.line", "t.old", parent_state="posted")
+    rows = [
+        ["t.old", "t.posted"],  # existing posted line
+        ["t.new1", "t.posted"],  # new line, posted parent (xmlid)
+        ["t.new2", "t.draft"],  # new line, draft parent
+    ]
+    kept, skipped, reason = immutable.guard_rows(
+        _Conn(db), "account.move.line", ["id", "move_id/id"], rows, "id"
+    )
+    assert reason == "posted_immutable"
+    assert kept == [["t.new2", "t.draft"]]
+    assert sorted(r[0] for r in skipped) == ["t.new1", "t.old"]
+
+    rows = [["t.n3", str(posted_id)], ["t.n4", str(draft)]]
+    kept, skipped, _ = immutable.guard_rows(
+        _Conn(db), "account.move.line", ["id", "move_id/.id"], rows, "id"
+    )
+    assert kept == [["t.n4", str(draft)]] and skipped == [["t.n3", str(posted_id)]]
+
+
 # --- import_data integration ------------------------------------------------------
 
 

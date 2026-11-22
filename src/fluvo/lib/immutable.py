@@ -23,6 +23,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from ..logging_config import log
 from .core import SourceReadError
 from .internal.tools import to_xmlid
 
@@ -34,6 +35,27 @@ CHUNK = 2000
 
 
 @dataclass(frozen=True)
+class ParentRule:
+    """A row is also immutable when the parent record it points at is.
+
+    Needed because a *new* child row has no state of its own yet. Odoo refuses
+    a new line on a posted move — unless ``check_move_validity`` is off, which
+    is exactly the context a separate line import uses, and then it silently
+    unbalances posted books (verified on Odoo 18).
+
+    Attributes:
+        field: The many2one column on the child (``move_id``); the source may
+            reference it as ``<field>/id`` or ``<field>/.id``.
+        model: The parent model.
+        state_field: The parent's state field.
+    """
+
+    field: str
+    model: str
+    state_field: str
+
+
+@dataclass(frozen=True)
 class ImmutableRule:
     """When a record of a model can no longer be changed by an import.
 
@@ -41,16 +63,22 @@ class ImmutableRule:
         field: The state field to read.
         values: The values of ``field`` that make the record immutable.
         reason: The ``unaccounted`` sub-reason guarded rows are counted under.
+        parent: Optional rule for rows whose parent is immutable.
     """
 
     field: str
     values: frozenset[str]
     reason: str = POSTED_IMMUTABLE
+    parent: ParentRule | None = None
 
 
 IMMUTABLE_RULES: dict[str, ImmutableRule] = {
     "account.move": ImmutableRule("state", frozenset({"posted"})),
-    "account.move.line": ImmutableRule("parent_state", frozenset({"posted"})),
+    "account.move.line": ImmutableRule(
+        "parent_state",
+        frozenset({"posted"}),
+        parent=ParentRule("move_id", "account.move", "state"),
+    ),
 }
 
 
@@ -239,14 +267,94 @@ def guard_rows(
         is unguarded or nothing was skipped.
     """
     rule = rule_for(model)
-    if rule is None or id_field not in header or not rows:
+    if rule is None or not rows:
         return rows, [], None
-    idx = header.index(id_field)
-    ext_ids = [normalize_xmlid(r[idx]) for r in rows if idx < len(r) and r[idx]]
-    states = resolve_states(connection, model, ext_ids, rule.field)
-    immutable = {x for x, v in states.items() if v in rule.values}
-    kept, skipped = partition_immutable(header, rows, id_field, immutable, o2m)
+    kept: list[list[Any]] = rows
+    skipped: list[list[Any]] = []
+    if id_field in header:
+        idx = header.index(id_field)
+        ext_ids = [normalize_xmlid(r[idx]) for r in rows if idx < len(r) and r[idx]]
+        states = resolve_states(connection, model, ext_ids, rule.field)
+        immutable = {x for x, v in states.items() if v in rule.values}
+        kept, skipped = partition_immutable(header, rows, id_field, immutable, o2m)
+    if rule.parent is not None:
+        kept, by_parent = _partition_by_parent(
+            connection, header, kept, rule.parent, rule.values
+        )
+        skipped = skipped + by_parent
     return kept, skipped, (rule.reason if skipped else None)
+
+
+def _partition_by_parent(
+    connection: Any,
+    header: list[str],
+    rows: list[list[Any]],
+    parent: ParentRule,
+    values: frozenset[str],
+) -> tuple[list[list[Any]], list[list[Any]]]:
+    """Split off rows whose parent record is in an immutable state.
+
+    Args:
+        connection: An Odoo connection exposing ``get_model``.
+        header: The column names.
+        rows: The data rows.
+        parent: The parent rule.
+        values: The parent state values that make it immutable.
+
+    Returns:
+        tuple[list[list[Any]], list[list[Any]]]: ``(kept, skipped)``.
+
+    Raises:
+        SourceReadError: When parent state cannot be read (fail closed).
+    """
+    xml_col, db_col = f"{parent.field}/id", f"{parent.field}/.id"
+    if xml_col in header:
+        idx = header.index(xml_col)
+        keys = {normalize_xmlid(r[idx]) for r in rows if idx < len(r) and r[idx]}
+        states = resolve_states(connection, parent.model, keys, parent.state_field)
+        locked = {k for k, v in states.items() if v in values}
+
+        def key(raw: Any) -> str:
+            return normalize_xmlid(raw)
+
+    elif db_col in header:
+        idx = header.index(db_col)
+        ids = sorted({int(r[idx]) for r in rows if idx < len(r) and r[idx]})
+        try:
+            model_obj = connection.get_model(parent.model)
+            recs = [
+                rec
+                for i in range(0, len(ids), CHUNK)
+                for rec in model_obj.read(ids[i : i + CHUNK], [parent.state_field])
+            ]
+        except Exception as e:
+            raise SourceReadError(
+                f"Could not read '{parent.state_field}' of '{parent.model}' to "
+                f"protect immutable records; aborting. ({e})"
+            ) from e
+        locked = {
+            str(rec["id"]) for rec in recs if rec.get(parent.state_field) in values
+        }
+
+        def key(raw: Any) -> str:
+            return str(int(raw))
+
+    else:
+        if parent.field in header:
+            log.warning(
+                f"'{parent.field}' is referenced by name, so rows aimed at an "
+                f"immutable '{parent.model}' cannot be detected before the load. "
+                f"Use '{xml_col}' or '{db_col}' to have them guarded."
+            )
+        return rows, []
+    if not locked:
+        return rows, []
+    kept: list[list[Any]] = []
+    skipped: list[list[Any]] = []
+    for row in rows:
+        raw = row[idx] if idx < len(row) else ""
+        (skipped if raw and key(raw) in locked else kept).append(row)
+    return kept, skipped
 
 
 def skipped_file_for(fail_file: str | None, source_file: str) -> str:

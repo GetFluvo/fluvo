@@ -567,7 +567,12 @@ never to the fail file, so a `--fail` re-run will not retry them. Fluvo does not
 compare posted entries against the source. To correct one, reverse it in Odoo;
 correction support is not part of v1.
 
-The same guard covers `account.move.line` rows whose move is posted.
+The same guard covers `account.move.line`. It catches existing lines on a
+posted entry, and also *new* lines whose `move_id/id` or `move_id/.id` points at
+a posted entry. The second case matters for line imports run with
+`check_move_validity: False`: Odoo then accepts a new line on a posted entry and
+the books become unbalanced. A `move_id` given by name cannot be checked before
+the load, so reference the move by external id or database id.
 
 ---
 
