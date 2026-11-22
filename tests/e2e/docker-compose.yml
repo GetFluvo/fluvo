@@ -5,7 +5,9 @@
 
 services:
   db:
-    image: postgres:15
+    # Odoo 20 uses the SQL aggregate any_value(), added in PostgreSQL 16, so the
+    # db must be >= 16. Overridable for pinning a specific version per run.
+    image: postgres:${FLUVO_E2E_PG_VERSION:-16}
     environment:
       - POSTGRES_DB=postgres
       - POSTGRES_USER=odoo
