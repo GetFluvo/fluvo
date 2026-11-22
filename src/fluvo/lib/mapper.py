@@ -860,19 +860,25 @@ def m2m_attribute_value(prefix: str, *fields: str) -> MapperFunc:
     return m2m_map(prefix, concat_field_value_m2m("_", *fields))
 
 
-def m2m_template_attribute_value(prefix: str, *fields: Any) -> MapperFunc:
+def m2m_template_attribute_value(
+    prefix: str, *fields: Any, template_key: str = "template_id"
+) -> MapperFunc:
     """(Modern V13+) Creates a comma-separated list of attribute values.
 
     This mapper concatenates the *values* of the given fields. This is used for
     the modern product attribute system where Odoo automatically
     creates the `product.attribute.value` records from the raw value names.
 
-    It will return an empty string if the `template_id` is missing from the
+    It will return an empty string if the template key is missing from the
     source line, preventing the creation of orphaned attribute lines.
 
     Args:
         prefix: (Unused) Kept for backward compatibility.
         *fields: The attribute columns (e.g. 'Color', 'Size') to get values from.
+        template_key: The column holding the template key; the mapper emits nothing
+            for a row where it is empty. Defaults to ``template_id`` (back-compat),
+            so a caller whose key lives elsewhere passes its column name instead of
+            aliasing it to ``template_id`` first (#372).
 
     Returns:
         MapperFunc: A mapper that returns a comma-separated string of attribute values.
@@ -881,7 +887,7 @@ def m2m_template_attribute_value(prefix: str, *fields: Any) -> MapperFunc:
 
     def m2m_attribute_fun(line: LineDict, state: StateDict) -> str:
         # This check is critical for the modern workflow.
-        if not line.get("template_id"):
+        if not line.get(template_key):
             return ""
         return cast(str, concat_m(line, state))
 
