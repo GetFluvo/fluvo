@@ -222,7 +222,7 @@ def test_new_line_on_posted_move_is_guarded(
 
 @pytest.mark.xfail(
     strict=True,
-    reason="pre-existing: --o2m counts continuation rows as failed and writes "
+    reason="#368: --o2m counts continuation rows as failed and writes "
     "them to the fail file, though Odoo created the lines",
 )
 def test_o2m_journal_entry_reconciles(
