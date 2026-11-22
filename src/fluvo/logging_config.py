@@ -4,6 +4,7 @@ import logging
 from collections.abc import Generator
 from contextlib import contextmanager
 
+from rich.console import Console
 from rich.logging import RichHandler
 
 # Get the root logger for the application package
@@ -36,7 +37,10 @@ def setup_logging(verbose: bool = False, log_file: str | None = None) -> None:
 
     # Create a rich handler for beautiful, colorful console output
     global _console_handler
+    # Log to stderr so stdout stays clean for a consumer speaking a line protocol
+    # over it (the headless core contract, #363): logs and progress are never data.
     _console_handler = RichHandler(
+        console=Console(stderr=True),
         rich_tracebacks=True,
         markup=True,
         log_time_format="[%X]",
