@@ -28,7 +28,10 @@ Everything in the previous "Near-term" list has landed, as of **0.1.0**:
 
 - **`fluvo assess`** — a fast, read-only pre-migration check that reports the shape and
   risk of a dataset against a target Odoo (models, fields, relations, likely problems)
-  before you commit to a run. Read-only: it never writes.
+  before you commit to a run. `--profile` goes further and reads the values themselves:
+  fill rates, columns that hold more than one population — the classic column mixing two
+  units — mixed and ambiguous date formats, and categories that differ only by case or
+  whitespace. Read-only: it never writes.
 
 - **`fluvo compare`** ([#298](https://github.com/GetFluvo/fluvo/issues/298)) — diff a live
   Odoo model against a spreadsheet, so you can see what a run would change, or check
