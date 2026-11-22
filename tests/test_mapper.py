@@ -360,6 +360,18 @@ def test_modern_template_attribute_mapper() -> None:
     assert mapper_func(line_without_template, {}) == ""
 
 
+def test_modern_template_attribute_mapper_custom_template_key() -> None:
+    """template_key lets the mapper read the key from any column (#372)."""
+    custom = mapper.m2m_template_attribute_value(
+        "PREFIX", "Color", "Size", template_key="ref"
+    )
+    # Key present under the custom column -> concatenated values.
+    assert custom({"ref": "TPL1", "Color": "Blue", "Size": "L"}, {}) == "Blue,L"
+    # The default 'template_id' column is now irrelevant; only 'ref' gates output.
+    assert custom({"template_id": "TPL1", "Color": "Blue", "Size": "L"}, {}) == ""
+    assert custom({"ref": "", "Color": "Blue", "Size": "L"}, {}) == ""
+
+
 def test_split_mappers() -> None:
     """Tests the split helper functions."""
     split_line_func = mapper.split_line_number(100)
