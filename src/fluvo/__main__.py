@@ -2139,6 +2139,32 @@ def assess_cmd(
     )
 
 
+def _literal_option(raw: str | None, option: str, expected: type) -> Any:
+    """Parse a Python-literal CLI option, failing before any connection is made.
+
+    Args:
+        raw: The option's raw string value, or None if it was not given.
+        option: The option name, for the error message.
+        expected: ``list`` for a domain, ``dict`` for a context.
+
+    Returns:
+        Any: The parsed literal, or None if ``raw`` was None.
+
+    Raises:
+        click.BadParameter: If the value is not a literal of that type.
+    """
+    if raw is None:
+        return None
+    kind = "an Odoo domain list literal" if expected is list else "a dict literal"
+    try:
+        value = ast.literal_eval(raw)
+    except (ValueError, SyntaxError) as exc:
+        raise click.BadParameter(f"{option} must be {kind}, got '{raw}'.") from exc
+    if not isinstance(value, expected):
+        raise click.BadParameter(f"{option} must be {kind}, got '{raw}'.")
+    return value
+
+
 @cli.command(name="compare")
 @click.option(
     "--connection-file",
@@ -2159,9 +2185,39 @@ def assess_cmd(
 @click.option(
     "--file",
     "source_file",
-    required=True,
+    default=None,
     type=click.Path(exists=True, dir_okay=False),
-    help="The spreadsheet (.xlsx/.ods) or delimited file to compare.",
+    help="The spreadsheet (.xlsx/.ods) or delimited file to compare. Give this or "
+    "--against-connection, not both.",
+)
+@click.option(
+    "--against-connection",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Compare against a second Odoo instance instead of a file: the path to "
+    "its connection file. Both sides are read over RPC, with no intermediate "
+    "export. --fields is required in this mode.",
+)
+@click.option(
+    "--against-protocol",
+    type=click.Choice(
+        ["xmlrpc", "xmlrpcs", "jsonrpc", "jsonrpcs", "json2", "json2s"],
+        case_sensitive=False,
+    ),
+    default=None,
+    help="RPC protocol for --against-connection. Older Odoo instances often need "
+    "xmlrpc where the target takes jsonrpc.",
+)
+@click.option(
+    "--against-domain",
+    default=None,
+    help="Odoo domain filter for the source instance. Defaults to --domain, so "
+    "one filter covers both sides; pass '[]' for no filter on the source.",
+)
+@click.option(
+    "--against-context",
+    default=None,
+    help="Odoo context for the source instance. Defaults to --context.",
 )
 @click.option("--sheet", default=None, help="Worksheet name (default: the first).")
 @click.option("-s", "--sep", "separator", default=";", help="CSV separator character.")
@@ -2175,7 +2231,7 @@ def assess_cmd(
     "--fields",
     default=None,
     help="Comma-separated fields to compare. Defaults to the file's columns that "
-    "exist as fields on the model.",
+    "exist as fields on the model; required with --against-connection.",
 )
 @click.option(
     "--map",
@@ -2193,18 +2249,18 @@ def assess_cmd(
 @click.option(
     "--locale",
     type=click.Choice(["dutch", "anglo"], case_sensitive=False),
-    default="dutch",
-    show_default=True,
-    help="How the FILE writes numbers: 'dutch' (1.234,56) or 'anglo' (1,234.56). "
-    "Never guessed -- an inverted guess misreads values by a factor of a thousand.",
+    default=None,
+    help="How the FILE writes numbers: 'dutch' (1.234,56, the default) or 'anglo' "
+    "(1,234.56). Never guessed -- an inverted guess misreads values by a factor "
+    "of a thousand. Does not apply to --against-connection.",
 )
 @click.option(
     "--date-order",
     type=click.Choice(["dmy", "mdy", "iso"], case_sensitive=False),
-    default="dmy",
-    show_default=True,
+    default=None,
     help="How to read an all-numeric date in the file: 05-01-2024 as 5 January "
-    "(dmy), 1 May (mdy), or ISO dates only.",
+    "(dmy, the default), 1 May (mdy), or ISO dates only. Does not apply to "
+    "--against-connection.",
 )
 @click.option(
     "--numeric-coercion/--no-numeric-coercion",
@@ -2264,21 +2320,39 @@ def assess_cmd(
     help="Exit with status 1 when anything differs. For CI and nightly checks.",
 )
 def compare_cmd(**kwargs: Any) -> None:
-    """Compare an Odoo model against a spreadsheet (read-only).
+    """Compare an Odoo model against a spreadsheet or a second Odoo (read-only).
 
     Answers "does what's in Odoo match this file?" without the false differences a
     generic diff produces: numbers, leading zeros Excel ate, Dutch booleans, Excel
     date serials, many2one labels and selection labels are all normalised first.
+
+    With --against-connection the source is a second Odoo instance instead of a
+    file, which is the overlap check a migration wants: old instance against new,
+    over RPC, with no intermediate export.
     """
     from .lib.compare import ANGLO, DUTCH, CompareError, CompareOptions, run_compare
     from .lib.internal.ui import _show_error_panel
 
-    config: str | dict[str, Any] = kwargs["connection_file"]
-    if kwargs["protocol"]:
-        config = {
-            "_config_file": kwargs["connection_file"],
-            "protocol": kwargs["protocol"],
-        }
+    against = kwargs["against_connection"]
+    if (kwargs["source_file"] is None) == (against is None):
+        raise click.UsageError(
+            "Give exactly one source: --file for a spreadsheet, or "
+            "--against-connection for a second Odoo instance."
+        )
+    if against and (kwargs["locale"] or kwargs["date_order"]):
+        raise click.UsageError(
+            "--locale and --date-order say how a spreadsheet writes values. Both "
+            "sides are Odoo here, and Odoo writes dot decimals and ISO dates "
+            "whatever the user's language, so neither applies."
+        )
+
+    def _config(path: str, protocol: str | None) -> str | dict[str, Any]:
+        if not protocol:
+            return path
+        return {"_config_file": path, "protocol": protocol}
+
+    config = _config(kwargs["connection_file"], kwargs["protocol"])
+    against_config = _config(against, kwargs["against_protocol"]) if against else None
 
     column_map: dict[str, str] = {}
     for pair in kwargs["column_map"]:
@@ -2289,26 +2363,17 @@ def compare_cmd(**kwargs: Any) -> None:
         source_column, odoo_field = pair.split("=", 1)
         column_map[source_column.strip()] = odoo_field.strip()
 
-    try:
-        domain = ast.literal_eval(kwargs["domain"])
-        if not isinstance(domain, list):
-            raise ValueError("not a list")
-    except (ValueError, SyntaxError) as exc:
-        raise click.BadParameter(
-            f"--domain must be an Odoo domain list literal, got '{kwargs['domain']}'."
-        ) from exc
-    try:
-        context = ast.literal_eval(kwargs["context"])
-        if not isinstance(context, dict):
-            raise ValueError("not a dict")
-    except (ValueError, SyntaxError) as exc:
-        raise click.BadParameter(
-            f"--context must be a dict literal, got '{kwargs['context']}'."
-        ) from exc
+    domain = _literal_option(kwargs["domain"], "--domain", list)
+    context = _literal_option(kwargs["context"], "--context", dict)
+    against_domain = _literal_option(kwargs["against_domain"], "--against-domain", list)
+    against_context = _literal_option(
+        kwargs["against_context"], "--against-context", dict
+    )
 
+    locale_name = (kwargs["locale"] or "dutch").lower()
     options = CompareOptions(
-        locale=ANGLO if kwargs["locale"].lower() == "anglo" else DUTCH,
-        date_order=kwargs["date_order"].lower(),
+        locale=ANGLO if locale_name == "anglo" else DUTCH,
+        date_order=(kwargs["date_order"] or "dmy").lower(),
         numeric_coercion=kwargs["numeric_coercion"],
         case_insensitive=kwargs["case_insensitive"],
         float_decimals=kwargs["float_decimals"],
@@ -2321,6 +2386,9 @@ def compare_cmd(**kwargs: Any) -> None:
             model=kwargs["model"],
             file=kwargs["source_file"],
             key=kwargs["key"],
+            against_connection=against_config,
+            against_domain=against_domain,
+            against_context=against_context,
             fields=kwargs["fields"],
             column_map=column_map or None,
             domain=domain,

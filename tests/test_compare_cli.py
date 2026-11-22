@@ -63,6 +63,37 @@ def _invoke(
     return invocation, run_compare
 
 
+def _invoke_against(
+    tmp_path: Path, *extra: str, result: CompareResult | None = None
+) -> tuple[Any, MagicMock]:
+    """Run `fluvo compare --against-connection` with both connections stubbed."""
+    target = tmp_path / "target.conf"
+    target.write_text("[Connection]\n", encoding="utf-8")
+    source = tmp_path / "source.conf"
+    source.write_text("[Connection]\n", encoding="utf-8")
+    runner = CliRunner()
+    with patch("fluvo.lib.compare.run_compare") as run_compare:
+        run_compare.return_value = result or _result()
+        invocation = runner.invoke(
+            __main__.cli,
+            [
+                "compare",
+                "--connection-file",
+                str(target),
+                "--model",
+                "res.partner",
+                "--against-connection",
+                str(source),
+                "--key",
+                "ref",
+                "--fields",
+                "name",
+                *extra,
+            ],
+        )
+    return invocation, run_compare
+
+
 def test_options_reach_run_compare(tmp_path: Path) -> None:
     """The command is a thin wrapper: every flag lands on the call."""
     invocation, run_compare = _invoke(
@@ -178,3 +209,100 @@ def test_a_setup_error_is_shown_and_exits_one(tmp_path: Path) -> None:
         )
     assert invocation.exit_code == 1
     assert "boom" in invocation.output
+
+
+# ---------------------------------------------------------------------------
+# --against-connection (#350)
+# ---------------------------------------------------------------------------
+
+
+def test_a_second_connection_reaches_run_compare(tmp_path: Path) -> None:
+    """The Odoo source is passed through, and no file is given."""
+    invocation, run_compare = _invoke_against(tmp_path)
+    assert invocation.exit_code == 0, invocation.output
+    kwargs = run_compare.call_args.kwargs
+    assert kwargs["file"] is None
+    assert str(kwargs["against_connection"]).endswith("source.conf")
+
+
+def test_a_source_protocol_can_differ_from_the_targets(tmp_path: Path) -> None:
+    """A legacy source often needs xmlrpc where the target takes jsonrpc."""
+    _, run_compare = _invoke_against(
+        tmp_path, "--against-protocol", "xmlrpc", "--protocol", "jsonrpc"
+    )
+    kwargs = run_compare.call_args.kwargs
+    assert kwargs["against_connection"]["protocol"] == "xmlrpc"
+    assert kwargs["config"]["protocol"] == "jsonrpc"
+
+
+def test_the_source_domain_and_context_are_parsed(tmp_path: Path) -> None:
+    """Both are literals, and both default to None so run_compare can fall back."""
+    _, run_compare = _invoke_against(tmp_path)
+    assert run_compare.call_args.kwargs["against_domain"] is None
+    assert run_compare.call_args.kwargs["against_context"] is None
+
+    _, run_compare = _invoke_against(
+        tmp_path, "--against-domain", "[]", "--against-context", "{'lang': 'nl_NL'}"
+    )
+    assert run_compare.call_args.kwargs["against_domain"] == []
+    assert run_compare.call_args.kwargs["against_context"] == {"lang": "nl_NL"}
+
+
+def test_a_malformed_source_domain_is_rejected(tmp_path: Path) -> None:
+    """Before any connection is opened, as with --domain."""
+    invocation, run_compare = _invoke_against(tmp_path, "--against-domain", "nope")
+    assert invocation.exit_code != 0
+    assert "--against-domain" in invocation.output
+    run_compare.assert_not_called()
+
+
+def test_a_file_and_a_connection_together_is_a_usage_error(tmp_path: Path) -> None:
+    """Two sources is ambiguous, so it is refused rather than one winning."""
+    source = tmp_path / "rows.csv"
+    source.write_text("ref;name\nA;Acme\n", encoding="utf-8")
+    invocation, run_compare = _invoke_against(tmp_path, "--file", str(source))
+    assert invocation.exit_code != 0
+    assert "exactly one source" in invocation.output
+    run_compare.assert_not_called()
+
+
+def test_no_source_at_all_is_a_usage_error(tmp_path: Path) -> None:
+    """--file used to be required; dropping it must not mean 'compare nothing'."""
+    connection = tmp_path / "connection.conf"
+    connection.write_text("[Connection]\n", encoding="utf-8")
+    runner = CliRunner()
+    with patch("fluvo.lib.compare.run_compare") as run_compare:
+        invocation = runner.invoke(
+            __main__.cli,
+            [
+                "compare",
+                "--connection-file",
+                str(connection),
+                "--model",
+                "res.partner",
+                "--key",
+                "ref",
+            ],
+        )
+    assert invocation.exit_code != 0
+    assert "exactly one source" in invocation.output
+    run_compare.assert_not_called()
+
+
+def test_spreadsheet_locale_flags_are_refused_for_two_odoo_instances(
+    tmp_path: Path,
+) -> None:
+    """Silently ignoring them would be the one thing this module never does."""
+    for flag, value in (("--locale", "anglo"), ("--date-order", "mdy")):
+        invocation, run_compare = _invoke_against(tmp_path, flag, value)
+        assert invocation.exit_code != 0, flag
+        assert "Odoo writes dot decimals" in invocation.output
+        run_compare.assert_not_called()
+
+
+def test_the_file_locale_default_is_unchanged(tmp_path: Path) -> None:
+    """Making the flags detectable must not change what a file run assumes."""
+    _, run_compare = _invoke(tmp_path)
+    options = run_compare.call_args.kwargs["options"]
+    assert options.locale.decimal_sep == ","
+    assert options.date_order == "dmy"
