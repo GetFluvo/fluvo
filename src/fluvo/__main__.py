@@ -2332,6 +2332,7 @@ def compare_cmd(**kwargs: Any) -> None:
     over RPC, with no intermediate export.
     """
     from .lib.compare import ANGLO, DUTCH, CompareError, CompareOptions, run_compare
+    from .lib.internal.reporter import ConsoleReporter
     from .lib.internal.ui import _show_error_panel
 
     against = kwargs["against_connection"]
@@ -2400,6 +2401,7 @@ def compare_cmd(**kwargs: Any) -> None:
             fmt=kwargs["report_format"].lower(),
             output=kwargs["output"],
             write_fixes=kwargs["write_fixes"],
+            reporter=ConsoleReporter(),
         )
     except CompareError as exc:
         _show_error_panel("Comparison failed", str(exc))
