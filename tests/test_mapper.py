@@ -396,6 +396,14 @@ def test_m2m_template_attribute_value_as_xmlid_sanitises() -> None:
     assert out == "product_template_attribute_value.T_1_Color_Bl_k_Red"
 
 
+def test_m2m_template_attribute_value_as_xmlid_name_with_dots() -> None:
+    """The xmlid name part may contain dots: split on the first dot only (#374)."""
+    m = mapper.m2m_template_attribute_value("x", "Color", as_xmlid=True)
+    # module 'PRODUCT_TEMPLATE', name 'A.B' -> 'A_B' after \W->_, not 'B'.
+    out = m({"template_id": "PRODUCT_TEMPLATE.A.B", "Color": "Black"}, {})
+    assert out == "product_template_attribute_value.A_B_Color_Black"
+
+
 def test_split_mappers() -> None:
     """Tests the split helper functions."""
     split_line_func = mapper.split_line_number(100)

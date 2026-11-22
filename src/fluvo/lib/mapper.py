@@ -887,7 +887,10 @@ def m2m_template_attribute_value(
     value's external-id name part (``to_xmlid('<attribute>_<value>')``, as
     :meth:`ProductProcessor.process_attribute_value_data` builds it); the whole
     name is sanitised with ``\\W -> _`` to match the addon. This requires that
-    addon to be installed on the target to have created the ids.
+    addon to be installed on the target to have created the ids. The
+    ``<attribute>`` here is the source *column name*, so the ids line up only when
+    the value external ids were built from the same column names (the
+    ``process_attribute_value_data`` convention).
 
     Args:
         prefix: (Unused) Kept for backward compatibility.
@@ -921,8 +924,9 @@ def m2m_template_attribute_value(
         if not template:
             return ""
         # The template key may be a full ``module.name`` external id; the addon
-        # keys on the name part only.
-        template_ref = str(template).rsplit(".", 1)[-1]
+        # keys on the name part only. An xmlid splits on the FIRST dot — the name
+        # itself may contain dots — and a bare ref (no dot) is used whole.
+        template_ref = str(template).split(".", 1)[-1]
         ids: list[str] = []
         for field in fields:
             value = line.get(field)
