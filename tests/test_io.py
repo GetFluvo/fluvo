@@ -83,7 +83,7 @@ def test_write_file_import_command(tmp_path: Path) -> None:
     assert script_file.exists()
     content = script_file.read_text()
     assert "fluvo import" in content
-    assert f"--config {shlex.quote('conf/custom.conf')}" in content
+    assert f"--connection-file {shlex.quote('conf/custom.conf')}" in content
     assert f"--file {shlex.quote(str(data_file))}" in content
     assert f"--model {shlex.quote('my.model')}" in content
     assert "--worker 4" in content
@@ -117,6 +117,57 @@ def test_write_file_export_command(tmp_path: Path) -> None:
     expected_domain_str = f"--domain {shlex.quote(domain_str)}"
     assert expected_domain_str in content
     assert "--fail" not in content
+
+
+def _cli_long_options(command: str) -> set[str]:
+    """The ``--long`` option names the real CLI accepts for ``command``."""
+    from fluvo.__main__ import cli
+
+    opts: set[str] = set()
+    for param in cli.commands[command].params:
+        opts.update(o for o in param.opts if o.startswith("--"))
+    return opts
+
+
+def test_generated_commands_use_real_cli_options(tmp_path: Path) -> None:
+    """Every flag in a generated script must be an option the CLI accepts.
+
+    Regression: write_file emitted ``--config``, but ``fluvo import`` only has
+    ``--connection-file``, so every line of the generated load.sh failed with
+    "No such option '--config'". This guards against any such flag drift.
+    """
+    load = tmp_path / "load.sh"
+    write_file(
+        filename=str(tmp_path / "d.csv"),
+        header=["id"],
+        data=[["1"]],
+        launchfile=str(load),
+        command="import",
+        model="my.model",
+        init=True,
+    )
+    export = tmp_path / "export.sh"
+    write_file(
+        filename=str(tmp_path / "e.csv"),
+        launchfile=str(export),
+        command="export",
+        model="my.model",
+        fields="id",
+        init=True,
+    )
+
+    for script, command in ((load, "import"), (export, "export")):
+        valid = _cli_long_options(command)
+        checked = 0
+        for line in script.read_text().splitlines():
+            tokens = shlex.split(line)
+            if tokens[:2] != ["fluvo", command]:
+                continue
+            flags = [t for t in tokens if t.startswith("--")]
+            unknown = [f for f in flags if f not in valid]
+            assert not unknown, f"fluvo {command} got unknown options {unknown}"
+            checked += 1
+        assert checked, f"no 'fluvo {command}' line found in the generated script"
 
 
 def test_write_file_auto_model_name(tmp_path: Path) -> None:
