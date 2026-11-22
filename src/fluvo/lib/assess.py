@@ -29,7 +29,7 @@ from rich.table import Table
 
 from ..logging_config import log
 from . import conf_lib
-from .internal.ui import _show_error_panel
+from .core import ConnectError, NothingToDoError, NullReporter, RunReporter
 from .mangling import ANGLO, Locale
 from .profiling import looks_like_qualifier, profile_frame
 
@@ -635,6 +635,7 @@ def run_assess(  # noqa: C901
     group_by: str | None = None,
     profile_limit: int = DEFAULT_PROFILE_LIMIT,
     locale: Locale = ANGLO,
+    reporter: RunReporter | None = None,
 ) -> list[dict[str, Any]]:
     """Assess the requested models on the source Odoo and emit a report (PLAN 2.2).
 
@@ -654,34 +655,39 @@ def run_assess(  # noqa: C901
         profile_limit: Maximum rows read per model when profiling.
         locale: Decimal/thousands convention used to parse numeric values.
             Never inferred, because an inverted guess changes every finding.
+        reporter: Optional progress sink (issue #363). Receives phase and
+            per-model progress; defaults to a no-op, so the console-free core
+            never has to check for None.
 
     Returns:
         list[dict[str, Any]]: The per-model assessments (also for programmatic use).
 
     Raises:
-        SystemExit: with code 1 if the connection fails or no models can be
-            assessed.
+        ConnectError: If the source Odoo cannot be reached or authenticated.
+        NothingToDoError: If no models are selected, or none can be read.
     """
+    reporter = reporter or NullReporter()
+    reporter.on_phase("connecting")
     try:
         conn = _connect(config)
     except Exception as e:
-        _show_error_panel(
-            "Odoo Connection Error",
-            f"Could not connect to the source Odoo to assess it.\nError: {e}",
-        )
-        raise SystemExit(1) from e
+        raise ConnectError(
+            f"Could not connect to the source Odoo to assess it.\nError: {e}"
+        ) from e
 
+    reporter.on_phase("discovering models")
     target_models = models or _discover_models(conn)
     if not target_models:
-        _show_error_panel(
-            "Nothing to assess",
+        raise NothingToDoError(
             "No models to assess. Pass --models model.a,model.b, or check that the "
-            "common models exist on this database.",
+            "common models exist on this database."
         )
-        raise SystemExit(1)
 
+    reporter.on_phase("assessing")
     assessments: list[dict[str, Any]] = []
-    for model in target_models:
+    total = len(target_models)
+    for index, model in enumerate(target_models, start=1):
+        reporter.on_progress(index, total)
         try:
             odoo_fields = conn.get_model(model).fields_get()
         except Exception as e:
@@ -714,11 +720,9 @@ def run_assess(  # noqa: C901
         assessments.append(assessment)
 
     if not assessments:
-        _show_error_panel(
-            "Nothing to assess",
-            "None of the requested models could be read on this database.",
+        raise NothingToDoError(
+            "None of the requested models could be read on this database."
         )
-        raise SystemExit(1)
 
     # Console output.
     if fmt == "json":

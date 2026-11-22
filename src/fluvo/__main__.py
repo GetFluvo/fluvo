@@ -2119,24 +2119,38 @@ def assess_cmd(
 ) -> None:
     """Assess a source Odoo for migration: inventory, volumes, and risk flags."""
     from .lib.assess import DEFAULT_PROFILE_LIMIT, run_assess
+    from .lib.core import ConnectError, FluvoError, NothingToDoError
+    from .lib.internal.reporter import ConsoleReporter
+    from .lib.internal.ui import _show_error_panel
     from .lib.mangling import ANGLO, DUTCH
 
     config: str | dict[str, Any] = connection_file
     if protocol:
         config = {"_config_file": connection_file, "protocol": protocol}
     model_list = [m.strip() for m in models.split(",") if m.strip()] if models else None
-    run_assess(
-        config=config,
-        models=model_list,
-        output=output,
-        fmt=report_format.lower(),
-        profile=profile,
-        group_by=group_by,
-        profile_limit=(
-            profile_limit if profile_limit is not None else DEFAULT_PROFILE_LIMIT
-        ),
-        locale=DUTCH if decimal_comma else ANGLO,
-    )
+    # Map a typed core error to its panel title; the core no longer knows about
+    # panels or exit codes — this CLI adapter owns that presentation (#363).
+    titles = {
+        ConnectError: "Odoo Connection Error",
+        NothingToDoError: "Nothing to assess",
+    }
+    try:
+        run_assess(
+            config=config,
+            models=model_list,
+            output=output,
+            fmt=report_format.lower(),
+            profile=profile,
+            group_by=group_by,
+            profile_limit=(
+                profile_limit if profile_limit is not None else DEFAULT_PROFILE_LIMIT
+            ),
+            locale=DUTCH if decimal_comma else ANGLO,
+            reporter=ConsoleReporter(),
+        )
+    except FluvoError as exc:
+        _show_error_panel(titles.get(type(exc), "Error"), str(exc))
+        raise SystemExit(exc.exit_code) from exc
 
 
 def _literal_option(raw: str | None, option: str, expected: type) -> Any:

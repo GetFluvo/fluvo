@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fluvo.lib import assess
+from fluvo.lib.core import ConnectError, NothingToDoError
 
 FIELDS: dict[str, dict[str, Any]] = {
     "id": {"type": "integer"},
@@ -122,19 +123,66 @@ def test_run_assess_writes_output_file(mock_connect: MagicMock, tmp_path: Any) -
 
 
 @patch("fluvo.lib.assess._connect")
-def test_run_assess_no_models_aborts(mock_connect: MagicMock) -> None:
-    """No readable models -> fail loud (SystemExit)."""
+def test_run_assess_no_models_raises_nothing_to_do(mock_connect: MagicMock) -> None:
+    """No readable models -> a typed NothingToDoError, not a SystemExit (#363)."""
     mock_connect.return_value = _fake_conn({}, {})
-    with pytest.raises(SystemExit):
+    with pytest.raises(NothingToDoError):
         assess.run_assess("c.conf", models=["ghost.a", "ghost.b"])
 
 
 @patch("fluvo.lib.assess._connect")
-def test_run_assess_connection_failure_aborts(mock_connect: MagicMock) -> None:
-    """A connection failure exits non-zero."""
+def test_run_assess_connection_failure_raises_connect_error(
+    mock_connect: MagicMock,
+) -> None:
+    """A connection failure raises a typed ConnectError, not a SystemExit (#363)."""
     mock_connect.side_effect = Exception("refused")
-    with pytest.raises(SystemExit):
+    with pytest.raises(ConnectError):
         assess.run_assess("c.conf", models=["res.partner"])
+
+
+@patch("fluvo.lib.assess._connect")
+def test_run_assess_reports_phases_to_its_reporter(mock_connect: MagicMock) -> None:
+    """run_assess drives the reporter through its phases (#363)."""
+    mock_connect.return_value = _fake_conn({"res.partner": FIELDS}, {"res.partner": 3})
+
+    class Recording:
+        def __init__(self) -> None:
+            self.phases: list[str] = []
+            self.progress: list[tuple[int, int]] = []
+
+        def on_phase(self, name: str) -> None:
+            self.phases.append(name)
+
+        def on_progress(self, done: int, total: int, stats: Any = None) -> None:
+            self.progress.append((done, total))
+
+        def on_message(self, level: str, text: str) -> None:
+            pass
+
+    reporter = Recording()
+    assess.run_assess("c.conf", models=["res.partner"], reporter=reporter)
+    assert reporter.phases == ["connecting", "discovering models", "assessing"]
+    assert reporter.progress == [(1, 1)]
+
+
+@patch("fluvo.lib.assess._connect")
+def test_assess_cli_maps_core_error_to_panel_and_exit(
+    mock_connect: MagicMock, tmp_path: Any
+) -> None:
+    """The CLI adapter turns a typed core error into a panel + exit 1 (#363)."""
+    from click.testing import CliRunner
+
+    from fluvo.__main__ import cli
+
+    mock_connect.side_effect = Exception("refused")
+    conf = tmp_path / "x.conf"
+    conf.write_text("[x]\n")
+    result = CliRunner().invoke(
+        cli, ["assess", "--connection-file", str(conf), "--models", "res.partner"]
+    )
+    assert result.exit_code == 1
+    assert "Odoo Connection Error" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_company_distribution_parses_read_group() -> None:
