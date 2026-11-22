@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       odoo_version:
-        description: "Odoo version to test (e.g. 16.0, 17.0, 18.0, 19.0)"
+        description: "Odoo version to test (e.g. 16.0, 17.0, 18.0, 19.0, 20.0)"
         required: false
         default: "18.0"
   schedule:
@@ -25,7 +25,7 @@ jobs:
         odoo_version: >-
           ${{ github.event_name == 'workflow_dispatch'
               && fromJSON(format('["{0}"]', github.event.inputs.odoo_version))
-              || fromJSON('["16.0", "17.0", "18.0", "19.0"]') }}
+              || fromJSON('["16.0", "17.0", "18.0", "19.0", "20.0"]') }}
     env:
       # Small CI tier: fast, still exercises every integrity scenario.
       FLUVO_E2E_SCALE: "5000"

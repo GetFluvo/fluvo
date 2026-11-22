@@ -67,12 +67,12 @@ Everything in the previous "Near-term" list has landed, as of **0.1.0**:
 
 - **Reconciliation & data quality** — deepen the integrity guarantees that already
   back every import (the `created + failed + unaccounted == total` contract) and the
-  end-to-end suite that proves them against real Odoo 16–19, including resilience
+  end-to-end suite that proves them against real Odoo 16–20, including resilience
   under a flaky server ([#197](https://github.com/GetFluvo/fluvo/issues/197)).
 
 ## Supported versions & legacy
 
-Fluvo targets **Odoo 16–19** over RPC. The old `InvoiceWorkflowV9` post-import workflow
+Fluvo targets **Odoo 16–20** over RPC. The old `InvoiceWorkflowV9` post-import workflow
 (written for Odoo 9, using the removed `exec_workflow` API) is **legacy and unmaintained**
 — it is retained only for reference and is excluded from the test/coverage gates. It is
 not part of the roadmap above; if post-import workflows return, it will be as a new,

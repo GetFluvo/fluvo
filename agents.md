@@ -6,7 +6,7 @@ Guidance for AI coding agents working in this repository.
 
 fluvo is a **Python package** (a library plus a CLI) — **not** an Odoo module, and
 it is not installed inside Odoo. It is a Polars-backed ETL engine that imports,
-exports, and migrates data by talking to **Odoo 16–19 over RPC**
+exports, and migrates data by talking to **Odoo 16–20 over RPC**
 (xmlrpc / jsonrpc / json2). Because it connects over RPC, fluvo's own Python
 version is decoupled from the target Odoo's — you can drive an old Odoo database
 from a modern Python.
@@ -18,7 +18,7 @@ from a modern Python.
   `odoo_csv_import`; see `NOTICE`. Do not propose relicensing the core.
 - There is **no Odoo-version-from-branch-name** convention. Ignore any such
   instruction — that scheme was dropped. Target Odoo versions are handled at
-  runtime over RPC, and exercised by the e2e suite (Odoo 16–19), not by branches.
+  runtime over RPC, and exercised by the e2e suite (Odoo 16–20), not by branches.
 
 ## Toolchain
 
