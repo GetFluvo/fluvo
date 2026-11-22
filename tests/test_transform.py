@@ -214,6 +214,39 @@ def test_join_file_missing_key(tmp_path: Path) -> None:
         )
 
 
+def test_write_flow_file_emits_runner_valid_step(tmp_path: Path) -> None:
+    """write_flow_file emits a flows.yml the real flow parser accepts (#373)."""
+    from fluvo.__main__ import _command_option_specs, cli
+    from fluvo.lib.flow import parse_flow_file
+
+    src = tmp_path / "src.csv"
+    src.write_text("SKU,Name\nA1,Widget\n")
+    out = tmp_path / "product.product.csv"
+    flow = tmp_path / "flows.yml"
+    mapping = {"id": mapper.m2o("product", "SKU"), "name": mapper.val("Name")}
+    processor = Processor(
+        mapping, source_filename=str(src), separator=",", config_file="conn.conf"
+    )
+    processor.process(
+        str(out), {"model": "product.product", "worker": 2, "batch_size": 50}
+    )
+    processor.write_flow_file(str(flow), flow_name="products")
+
+    # Parse back through the runner's own validation (keys = click param names).
+    known = {
+        c: set(_command_option_specs(cli.commands[c]))
+        for c in ("import", "export", "write", "migrate")
+    }
+    parsed = parse_flow_file(str(flow), known_options=known)
+    step = parsed.flows[0].steps[0]
+    assert parsed.flows[0].name == "products"
+    assert step.run == "import"
+    assert step.with_["model"] == "product.product"
+    assert step.with_["filename"].endswith("product.product.csv")
+    assert step.with_["connection_file"] == "conn.conf"
+    assert step.with_["batch_size"] == 50
+
+
 def test_join_file_how_left_keeps_unmatched(tmp_path: Path) -> None:
     """how='left' keeps master rows with no child match (child cols null) (#376)."""
     master_df = pl.DataFrame({"id": ["a", "b"], "name": ["x", "y"]})
