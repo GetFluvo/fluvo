@@ -11,6 +11,7 @@ from fluvo.lib.core import (
     ConnectError,
     FluvoError,
     InputError,
+    Level,
     NothingToDoError,
     NullReporter,
     OperationCancelledError,
@@ -194,7 +195,15 @@ def test_null_reporter_satisfies_protocol_and_is_silent() -> None:
     reporter.on_phase("reading source")
     reporter.on_progress(1, 10)
     reporter.on_progress(5, 10, ReconStats(total=10, created=5))
-    reporter.on_message("info", "halfway")
+    reporter.on_message(Level.INFO, "halfway")
+
+
+def test_level_is_a_str_enum() -> None:
+    """Level is a fixed set, and each member is a str so it serialises plainly."""
+    assert [lvl.value for lvl in Level] == ["info", "warning", "error"]
+    assert isinstance(Level.ERROR, str)
+    assert Level.ERROR.value == "error"
+    assert Level("warning") is Level.WARNING
 
 
 def test_a_recording_adapter_also_satisfies_the_protocol() -> None:
@@ -212,7 +221,7 @@ def test_a_recording_adapter_also_satisfies_the_protocol() -> None:
         ) -> None:
             self.events.append(("progress", (done, total)))
 
-        def on_message(self, level: str, text: str) -> None:
+        def on_message(self, level: Level, text: str) -> None:
             self.events.append(("message", (level, text)))
 
     rec = Recording()

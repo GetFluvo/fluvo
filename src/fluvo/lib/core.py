@@ -107,6 +107,19 @@ class RunStatus(str, Enum):
     PARTIAL = "partial"
 
 
+class Level(str, Enum):
+    """Severity of a :meth:`RunReporter.on_message`, as a fixed set.
+
+    A ``str`` enum, so a member both serialises as its value and compares equal
+    to that string — an adapter may branch on ``level == "error"`` or on
+    ``level is Level.ERROR`` interchangeably.
+    """
+
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+
+
 @dataclass
 class ReconStats:
     """The reconciliation counters, carrying Fluvo's core identity.
@@ -245,11 +258,11 @@ class RunReporter(Protocol):
                 them (the import engine); None for phases that do not.
         """
 
-    def on_message(self, level: str, text: str) -> None:
+    def on_message(self, level: Level, text: str) -> None:
         """Surface a human-readable message.
 
         Args:
-            level: A severity label (``"info"``, ``"warning"``, ``"error"``).
+            level: The message severity.
             text: The message.
         """
 
@@ -279,7 +292,7 @@ class NullReporter:
             stats: Ignored.
         """
 
-    def on_message(self, level: str, text: str) -> None:
+    def on_message(self, level: Level, text: str) -> None:
         """Discard a message.
 
         Args:
