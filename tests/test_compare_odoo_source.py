@@ -301,3 +301,15 @@ def test_version_drift_between_two_instances_is_not_a_difference() -> None:
     assert result.stats.differing_cells == 1
     assert result.differences["field"].to_list() == ["name"]
     assert result.differences["target_value"].to_list() == ["Gamma BV"]
+
+
+def test_run_compare_reports_phases() -> None:
+    """run_compare drives the reporter through its phases in order (#363)."""
+    from unittest.mock import MagicMock
+
+    frame = pl.DataFrame({"ref": ["A"], "name": ["Acme"], "id": ["__e.a"]})
+    reporter = MagicMock()
+    with _odoo(frame, frame):
+        _run(fields="name", reporter=reporter)
+    phases = [c.args[0] for c in reporter.on_phase.call_args_list]
+    assert phases == ["connecting", "reading source", "reading target", "comparing"]

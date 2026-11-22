@@ -60,7 +60,7 @@ import polars as pl
 
 from ..logging_config import log
 from . import conf_lib
-from .core import FluvoError
+from .core import FluvoError, NullReporter, RunReporter
 from .mangling import ANGLO, DUTCH, Locale
 
 __all__ = [
@@ -1324,6 +1324,7 @@ def run_compare(  # noqa: C901
     fmt: str = "table",
     output: str | None = None,
     write_fixes: str | None = None,
+    reporter: RunReporter | None = None,
 ) -> CompareResult:
     """Compare one Odoo model against a spreadsheet or a second Odoo, and report.
 
@@ -1361,6 +1362,9 @@ def run_compare(  # noqa: C901
         output: Also write the report to this path.
         write_fixes: Write a Fluvo-loadable CSV of the source values for the
             differing records to this path.
+        reporter: A :class:`RunReporter` the comparison reports progress through
+            (phases: reading source, connecting, reading target, comparing).
+            Defaults to a null reporter, so the CLI behaviour is unchanged (#363).
 
     Returns:
         CompareResult: The buckets and the counts.
@@ -1379,6 +1383,7 @@ def run_compare(  # noqa: C901
             "--against-connection for a second Odoo instance."
         )
 
+    reporter = reporter or NullReporter()
     options = options or CompareOptions()
     key_names = [k.strip() for k in key.split(",") if k.strip()]
     if not key_names:
@@ -1389,6 +1394,7 @@ def run_compare(  # noqa: C901
 
     source: pl.DataFrame | None = None
     if file is not None:
+        reporter.on_phase("reading source")
         source = read_source_file(file, delimiter=delimiter, sheet=sheet)
         if column_map:
             source = apply_column_map(source, column_map)
@@ -1398,6 +1404,7 @@ def run_compare(  # noqa: C901
             "field names. Drop --map, or name the fields in --fields."
         )
 
+    reporter.on_phase("connecting")
     connection = _connect(config)
     try:
         odoo_fields = connection.get_model(model).fields_get()
@@ -1424,6 +1431,7 @@ def run_compare(  # noqa: C901
         _source_fields_check(
             against_connection, model, key_names + field_names, odoo_fields
         )
+        reporter.on_phase("reading source")
         source = read_source_odoo(
             against_connection,
             model,
@@ -1452,6 +1460,7 @@ def run_compare(  # noqa: C901
     if not mixes_subfields:
         export_fields.insert(1, ".id")
     export_fields = list(dict.fromkeys(export_fields))
+    reporter.on_phase("reading target")
     target = _export_frame(
         config,
         model,
@@ -1461,6 +1470,7 @@ def run_compare(  # noqa: C901
         side=target_label,
     )
 
+    reporter.on_phase("comparing")
     specs = build_field_specs(field_names, odoo_fields)
     key_specs = build_field_specs(key_names, odoo_fields)
     result = compare_frames(
