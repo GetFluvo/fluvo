@@ -1684,6 +1684,118 @@ def _load_batch_with_binary_fallback(  # noqa: C901
     }
 
 
+def _execute_o2m_batch(  # noqa: C901
+    model: Any,
+    batch_lines: list[list[Any]],
+    batch_header: list[str],
+    uid_index: int,
+    context: dict[str, Any],
+    ignore_list: list[str],
+) -> dict[str, Any]:
+    """Load one ``--o2m`` group atomically: a parent row plus its line rows.
+
+    In ``--o2m`` mode each batch is a single logical record — a parent row (which
+    carries the ``id``) followed by id-less continuation rows holding its
+    one2many lines. Odoo's ``load`` returns one id per **parent**, so a
+    continuation row is never a separate record. The standard loader compares the
+    number of rows sent with the number of ids returned, which wrongly flags every
+    continuation row as a failure (counted in ``failed``, written to the fail file,
+    replayed on ``--fail``). Here instead:
+
+    * on success the parent is mapped and its continuation rows are accounted with
+      it — neither created nor failed, so they land in the run's ``unaccounted``
+      bucket (where o2m lines belong), not ``failed``;
+    * on failure the whole group (parent + its lines) is written to the fail file
+      so a ``--fail`` re-run can rebuild the record (#368).
+
+    Args:
+        model: The Odoo model proxy to ``load`` into.
+        batch_lines: The batch's rows — one parent followed by its line rows.
+        batch_header: The column header for the batch.
+        uid_index: Index of the ``id`` column in ``batch_header``.
+        context: The Odoo context for the ``load`` call.
+        ignore_list: Columns to drop before loading.
+
+    Returns:
+        dict[str, Any]: ``id_map``, ``failed_lines`` and ``success`` for the group.
+    """
+    if ignore_list:
+        ignore_set = {f[:-3] if f.endswith("/id") else f for f in ignore_list}
+        keep = [
+            i for i, h in enumerate(batch_header) if h.split("/")[0] not in ignore_set
+        ]
+    else:
+        keep = list(range(len(batch_header)))
+    load_header = [batch_header[i] for i in keep]
+    uid_in_load = keep.index(uid_index) if uid_index in keep else -1
+    max_idx = max(keep) if keep else -1
+
+    failed_lines: list[list[Any]] = []
+    kept_rows: list[list[Any]] = []
+    load_lines: list[list[Any]] = []
+    for row in batch_lines:
+        if len(row) <= max_idx:
+            failed_lines.append(
+                [*list(row), "Load failed: row has too few columns for the fields"]
+            )
+            continue
+        kept_rows.append(row)
+        line = [row[i] for i in keep]
+        if 0 <= uid_in_load < len(line) and str(line[uid_in_load]).strip():
+            line[uid_in_load] = to_xmlid(str(line[uid_in_load]))
+        load_lines.append(line)
+
+    if not load_lines:
+        return {
+            "id_map": {},
+            "failed_lines": failed_lines,
+            "success": not failed_lines,
+        }
+
+    try:
+        res = model.load(load_header, load_lines, context=context)
+    except Exception as exc:  # whole group failed -> all its rows to the fail file
+        for row in kept_rows:
+            failed_lines.append([*list(row), f"Load failed: {exc}"])
+        return {"id_map": {}, "failed_lines": failed_lines, "success": False}
+
+    messages = res.get("messages") or []
+    error_msg = (
+        messages[0].get("message", "Record creation failed")
+        if messages
+        else "Record creation failed"
+    )
+    # A fatal server error aborts the whole load, so no parent was created.
+    fatal = any(m.get("type") == "error" for m in messages)
+    created_ids: list[Any] = [] if fatal else res.get("ids", [])
+
+    id_map: dict[str, int] = {}
+    parent_idx = 0
+    parent_ok = False
+    for row, line in zip(kept_rows, load_lines, strict=True):
+        is_parent = uid_index < len(row) and bool(str(row[uid_index]).strip())
+        if is_parent:
+            if parent_idx < len(created_ids) and created_ids[parent_idx] is not None:
+                if 0 <= uid_in_load < len(line):
+                    id_map[str(line[uid_in_load])] = created_ids[parent_idx]
+                parent_ok = True
+            else:
+                parent_ok = False
+                failed_lines.append([*list(row), f"Load failed: {error_msg}"])
+            parent_idx += 1
+        elif not parent_ok:
+            # A continuation row whose parent failed goes to the fail file with it.
+            failed_lines.append([*list(row), f"Load failed: {error_msg}"])
+        # A continuation row of a *successful* parent is deliberately left alone:
+        # it is part of that one record, not a created or failed record of its own.
+
+    return {
+        "id_map": id_map,
+        "failed_lines": failed_lines,
+        "success": not failed_lines,
+    }
+
+
 def _execute_load_batch(  # noqa: C901
     thread_state: dict[str, Any],
     batch_lines: list[list[Any]],
@@ -1742,6 +1854,14 @@ def _execute_load_batch(  # noqa: C901
         )
         result["success"] = bool(result.get("id_map"))
         return result
+
+    if thread_state.get("o2m"):
+        # In o2m mode a batch is one parent + its line rows; load() returns one id
+        # per parent, so the row-vs-id accounting of the standard path would flag
+        # every line row as a failure. Handle the group atomically instead (#368).
+        return _execute_o2m_batch(
+            model, batch_lines, batch_header, uid_index, context, ignore_list
+        )
 
     lines_to_process = list(batch_lines)
     aggregated_id_map: dict[str, int] = {}
@@ -2737,6 +2857,7 @@ def _orchestrate_pass_1(
         "unique_id_field_index": pass_1_uid_index,
         "batch_header": pass_1_header,
         "force_create": force_create,
+        "o2m": o2m,
         "progress": progress,
         "ignore_list": pass_1_ignore_list,
         "throttle_controller": throttle_controller,
