@@ -372,6 +372,30 @@ def test_modern_template_attribute_mapper_custom_template_key() -> None:
     assert custom({"ref": "", "Color": "Blue", "Size": "L"}, {}) == ""
 
 
+def test_m2m_template_attribute_value_as_xmlid() -> None:
+    """as_xmlid emits product.template.attribute.value external ids (#374)."""
+    m = mapper.m2m_template_attribute_value("unused", "Color", "Size", as_xmlid=True)
+    # template_id is a full module.name id; the addon keys on the name part.
+    line = {"template_id": "PRODUCT_TEMPLATE.66845", "Color": "Black", "Size": "M"}
+    assert m(line, {}) == (
+        "product_template_attribute_value.66845_Color_Black,"
+        "product_template_attribute_value.66845_Size_M"
+    )
+    # A bare ref (no module prefix) works too.
+    assert m({"template_id": "66845", "Color": "Black", "Size": ""}, {}) == (
+        "product_template_attribute_value.66845_Color_Black"
+    )
+    # No template -> nothing, so no orphan lines.
+    assert m({"template_id": "", "Color": "Black"}, {}) == ""
+
+
+def test_m2m_template_attribute_value_as_xmlid_sanitises() -> None:
+    """Non-word characters in the composed id become '_', matching the addon (#374)."""
+    m = mapper.m2m_template_attribute_value("x", "Color", as_xmlid=True)
+    out = m({"template_id": "T 1", "Color": "Bl-k/Red"}, {})
+    assert out == "product_template_attribute_value.T_1_Color_Bl_k_Red"
+
+
 def test_split_mappers() -> None:
     """Tests the split helper functions."""
     split_line_func = mapper.split_line_number(100)

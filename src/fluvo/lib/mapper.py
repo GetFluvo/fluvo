@@ -10,6 +10,7 @@ Processor for each row of the source data.
 import base64
 import io
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
@@ -18,7 +19,7 @@ import httpx
 
 from ..logging_config import log
 from .internal.exceptions import SkippingError
-from .internal.tools import to_m2m, to_m2o
+from .internal.tools import to_m2m, to_m2o, to_xmlid
 
 __all__ = [
     "ImageResize",
@@ -861,9 +862,13 @@ def m2m_attribute_value(prefix: str, *fields: str) -> MapperFunc:
 
 
 def m2m_template_attribute_value(
-    prefix: str, *fields: Any, template_key: str = "template_id"
+    prefix: str,
+    *fields: Any,
+    template_key: str = "template_id",
+    as_xmlid: bool = False,
+    module: str = "product_template_attribute_value",
 ) -> MapperFunc:
-    """(Modern V13+) Creates a comma-separated list of attribute values.
+    r"""(Modern V13+) Creates a comma-separated list of attribute values.
 
     This mapper concatenates the *values* of the given fields. This is used for
     the modern product attribute system where Odoo automatically
@@ -872,6 +877,18 @@ def m2m_template_attribute_value(
     It will return an empty string if the template key is missing from the
     source line, preventing the creation of orphaned attribute lines.
 
+    With ``as_xmlid=True`` it instead emits the **external ids** of the matching
+    ``product.template.attribute.value`` records, for a
+    ``product_template_attribute_value_ids/id`` header where Odoo resolves ids
+    rather than creating values from names (#374). The id follows the
+    ``product_template_attribute_value_xmlid`` addon's scheme:
+    ``<module>.<template-ref>_<attribute>_<value>`` where ``<template-ref>`` is the
+    name part of the template key's external id and ``<attribute>_<value>`` is the
+    value's external-id name part (``to_xmlid('<attribute>_<value>')``, as
+    :meth:`ProductProcessor.process_attribute_value_data` builds it); the whole
+    name is sanitised with ``\\W -> _`` to match the addon. This requires that
+    addon to be installed on the target to have created the ids.
+
     Args:
         prefix: (Unused) Kept for backward compatibility.
         *fields: The attribute columns (e.g. 'Color', 'Size') to get values from.
@@ -879,19 +896,46 @@ def m2m_template_attribute_value(
             for a row where it is empty. Defaults to ``template_id`` (back-compat),
             so a caller whose key lives elsewhere passes its column name instead of
             aliasing it to ``template_id`` first (#372).
+        as_xmlid: When True, emit ``product.template.attribute.value`` external ids
+            instead of raw value names (#374).
+        module: The external-id module for ``as_xmlid`` (the addon fixes it to
+            ``product_template_attribute_value``).
 
     Returns:
-        MapperFunc: A mapper that returns a comma-separated string of attribute values.
+        MapperFunc: A mapper returning the comma-separated values or external ids.
     """
     concat_m = concat(",", *fields)
 
-    def m2m_attribute_fun(line: LineDict, state: StateDict) -> str:
-        # This check is critical for the modern workflow.
-        if not line.get(template_key):
-            return ""
-        return cast(str, concat_m(line, state))
+    if not as_xmlid:
 
-    return m2m_attribute_fun
+        def m2m_names_fun(line: LineDict, state: StateDict) -> str:
+            # This check is critical for the modern workflow.
+            if not line.get(template_key):
+                return ""
+            return cast(str, concat_m(line, state))
+
+        return m2m_names_fun
+
+    def m2m_xmlid_fun(line: LineDict, state: StateDict) -> str:
+        template = line.get(template_key)
+        if not template:
+            return ""
+        # The template key may be a full ``module.name`` external id; the addon
+        # keys on the name part only.
+        template_ref = str(template).rsplit(".", 1)[-1]
+        ids: list[str] = []
+        for field in fields:
+            value = line.get(field)
+            if value in (None, ""):
+                continue
+            # The value's external-id name part, exactly as
+            # process_attribute_value_data stored it, then the addon's \W -> _.
+            value_name = to_xmlid(f"{field}_{value}")
+            name = re.sub(r"\W", "_", f"{template_ref}_{value_name}")
+            ids.append(f"{module}.{name}")
+        return ",".join(ids)
+
+    return m2m_xmlid_fun
 
 
 def split_line_number(line_nb: int) -> Callable[[LineDict, int], int]:
