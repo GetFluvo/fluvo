@@ -1,6 +1,7 @@
 """Tests for the direct relational import strategy."""
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import polars as pl
@@ -993,3 +994,80 @@ class TestCreateRelationalRecords:
         )
 
         assert result is False
+
+
+# --- resolve_xmlids_in_df (#375) ------------------------------------------------
+
+
+def _xmlid_conn(rows: list[dict[str, Any]]) -> MagicMock:
+    """A mock Odoo connection whose ir.model.data.search_read returns ``rows``."""
+    conn = MagicMock()
+    model = MagicMock()
+    model.search_read.return_value = rows
+    conn.get_model.return_value = model
+    return conn
+
+
+@patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
+def test_resolve_xmlids_full_module_name(mock_get_conn: MagicMock) -> None:
+    """Full 'module.name' ids resolve to an integer res_id column (#375)."""
+    mock_get_conn.return_value = _xmlid_conn(
+        [
+            {"module": "__import__", "name": "p1", "res_id": 11},
+            {"module": "__import__", "name": "p2", "res_id": 22},
+        ]
+    )
+    df = pl.DataFrame({"xid": ["__import__.p1", "__import__.p2"]})
+    out = relational_import.resolve_xmlids_in_df(
+        df, "c.conf", source_column="xid", model="res.partner"
+    )
+    assert out["res_id"].to_list() == [11, 22]
+    assert out["res_id"].dtype == pl.Int64
+
+
+@patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
+def test_resolve_xmlids_with_prefix(mock_get_conn: MagicMock) -> None:
+    """With prefix, the column holds bare names and the module is queried (#375)."""
+    conn = _xmlid_conn([{"name": "p1", "res_id": 11}, {"name": "p2", "res_id": 22}])
+    mock_get_conn.return_value = conn
+    df = pl.DataFrame({"xid": ["p1", "p2"]})
+    out = relational_import.resolve_xmlids_in_df(
+        df, "c.conf", source_column="xid", model="res.partner", prefix="__import__"
+    )
+    assert out["res_id"].to_list() == [11, 22]
+    domain = conn.get_model.return_value.search_read.call_args[0][0]
+    assert ("module", "=", "__import__") in domain
+
+
+@patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
+def test_resolve_xmlids_on_missing_error(mock_get_conn: MagicMock) -> None:
+    """Unresolved ids raise under on_missing='error', not a silent null (#375)."""
+    mock_get_conn.return_value = _xmlid_conn(
+        [{"module": "__import__", "name": "p1", "res_id": 11}]
+    )
+    df = pl.DataFrame({"xid": ["__import__.p1", "__import__.gone"]})
+    with pytest.raises(ValueError, match=r"1 external id\(s\).*did not resolve"):
+        relational_import.resolve_xmlids_in_df(
+            df, "c.conf", source_column="xid", model="res.partner"
+        )
+
+
+@patch("fluvo.lib.relational_import.conf_lib.get_connection_from_config")
+def test_resolve_xmlids_on_missing_keep_and_drop_source(
+    mock_get_conn: MagicMock,
+) -> None:
+    """on_missing='keep' leaves null; drop_source removes the source column (#375)."""
+    mock_get_conn.return_value = _xmlid_conn(
+        [{"module": "__import__", "name": "p1", "res_id": 11}]
+    )
+    df = pl.DataFrame({"xid": ["__import__.p1", "__import__.gone"]})
+    out = relational_import.resolve_xmlids_in_df(
+        df,
+        "c.conf",
+        source_column="xid",
+        model="res.partner",
+        on_missing="keep",
+        drop_source=True,
+    )
+    assert out["res_id"].to_list() == [11, None]
+    assert "xid" not in out.columns

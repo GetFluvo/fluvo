@@ -196,6 +196,104 @@ def resolve_relations_in_df(
     return df
 
 
+def resolve_xmlids_in_df(
+    df: "pl.DataFrame",
+    config: str | dict[str, Any],
+    *,
+    source_column: str,
+    model: str,
+    prefix: str | None = None,
+    out_column: str = "res_id",
+    on_missing: str = "error",
+    drop_source: bool = False,
+) -> "pl.DataFrame":
+    """Resolve a column of external ids to integer ``res_id`` values via one query.
+
+    For a ``Many2oneReference`` target (``mail.message.res_id``,
+    ``ir.attachment.res_id``) Odoo's ``load`` wants a plain integer in a column
+    literally named ``res_id`` — ``res_id/id`` does not work. This runs a single
+    live ``ir.model.data`` query (no cache, so records imported earlier in the
+    same run resolve) and adds an integer ``out_column``.
+
+    Args:
+        df: The source frame.
+        config: Odoo connection config (path or dict).
+        source_column: Column holding the external ids. With ``prefix`` it holds
+            bare names; without it, full ``module.name`` ids.
+        model: The target model whose records the ids point at (e.g. ``res.partner``).
+        prefix: The id module when the column holds bare names; None to parse
+            ``module.name`` from each value.
+        out_column: Name of the integer column to add (default ``res_id``).
+        on_missing: ``"error"`` (raise, listing unresolved ids) or ``"keep"``
+            (leave the row's ``out_column`` null).
+        drop_source: Drop ``source_column`` after resolving.
+
+    Returns:
+        pl.DataFrame: A new DataFrame with the integer ``out_column`` added.
+
+    Raises:
+        ValueError: If ``source_column`` is absent, ``on_missing`` is unknown, or
+            ``on_missing="error"`` and some ids did not resolve.
+    """
+    if source_column not in df.columns:
+        raise ValueError(f"resolve_xmlid: source column '{source_column}' not found.")
+    if on_missing not in ("error", "keep"):
+        raise ValueError(
+            f"resolve_xmlid: unknown on_missing={on_missing!r}; expected error or keep."
+        )
+
+    if isinstance(config, dict):
+        connection = conf_lib.get_connection_from_dict(config)
+    else:
+        connection = conf_lib.get_connection_from_config(config_file=config)
+
+    keys = [k for k in df[source_column].drop_nulls().unique().to_list() if k != ""]
+    data_model = connection.get_model("ir.model.data")
+    mapping: dict[str, int] = {}
+    if keys:
+        if prefix is not None:
+            rows = data_model.search_read(
+                [("model", "=", model), ("module", "=", prefix), ("name", "in", keys)],
+                ["name", "res_id"],
+            )
+            mapping = {r["name"]: r["res_id"] for r in rows}
+        else:
+            names = sorted({k.split(".", 1)[1] for k in keys if "." in k})
+            rows = data_model.search_read(
+                [("model", "=", model), ("name", "in", names)],
+                ["module", "name", "res_id"],
+            )
+            mapping = {f"{r['module']}.{r['name']}": r["res_id"] for r in rows}
+
+    map_df = pl.DataFrame(
+        {source_column: list(mapping.keys()), out_column: list(mapping.values())},
+        schema={source_column: pl.String, out_column: pl.Int64},
+    )
+    result = df.with_columns(pl.col(source_column).cast(pl.String)).join(
+        map_df, on=source_column, how="left"
+    )
+
+    if on_missing == "error":
+        unresolved = sorted(
+            {
+                k
+                for k in df[source_column].drop_nulls().to_list()
+                if k != "" and k not in mapping
+            },
+            key=str,
+        )
+        if unresolved:
+            sample = ", ".join(str(k) for k in unresolved[:10])
+            raise ValueError(
+                f"resolve_xmlid: {len(unresolved)} external id(s) for model "
+                f"'{model}' did not resolve. First: {sample}"
+            )
+
+    if drop_source:
+        result = result.drop(source_column)
+    return result
+
+
 def _derive_missing_relation_info(
     config: str | dict[str, Any],
     model: str,
