@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping
 from typing import (
     Any,
     Union,
+    cast,
 )
 
 import polars as pl
@@ -513,6 +514,8 @@ class Processor:
         separator: str = ";",
         schema_overrides: dict[str, pl.DataType] | None = None,
         dry_run: bool = False,
+        how: str = "inner",
+        on_missing: str = "drop",
     ) -> None:
         """Joins data from a secondary file into the processor's main data.
 
@@ -526,9 +529,32 @@ class Processor:
                 types for the joined file.
             dry_run: If True, prints a sample of the joined data to the
                 console without modifying the processor's state.
+            how: Join kind — ``"inner"`` (default, back-compat: unmatched master
+                rows are dropped), ``"left"`` (keep every master row, child
+                columns null when unmatched) or ``"outer"`` (full join).
+            on_missing: What to do about master rows with no child match —
+                ``"drop"`` (default, the join's own behaviour) or ``"error"`` to
+                raise a ValueError listing how many keys (and a sample) are
+                unmatched, for migrations where a missing match is a data-integrity
+                problem rather than a filter (#376).
+
+        Raises:
+            ValueError: If ``how``/``on_missing`` is unknown, or ``on_missing`` is
+                ``"error"`` and some master keys have no match in the child file.
         """
         log.info(f"Joining with secondary file: {filename}")
         child_df = self._read_file(filename, separator, schema_overrides)
+
+        # Map the user-facing `how` to Polars' names ("outer" -> "full").
+        how_map = {"inner": "inner", "left": "left", "outer": "full", "full": "full"}
+        if how not in how_map:
+            raise ValueError(
+                f"join_file: unknown how={how!r}; expected inner, left or outer."
+            )
+        if on_missing not in ("drop", "error"):
+            raise ValueError(
+                f"join_file: unknown on_missing={on_missing!r}; expected drop or error."
+            )
 
         # This part correctly renames all columns EXCEPT the join key
         child_df = child_df.rename(
@@ -539,9 +565,30 @@ class Processor:
             }
         )
 
+        if on_missing == "error":
+            child_keys = set(child_df[child_key].to_list())
+            unmatched = sorted(
+                {
+                    k
+                    for k in self.dataframe[master_key].to_list()
+                    if k is not None and k not in child_keys
+                },
+                key=str,
+            )
+            if unmatched:
+                sample = ", ".join(str(k) for k in unmatched[:10])
+                raise ValueError(
+                    f"join_file: {len(unmatched)} key(s) in '{master_key}' have no "
+                    f"match in '{filename}' ('{child_key}'). First: {sample}"
+                )
+
         if dry_run:
             joined_df = self.dataframe.join(
-                child_df, left_on=master_key, right_on=child_key
+                child_df,
+                left_on=master_key,
+                right_on=child_key,
+                how=cast(Any, how_map[how]),
+                coalesce=True,
             )
             log.info("--- DRY RUN MODE (Outputting sample of joined data) ---")
             console = Console()
@@ -558,7 +605,11 @@ class Processor:
             log.info(f"Total rows that would be generated: {len(joined_df)}")
         else:
             self.dataframe = self.dataframe.join(
-                child_df, left_on=master_key, right_on=child_key
+                child_df,
+                left_on=master_key,
+                right_on=child_key,
+                how=cast(Any, how_map[how]),
+                coalesce=True,
             )
 
     def resolve_relation(

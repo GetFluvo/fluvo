@@ -214,6 +214,52 @@ def test_join_file_missing_key(tmp_path: Path) -> None:
         )
 
 
+def test_join_file_how_left_keeps_unmatched(tmp_path: Path) -> None:
+    """how='left' keeps master rows with no child match (child cols null) (#376)."""
+    master_df = pl.DataFrame({"id": ["a", "b"], "name": ["x", "y"]})
+    processor = Processor(mapping={}, dataframe=master_df)
+    child_file = tmp_path / "child.csv"
+    child_file.write_text("child_id,value\na,10")  # no row for 'b'
+    processor.join_file(
+        str(child_file),
+        master_key="id",
+        child_key="child_id",
+        header_prefix="c",
+        separator=",",
+        how="left",
+    )
+    rows = {r["id"]: r["c_value"] for r in processor.dataframe.to_dicts()}
+    assert rows == {"a": 10, "b": None}  # 'b' kept, not dropped
+
+
+def test_join_file_inner_drops_unmatched(tmp_path: Path) -> None:
+    """Default inner join still drops master rows with no child match (#376)."""
+    master_df = pl.DataFrame({"id": ["a", "b"], "name": ["x", "y"]})
+    processor = Processor(mapping={}, dataframe=master_df)
+    child_file = tmp_path / "child.csv"
+    child_file.write_text("child_id,value\na,10")
+    processor.join_file(
+        str(child_file), master_key="id", child_key="child_id", separator=","
+    )
+    assert [r["id"] for r in processor.dataframe.to_dicts()] == ["a"]
+
+
+def test_join_file_on_missing_error_raises(tmp_path: Path) -> None:
+    """on_missing='error' raises listing the unmatched keys (#376)."""
+    master_df = pl.DataFrame({"id": ["a", "b", "c"], "name": ["x", "y", "z"]})
+    processor = Processor(mapping={}, dataframe=master_df)
+    child_file = tmp_path / "child.csv"
+    child_file.write_text("child_id,value\na,10")  # b and c unmatched
+    with pytest.raises(ValueError, match=r"2 key\(s\).*no match"):
+        processor.join_file(
+            str(child_file),
+            master_key="id",
+            child_key="child_id",
+            separator=",",
+            on_missing="error",
+        )
+
+
 @patch("fluvo.lib.transform.Console")
 def test_join_file_dry_run(mock_console_class: MagicMock, tmp_path: Path) -> None:
     """Tests that join_file in dry_run mode does not modify data."""
