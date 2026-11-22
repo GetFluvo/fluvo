@@ -300,6 +300,30 @@ model, so it adds no overhead to non-product imports.
 
 This command group is for running multi-step processes on records that are already in the database.
 
+### Posting Journal Entries (`post-moves`)
+
+Journal entries load as **draft**, which keeps a re-run of the import safe
+(see [Posted Entries and Safe Re-runs](advanced_usage.md#posted-entries-and-safe-re-runs)).
+`post-moves` is the separate, explicit step that posts them. After it, Odoo
+will not let those entries change.
+
+```bash
+fluvo workflow post-moves \
+    --connection-file conf/connection.conf \
+    --file data/account_move.csv
+```
+
+The command reads the distinct ids in `--id-field` (default `id`) and posts
+every entry that is still draft. Each entry is counted once:
+
+- **posted**: posted by this run.
+- **already posted**: left alone, so re-running the command is safe.
+- **failed**: not found, not in draft, or refused by Odoo (an unbalanced entry,
+  for example). Each failure is written with its reason to
+  `<file>_post_fail.csv`.
+
+The command exits non-zero when any entry fails.
+
 ### The `invoice-v9` Workflow (Legacy Example)
 
 The library also includes a built-in workflow specifically for processing customer invoices (`account.invoice`) in **Odoo version 9**.

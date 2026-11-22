@@ -27,8 +27,10 @@ from rich.progress import (
 from .lib import checkpoint as ckpt
 from .lib import conf_lib
 from .lib import idempotent as idempotent_lib
+from .lib import immutable as immutable_lib
 from .lib import retry as retry_lib
 from .lib import throttle as throttle_lib
+from .lib.core import FluvoError
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch, to_xmlid
 from .logging_config import log, suppress_console_handler
@@ -3294,6 +3296,9 @@ def import_data(  # noqa: C901
         and not deferred
         and not force_create
         and not resolve_relations
+        # Guarded models (#358) read live record state before the load, which
+        # needs the whole dataset in hand.
+        and immutable_lib.rule_for(model) is None
     )
     if stream and not can_stream:
         log.warning(
@@ -3395,6 +3400,40 @@ def import_data(  # noqa: C901
             ["" if v is None else str(v) for v in row] for row in df.iter_rows()
         ]
         log.info("Applied auto-clean coercions before load.")
+
+    # --- Immutable-record guard (#358) ---
+    # Rows targeting a record Odoo will not let us change (a posted move) are
+    # taken out of the load and counted under a named `unaccounted` reason.
+    # record_count is deliberately NOT reduced: they stay in the total, so
+    # created + failed + unaccounted == total keeps holding with every row named.
+    unaccounted_reasons: dict[str, int] = {}
+    skipped_output_file = ""
+    if not can_stream and header and all_data:
+        try:
+            all_data, guarded_rows, guard_reason = immutable_lib.guard_rows(
+                connection, model, header, all_data, unique_id_field or "id", o2m
+            )
+        except FluvoError as e:
+            from .lib.internal.ui import _show_error_panel
+
+            _show_error_panel("Immutable Record Check Failed", str(e))
+            return False, {}
+        if guard_reason:
+            unaccounted_reasons[guard_reason] = len(guarded_rows)
+            skipped_output_file = immutable_lib.skipped_file_for(fail_file, file_csv)
+            immutable_lib.write_skipped_file(
+                skipped_output_file,
+                header,
+                guarded_rows,
+                guard_reason,
+                separator,
+                encoding,
+            )
+            log.info(
+                f"{len(guarded_rows)} row(s) target already-posted '{model}' "
+                f"records and were left untouched (not compared); "
+                f"see {skipped_output_file}."
+            )
 
     # Apply idempotent filtering if enabled (skip unchanged records)
     idempotent_stats = None
@@ -3721,8 +3760,15 @@ def import_data(  # noqa: C901
     # --- Reconciliation Check ---
     # Verify that created + failed == total (accounting for duplicates)
     accounted_records = len(id_map) + failed_records
+    if unaccounted_reasons:
+        stats["unaccounted_reasons"] = dict(unaccounted_reasons)
+        stats["skipped_file"] = skipped_output_file
+    explained = sum(unaccounted_reasons.values())
     if record_count > 0 and accounted_records < record_count:
         unaccounted = record_count - accounted_records
+        stats["unaccounted_records"] = unaccounted
+    if record_count > 0 and accounted_records + explained < record_count:
+        unaccounted = record_count - accounted_records - explained
         log.warning(
             f"Record reconciliation discrepancy detected: "
             f"{record_count} total records, {len(id_map)} created, "
@@ -3731,7 +3777,6 @@ def import_data(  # noqa: C901
             f"This may indicate records with duplicate IDs (expected) or "
             f"records dropped due to malformed data or transient errors."
         )
-        stats["unaccounted_records"] = unaccounted
 
     # Add idempotent stats if available
     if idempotent_stats:

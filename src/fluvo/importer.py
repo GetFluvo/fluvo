@@ -1096,8 +1096,18 @@ def run_import(  # noqa: C901
     _render_translation_summary(translation_summaries)
     _render_company_summary(company_summaries)
 
+    # Rows under a named reason are accounted for, not lost (#358): say what
+    # happened to them in a neutral line and keep the warning for the remainder.
+    reasons = cast(dict[str, int], stats.get("unaccounted_reasons") or {})
+    posted = reasons.get("posted_immutable", 0)
+    if posted:
+        Console(stderr=True).print(
+            f"[blue]INFO:[/blue] {posted} row(s) target already-posted records and "
+            f"were left untouched (not compared) -> {stats.get('skipped_file', '')}"
+        )
+
     # Check for unaccounted records and warn the user
-    unaccounted = stats.get("unaccounted_records", 0)
+    unaccounted = int(stats.get("unaccounted_records", 0)) - sum(reasons.values())
     if unaccounted > 0:
         Console(stderr=True).print(
             Panel(

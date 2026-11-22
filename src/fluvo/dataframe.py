@@ -209,7 +209,10 @@ def load_dataframe(
         **raw_stats,
     }
     failed = int(stats["failed_records"])
-    unaccounted = int(stats.get("unaccounted_records", 0))
+    # Rows under a named reason (e.g. posted_immutable, #358) are accounted for.
+    unaccounted = int(stats.get("unaccounted_records", 0)) - sum(
+        stats.get("unaccounted_reasons", {}).values()
+    )
     if failed and not fail_file:
         log.warning(
             f"{failed} row(s) failed to load into '{model}' and no fail_file was "

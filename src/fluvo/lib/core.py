@@ -144,12 +144,26 @@ class ReconStats:
             created or failed — duplicates, skipped, already-posted, cancelled.
             Never a silent remainder: the point of the bucket is that it is
             named and asserted, not inferred.
+        reasons: The named breakdown of ``unaccounted`` — e.g.
+            ``{"posted_immutable": 3}`` for rows left untouched because their
+            record is already posted (#358). Whatever ``unaccounted`` holds
+            beyond these is :attr:`unexplained`.
     """
 
     total: int = 0
     created: int = 0
     failed: int = 0
     unaccounted: int = 0
+    reasons: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def unexplained(self) -> int:
+        """The part of ``unaccounted`` not covered by a named reason.
+
+        Returns:
+            int: ``unaccounted`` minus the sum of :attr:`reasons`.
+        """
+        return self.unaccounted - sum(self.reasons.values())
 
     @property
     def reconciled(self) -> bool:

@@ -546,6 +546,29 @@ processor = Processor('origin/invoices.csv')
 # ... rest of process
 ```
 
+### Posted Entries and Safe Re-runs
+
+A posted journal entry is immutable in Odoo, so Fluvo splits the work in two:
+
+1. **Load as draft.** Import `account.move` without a `state` column. The load
+   upserts on the external id like any other model, so re-running it is safe.
+   A `state` column is refused by a pre-flight check (drop it or pass
+   `--ignore state`).
+2. **Post explicitly.** Run `fluvo workflow post-moves --file <same file>`. This
+   is the single one-way step (see
+   [Odoo Workflows](odoo_workflows.md#posting-journal-entries-post-moves)).
+
+When a re-run of the load reaches an entry that is already posted, the row is
+not sent to Odoo. That holds whether the entry was posted by Fluvo or by someone
+in Odoo between runs. The row is counted under the named reason
+`posted_immutable`, so `created + failed + unaccounted == total` still holds.
+Posted rows go to a `*_skipped.csv` sidecar with a `_SKIP_REASON` column and
+never to the fail file, so a `--fail` re-run will not retry them. Fluvo does not
+compare posted entries against the source. To correct one, reverse it in Odoo;
+correction support is not part of v1.
+
+The same guard covers `account.move.line` rows whose move is posted.
+
 ---
 
 ## Importing One-to-Many Relationships (`--o2m` flag)

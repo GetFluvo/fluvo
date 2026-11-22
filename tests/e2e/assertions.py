@@ -114,21 +114,37 @@ def run_full_import(
 # --- Reconciliation -------------------------------------------------------------
 
 
-def assert_reconciled(stats: dict[str, Any], *, expect_unaccounted: int = 0) -> None:
+def assert_reconciled(
+    stats: dict[str, Any],
+    *,
+    expect_unaccounted: int = 0,
+    expect_reasons: Optional[dict[str, int]] = None,
+) -> None:
     """Assert no records were silently dropped.
 
     Args:
         stats: The stats dict from :func:`import_with_stats`.
         expect_unaccounted: Records expected to be unaccounted (e.g. duplicate
             external IDs collapse to one create). Default 0 = nothing may vanish.
+        expect_reasons: The named breakdown of ``unaccounted`` expected in
+            ``stats["unaccounted_reasons"]`` (e.g. ``{"posted_immutable": 3}``
+            for rows left untouched because their move is posted, #358).
+            Default: no named reasons.
     """
     total = stats.get("total_records", 0)
     created = stats.get("created_records", 0)
     failed = stats.get("failed_records", 0)
     unaccounted = stats.get("unaccounted_records", 0)
+    reasons = stats.get("unaccounted_reasons", {})
     assert unaccounted == expect_unaccounted, (
         f"unaccounted_records={unaccounted}, expected {expect_unaccounted}. "
-        f"(total={total}, created={created}, failed={failed})"
+        f"(total={total}, created={created}, failed={failed}, reasons={reasons})"
+    )
+    assert reasons == (expect_reasons or {}), (
+        f"unaccounted_reasons={reasons}, expected {expect_reasons or {}}"
+    )
+    assert sum(reasons.values()) <= unaccounted, (
+        f"Named reasons {reasons} exceed unaccounted_records={unaccounted}"
     )
     assert created + failed + unaccounted == total, (
         f"Reconciliation failed: created({created}) + failed({failed}) + "

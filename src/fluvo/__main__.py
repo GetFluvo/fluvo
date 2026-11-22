@@ -880,6 +880,75 @@ def create_missing_variants_cmd(
         raise SystemExit(1)
 
 
+# --- Post Journal Entries Sub-command (#358) ---
+@workflow_group.command(name="post-moves")
+@click.option(
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
+)
+@click.option(
+    "--file",
+    "file_",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="The account.move source file the entries were imported from.",
+)
+@click.option(
+    "--id-field",
+    default="id",
+    show_default=True,
+    help="The external-id column in the file.",
+)
+@click.option(
+    "--batch-size",
+    default=100,
+    show_default=True,
+    type=int,
+    help="Entries posted per RPC call.",
+)
+@click.option("-s", "--sep", "separator", default=";", show_default=True)
+@click.option("--encoding", default="utf-8", show_default=True)
+def post_moves_cmd(
+    connection_file: str,
+    file_: str,
+    id_field: str,
+    batch_size: int,
+    separator: str,
+    encoding: str,
+) -> None:
+    """Post the draft journal entries imported from FILE.
+
+    Imports land account.move records as draft so a re-run stays safe. This is
+    the explicit, one-way step that posts them; after it, Odoo will not let an
+    entry change. Re-running it is safe: already-posted entries are counted and
+    left alone.
+    """
+    from rich.console import Console
+
+    from .lib.actions.move_poster import ALREADY_POSTED, run_post_moves
+
+    result = run_post_moves(
+        config=connection_file,
+        file=file_,
+        id_field=id_field,
+        batch_size=batch_size,
+        separator=separator,
+        encoding=encoding,
+    )
+    console = Console(stderr=True)
+    st = result.stats
+    console.print(
+        f"Posted {st.created}, already posted {st.reasons.get(ALREADY_POSTED, 0)}, "
+        f"failed {st.failed} of {st.total} entr(y/ies)."
+    )
+    for err in result.errors:
+        console.print(f"[red]{err.kind}:[/red] {err.message}")
+    if not result.ok:
+        raise SystemExit(1)
+
+
 # --- Invoice v9 Workflow Sub-command ---
 @workflow_group.command(name="invoice-v9")
 @click.option(

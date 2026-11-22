@@ -1950,3 +1950,46 @@ def company_columns_check(  # noqa: C901
         f"{sorted(import_plan['company_fields'])}: {import_plan['company_fields']}"
     )
     return True
+
+
+@register_check
+def immutable_state_column_check(
+    preflight_mode: "PreflightMode",
+    model: str,
+    filename: str,
+    **kwargs: Any,
+) -> bool:
+    """Refuse a state column on a model guarded against re-runs (#358).
+
+    Journal entries load as draft, so a re-run converges like any other model;
+    posting is the separate, explicit ``fluvo workflow post-moves`` step. A
+    ``state`` column would make the *load* itself the non-idempotent step, so it
+    is rejected rather than silently stripped.
+
+    Args:
+        preflight_mode: The current pre-flight mode.
+        model: The target Odoo model.
+        filename: Path to the source CSV.
+        **kwargs: separator, ignore.
+
+    Returns:
+        bool: ``False`` when the guarded state column is present and not ignored.
+    """
+    from .immutable import rule_for
+
+    rule = rule_for(model)
+    if rule is None:
+        return True
+    ignore = kwargs.get("ignore", []) or []
+    header = _get_csv_header(filename, kwargs.get("separator", ";"))
+    if not header or rule.field not in header or rule.field in ignore:
+        return True
+    _show_error_panel(
+        "State Column Not Allowed",
+        f"The file sets '[bold]{rule.field}[/bold]' on '{model}'. Fluvo loads "
+        f"these records as draft so that re-running the import stays safe; "
+        f"posting is a separate, explicit step:\n\n"
+        f"  fluvo workflow post-moves --file <same file> ...\n\n"
+        f"Drop the column, or pass [bold]--ignore {rule.field}[/bold].",
+    )
+    return False
