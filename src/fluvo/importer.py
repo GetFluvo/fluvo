@@ -109,6 +109,11 @@ def _get_env_from_config(
     if config is None:
         return None
     if isinstance(config, dict):
+        # An inline registry connection names its own environment directly, so
+        # the fail-file directory follows the connection key (#363).
+        env_name = config.get("_env_name")
+        if env_name:
+            return str(env_name)
         # Config dict may have _config_file key
         config_file = config.get("_config_file", "")
     else:

@@ -349,6 +349,7 @@ dependencies = [
     { name = "polars" },
     { name = "pyarrow" },
     { name = "rich" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 
 [package.optional-dependencies]
@@ -471,6 +472,7 @@ requires-dist = [
     { name = "sphinx-click", marker = "extra == 'docs'", specifier = ">=3.0.2" },
     { name = "sphinx-copybutton", marker = "extra == 'docs'" },
     { name = "sphinx-mermaid", marker = "extra == 'docs'" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.0" },
     { name = "typeguard", marker = "extra == 'typeguard'", specifier = ">=2.13.3" },
     { name = "types-pyyaml", marker = "extra == 'mypy'", specifier = ">=6.0" },
     { name = "xdoctest", extras = ["colors"], marker = "extra == 'xdoctest'", specifier = ">=0.15.10" },

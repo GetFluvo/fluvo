@@ -30,6 +30,8 @@ dependencies = [
     "rich",
     "polars",
     "pyarrow",
+    # TOML reader for the connection registry (#363); stdlib tomllib is 3.11+.
+    "tomli >=2.0.0; python_version < '3.11'",
 ]
 
 
