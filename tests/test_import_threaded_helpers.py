@@ -1,5 +1,7 @@
 """Unit tests for import_threaded helper functions (coverage)."""
 
+import csv
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,7 +14,38 @@ from fluvo.import_threaded import (
     _prepare_pass_2_data,
     _process_external_id_fields,
     _resolve_external_id_for_pass2,
+    _setup_fail_file,
 )
+from fluvo.lib import buckets
+
+
+def test_setup_fail_file_adds_bucket_column_and_classifies(tmp_path: Path) -> None:
+    """The fail file gains _FLUVO_BUCKET and each row is classified (#299)."""
+    fail_file = str(tmp_path / "res_partner_fail.csv")
+    writer, handle = _setup_fail_file(fail_file, ["id", "name"], ";", "utf-8")
+    assert writer is not None and handle is not None
+    try:
+        writer.writerows(
+            [
+                ["1", "Acme", "No matching record found for external id"],
+                ["2", "Globex", "a wholly novel constraint"],
+            ]
+        )
+    finally:
+        handle.close()
+
+    with open(fail_file, encoding="utf-8", newline="") as fh:
+        rows = list(csv.reader(fh, delimiter=";"))
+    assert rows[0] == ["id", "name", "_ERROR_REASON", buckets.BUCKET_COLUMN]
+    # The reason stays the last original cell; the bucket is appended after it.
+    assert rows[1][-1] == buckets.BLOCKED_MISSING_DATA
+    assert rows[2][-1] == buckets.UNCLASSIFIED
+    # The tally over the written file agrees.
+    assert buckets.bucket_counts_from_fail_file(fail_file, ";") == {
+        buckets.BLOCKED_MISSING_DATA: 1,
+        buckets.UNCLASSIFIED: 1,
+    }
+
 
 # --- _execute_o2m_batch (#368): continuation rows belong to their parent -------
 

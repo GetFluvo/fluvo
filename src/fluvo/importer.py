@@ -21,7 +21,7 @@ from rich.progress import Progress
 
 from . import import_threaded
 from .enums import PreflightMode
-from .lib import cache, preflight, relational_import, sort
+from .lib import buckets, cache, preflight, relational_import, sort
 from .lib.internal.ui import _show_error_panel
 from .logging_config import log, suppress_console_handler
 
@@ -696,9 +696,10 @@ def run_import(  # noqa: C901
         file_to_process = str(fail_path)
         if ignore is None:
             ignore = []
-        if "_ERROR_REASON" not in ignore:
-            log.info("Ignoring the internal '_ERROR_REASON' column for re-import.")
-            ignore.append("_ERROR_REASON")
+        for meta_col in ("_ERROR_REASON", buckets.BUCKET_COLUMN):
+            if meta_col not in ignore:
+                log.info(f"Ignoring the internal '{meta_col}' column for re-import.")
+                ignore.append(meta_col)
 
     import_plan: dict[str, Any] = {}
     if not no_preflight_checks:
@@ -1192,12 +1193,28 @@ def run_import(  # noqa: C901
         # means an error with hard newlines spans several physical lines, so the
         # old `_count_lines - 1` overcounted.
         num_failed = _count_csv_records(fail_output_file, separator, encoding)
+        # Group the failures by *who decides* (#299), read back from the fail
+        # file — a decoupled, post-hoc tally that never touches the counters.
+        bucket_counts = buckets.bucket_counts_from_fail_file(
+            fail_output_file, separator, encoding
+        )
+        bucket_suffix = ""
+        if bucket_counts:
+            parts = ", ".join(
+                f"{name}: {count}"
+                for name, count in sorted(
+                    bucket_counts.items(), key=lambda kv: (-kv[1], kv[0])
+                )
+            )
+            bucket_suffix = f"\nBy bucket — {parts}."
         Console().print(
             Panel(
                 f"Partial import for [cyan]{model}[/cyan]: "
                 f"[green]{num_imported}[/green] succeeded, "
                 f"[red]{num_failed}[/red] failed. "
-                f"See {fail_output_file} for failed records." + company_suffix,
+                f"See {fail_output_file} for failed records."
+                + bucket_suffix
+                + company_suffix,
                 title="[bold yellow]Import Partially Complete[/bold yellow]",
             )
         )
