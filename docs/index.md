@@ -73,6 +73,7 @@ core_concepts
 comparison_with_other_tools
 guides/index
 reference
+Architecture Decisions <adr/index>
 faq
 contributing
 Support <support>
