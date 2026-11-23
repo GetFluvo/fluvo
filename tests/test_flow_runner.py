@@ -71,14 +71,70 @@ def test_continue_records_failure_and_proceeds() -> None:
     assert results[0].outcome.ok is False
 
 
-def test_partial_success_is_not_a_failure() -> None:
-    """A step that exits ok (even with a fail file) does not fail the run."""
+def test_partial_import_fails_the_run_exit_code() -> None:
+    """A partial import (fail file has rows) makes the run exit non-zero (#390)."""
     flows = [_flow("a", [_step("import", "a1")])]
 
     def run_step(command: str, with_: dict[str, Any]) -> StepOutcome:
         return StepOutcome(ok=True, fail_file="x_fail.csv", fail_rows=3)
 
     results, aborted = run_flows(flows, run_step)
-    assert aborted is False
-    assert not any_failed(results)
+    assert results[0].outcome.status == "partial"
+    assert any_failed(results)  # the dropped rows must not be silent
     assert results[0].outcome.fail_rows == 3
+
+
+def test_partial_import_aborts_under_default_on_error() -> None:
+    """A partial step honours on_error=abort just like a failure (#390).
+
+    The next step must not run — it would load children of rows that were
+    never created.
+    """
+    flows = [_flow("a", [_step("import", "a1", "abort"), _step("write", "a2")])]
+    seen: list[str] = []
+
+    def run_step(command: str, with_: dict[str, Any]) -> StepOutcome:
+        seen.append(command)
+        if command == "import":
+            return StepOutcome(ok=True, fail_file="x_fail.csv", fail_rows=6)
+        return StepOutcome(ok=True)
+
+    results, aborted = run_flows(flows, run_step)
+    assert aborted is True
+    assert seen == ["import"]  # stopped after the partial step
+    assert any_failed(results)
+
+
+def test_partial_import_continues_under_on_error_continue() -> None:
+    """on_error=continue keeps going through a partial step, run still fails."""
+    flows = [
+        _flow(
+            "a",
+            [_step("import", "a1", "continue"), _step("write", "a2", "continue")],
+        )
+    ]
+    seen: list[str] = []
+
+    def run_step(command: str, with_: dict[str, Any]) -> StepOutcome:
+        seen.append(command)
+        if command == "import":
+            return StepOutcome(ok=True, fail_file="x_fail.csv", fail_rows=2)
+        return StepOutcome(ok=True)
+
+    results, aborted = run_flows(flows, run_step)
+    assert aborted is False
+    assert seen == ["import", "write"]  # continue ran the next step
+    assert any_failed(results)
+
+
+def test_clean_step_is_not_a_failure() -> None:
+    """A step that exits ok with no failed rows converges quietly."""
+    flows = [_flow("a", [_step("import", "a1")])]
+
+    def run_step(command: str, with_: dict[str, Any]) -> StepOutcome:
+        return StepOutcome(ok=True)
+
+    results, aborted = run_flows(flows, run_step)
+    assert results[0].outcome.status == "ok"
+    assert results[0].outcome.succeeded is True
+    assert not any_failed(results)

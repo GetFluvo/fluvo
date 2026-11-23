@@ -511,9 +511,14 @@ def _render_flow_summary(results: list[StepResult], aborted: bool) -> None:
     from rich.console import Console
     from rich.panel import Panel
 
+    marks = {
+        "ok": "[green]ok[/green]",
+        "partial": "[yellow]PARTIAL[/yellow]",
+        "failed": "[red]FAILED[/red]",
+    }
     lines = []
     for result in results:
-        mark = "[green]ok[/green]" if result.outcome.ok else "[red]FAILED[/red]"
+        mark = marks[result.outcome.status]
         extra = (
             f"  ([red]{result.outcome.fail_rows}[/red] failed rows)"
             if result.outcome.fail_rows
