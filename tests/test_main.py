@@ -2045,7 +2045,9 @@ def test_run_flow_step_reports_fail_file(tmp_path: "Path") -> None:
     with patch.object(cmd, "main", return_value=None):
         outcome = __main__._run_flow_step(
             "import",
-            {"model": "res.partner", "file": str(src), "connection_file": ""},
+            # `filename` is the real key a flow step uses (the --file param); the
+            # old `file` key silently never matched (#402).
+            {"model": "res.partner", "filename": str(src), "connection_file": ""},
         )
     assert outcome.fail_file == str(fail)
     assert outcome.fail_rows == 2
