@@ -126,6 +126,44 @@ class TestExtractReferencesFromCSV:
         # tag_ids/id should still be included
         assert "res.tag" in refs
 
+    def test_skips_bare_name_many2one_column(
+        self, temp_dir: str, fields_info: dict[str, Any]
+    ) -> None:
+        """A bare m2o column (no ``/id``) holds names resolved by name_search.
+
+        Such columns must not be collected as checkable references, or the
+        pre-check reports a false "missing reference" for display names Odoo
+        resolves server-side (#392).
+        """
+        csv_path = Path(temp_dir) / "bare.csv"
+        csv_path.write_text("id;name;partner_id\n1;Acme;Thibault\n2;Globex;Francois\n")
+
+        header = ["id", "name", "partner_id"]
+        refs = preflight._extract_references_from_csv(
+            str(csv_path), header, fields_info
+        )
+
+        # Bare partner_id is a name_search column: not a verifiable reference.
+        assert not any(refs.values())
+
+    def test_still_checks_suffixed_column_alongside_bare_one(
+        self, temp_dir: str, fields_info: dict[str, Any]
+    ) -> None:
+        """A ``/id`` column is still checked even when a bare m2o is present."""
+        csv_path = Path(temp_dir) / "mixed.csv"
+        csv_path.write_text(
+            "id;name;partner_id;tag_ids/id\n1;Acme;Thibault;base.tag_1\n"
+        )
+
+        header = ["id", "name", "partner_id", "tag_ids/id"]
+        refs = preflight._extract_references_from_csv(
+            str(csv_path), header, fields_info
+        )
+
+        # The external-id column is verified; the bare name column is skipped.
+        assert refs.get("res.tag", {}).get("tag_ids/id") == {"base.tag_1"}
+        assert "res.partner" not in refs or not refs["res.partner"]
+
 
 class TestCheckReferencesExist:
     """Tests for _check_references_exist function."""
