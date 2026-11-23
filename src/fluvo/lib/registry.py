@@ -30,10 +30,16 @@ Example::
 """
 
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
 from .core import ConnectError, InputError
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # Python 3.10 has no stdlib tomllib; the tomli backport is pinned for it.
+    import tomli as tomllib
 
 REGISTRY_SCHEMA = 1
 DEFAULT_REGISTRY_FILENAME = "fluvo-connections.toml"
@@ -61,16 +67,15 @@ def _load_toml(path: str) -> dict[str, Any]:
         InputError: If the file cannot be read or is not valid TOML.
     """
     try:
-        import tomllib as toml_reader
-    except ModuleNotFoundError:  # Python 3.10
-        import tomli as toml_reader  # type: ignore[no-redef]
-
-    try:
         with open(path, "rb") as handle:
-            return toml_reader.load(handle)
+            # A typed local keeps both targets happy: tomli.load is Any on 3.10
+            # (so no "Returning Any"), tomllib.load is dict on 3.11+ (so no
+            # "redundant cast").
+            data: dict[str, Any] = tomllib.load(handle)
+            return data
     except OSError as exc:
         raise InputError(f"could not read connection registry '{path}': {exc}") from exc
-    except toml_reader.TOMLDecodeError as exc:
+    except tomllib.TOMLDecodeError as exc:
         raise InputError(
             f"invalid TOML in connection registry '{path}': {exc}"
         ) from exc
