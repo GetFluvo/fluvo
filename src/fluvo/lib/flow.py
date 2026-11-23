@@ -42,6 +42,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
 
+from .mapping import MappingSpec, parse_mapping
+
 SUPPORTED_VERSION = 1
 VALID_COMMANDS = ("import", "export", "write", "migrate")
 VALID_ON_ERROR = ("abort", "continue")
@@ -52,7 +54,7 @@ _MAX_VAR_DEPTH = 25  # defensive cap on nested var-in-var resolution
 
 _TOP_KEYS = {"version", "vars", "flows"}
 _FLOW_KEYS = {"name", "on_error", "steps"}
-_STEP_KEYS = {"run", "id", "with", "on_error"}
+_STEP_KEYS = {"run", "id", "with", "on_error", "mapping"}
 
 
 class FlowError(Exception):
@@ -71,6 +73,7 @@ class Step:
     with_: dict[str, Any]
     id: str
     on_error: str
+    mapping: MappingSpec | None = None
 
 
 @dataclass
@@ -335,6 +338,10 @@ def _parse_step(
         for key, value in with_raw.items()
     }
 
+    mapping_spec = _parse_step_mapping(
+        raw.get("mapping"), run, with_, resolved_vars, loc
+    )
+
     step_id = raw.get("id", f"{run}-{index}")
     _require(
         isinstance(step_id, str) and bool(step_id.strip()),
@@ -347,7 +354,90 @@ def _parse_step(
     )
     seen_ids.add(step_id)
 
-    return Step(run=run, with_=with_, id=step_id, on_error=on_error)
+    return Step(
+        run=run, with_=with_, id=step_id, on_error=on_error, mapping=mapping_spec
+    )
+
+
+def _load_mapping_file(path: str, loc: str) -> Any:
+    """Read and YAML-parse a sidecar mapping file.
+
+    Args:
+        path: The (already interpolated) path to the mapping file.
+        loc: Context for error messages.
+
+    Returns:
+        Any: The parsed YAML body, handed to :func:`parse_mapping` for validation.
+
+    Raises:
+        FlowError: If the file cannot be read or is not valid YAML.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError as exc:
+        raise FlowError(f"{loc}: could not read mapping file '{path}': {exc}") from exc
+    try:
+        import yaml
+    except ImportError as exc:  # pragma: no cover - same extra as the flow file
+        raise FlowError(
+            "Reading mapping files requires PyYAML ( pip install 'fluvo[flows]' )."
+        ) from exc
+    loader: Any = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+    try:
+        return yaml.load(text, Loader=loader)  # noqa: S506 - safe loader only
+    except yaml.YAMLError as exc:
+        raise FlowError(
+            f"{loc}: invalid YAML in mapping file '{path}':\n{exc}"
+        ) from exc
+
+
+def _parse_step_mapping(
+    mapping_raw: Any,
+    run: str,
+    with_: dict[str, Any],
+    resolved_vars: dict[str, str],
+    loc: str,
+) -> MappingSpec | None:
+    """Validate a step's optional ``mapping:`` block into a :class:`MappingSpec`.
+
+    Args:
+        mapping_raw: The raw ``mapping`` value, or ``None`` when absent.
+        run: The step's command (``mapping`` is valid on ``import`` only).
+        with_: The step's resolved options (to reject a doubly-set model).
+        resolved_vars: Fully-resolved variables, for interpolating ``file:``.
+        loc: Context for error messages.
+
+    Returns:
+        MappingSpec | None: The parsed mapping, or ``None`` when absent. On any
+        structural problem a :class:`FlowError` is raised (via :func:`_require`
+        or :func:`parse_mapping`).
+    """
+    if mapping_raw is None:
+        return None
+    _require(run == "import", f"{loc}: `mapping` is only valid on `import` steps.")
+    _require(
+        isinstance(mapping_raw, dict) and set(mapping_raw) in ({"file"}, {"inline"}),
+        f"{loc}: `mapping` needs exactly one of `file` or `inline`.",
+    )
+    if "file" in mapping_raw:
+        path = _interp_with_value(
+            mapping_raw["file"], resolved_vars, f"{loc}, mapping.file"
+        )
+        _require(
+            isinstance(path, str) and bool(path),
+            f"{loc}: `mapping.file` must be a path.",
+        )
+        body = _load_mapping_file(cast(str, path), loc)
+    else:
+        body = mapping_raw["inline"]
+    spec = parse_mapping(body, where=f"{loc}, mapping")
+    _require(
+        not with_.get("model"),
+        f"{loc}: step sets both `mapping.model` and `with.model`; set the model "
+        "in one place (the mapping).",
+    )
+    return spec
 
 
 def _parse_flow(

@@ -9,6 +9,7 @@ from click import unstyle
 from click.testing import CliRunner
 
 from fluvo import __main__
+from fluvo.lib.mapping import MappingSpec
 
 
 @pytest.fixture
@@ -3422,3 +3423,87 @@ def test_vat_validate_truncates_long_result_lists(
         assert "Invalid VAT Numbers" in output
         assert "and 1 more" in output  # 21 invalid -> 20 shown + 1 more
         assert "Errors:" in output
+
+
+# --- declarative mapping on an import step (#352) ----------------------------
+
+
+def _partner_mapping() -> MappingSpec:
+    """Build a MappingSpec that copies Name and ignores Notes."""
+    from fluvo.lib.mapping import parse_mapping
+
+    return parse_mapping(
+        {
+            "version": 1,
+            "model": "res.partner",
+            "id": {"prefix": "mig", "from": "legacy_id"},
+            "columns": {"name": {"copy": "Name"}},
+            "ignore": ["Notes"],
+        },
+        where="test",
+    )
+
+
+def test_run_flow_step_applies_inline_mapping(tmp_path: "Path") -> None:
+    """A mapping transforms the source and import runs over the result (#352)."""
+    import os
+
+    src = tmp_path / "src.csv"
+    src.write_text("legacy_id;Name;Notes\n1;Acme;x\n2;Globex;y\n")
+
+    captured: dict[str, str] = {}
+
+    def fake_main(argv: list[str], **_: object) -> None:
+        path = argv[argv.index("--file") + 1]
+        captured["file"] = path
+        captured["model"] = argv[argv.index("--model") + 1]
+        with open(path, encoding="utf-8") as fh:
+            captured["content"] = fh.read()
+
+    cmd = __main__.cli.commands["import"]
+    with patch.object(cmd, "main", side_effect=fake_main):
+        outcome = __main__._run_flow_step(
+            "import",
+            {"connection_file": "c.conf", "filename": str(src), "separator": ";"},
+            _partner_mapping(),
+        )
+
+    assert outcome.ok
+    assert captured["model"] == "res.partner"
+    # The transformed file carries the mapped columns and external ids.
+    assert "id;name" in captured["content"]
+    assert "mig.1" in captured["content"] and "Acme" in captured["content"]
+    assert "Notes" not in captured["content"]  # ignored source column dropped
+    # The temp file is cleaned up after the step.
+    assert not os.path.exists(captured["file"])
+
+
+def test_run_flow_step_mapping_validation_failure_skips_import(
+    tmp_path: "Path",
+) -> None:
+    """A mapping that does not match the source fails the step; import never runs."""
+    from fluvo.lib.mapping import parse_mapping
+
+    src = tmp_path / "src.csv"
+    src.write_text("legacy_id;Name\n1;Acme\n")  # no 'Ref' column
+    spec = parse_mapping(
+        {
+            "version": 1,
+            "model": "res.partner",
+            "id": {"prefix": "mig", "from": "legacy_id"},
+            "columns": {"parent_id/id": {"xmlid": {"prefix": "mig", "from": "Ref"}}},
+        },
+        where="test",
+    )
+
+    cmd = __main__.cli.commands["import"]
+    with patch.object(cmd, "main") as mock_main:
+        outcome = __main__._run_flow_step(
+            "import",
+            {"connection_file": "c.conf", "filename": str(src), "separator": ";"},
+            spec,
+        )
+
+    assert not outcome.ok
+    assert "not in the file" in (outcome.error or "")
+    mock_main.assert_not_called()
