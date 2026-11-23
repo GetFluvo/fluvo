@@ -1220,6 +1220,13 @@ def _extract_references_from_csv(  # noqa: C901
     for i, col in enumerate(header):
         if col in ignore or not col:
             continue
+        # Only columns carrying external-id (``/id``) or db-id (``/.id``)
+        # semantics are reference lookups we can verify. A bare m2o/m2m column
+        # (no suffix) holds display names resolved server-side by ``name_search``
+        # at load time; pre-checking it against ir.model.data/ids reports a false
+        # "missing reference" for names Odoo resolves fine (#392). Skip those.
+        if "/" not in col:
+            continue
         base_field = col.split("/")[0]
         field_info = odoo_fields.get(base_field, {})
         field_type = field_info.get("type", "")
