@@ -1930,6 +1930,23 @@ def test_flow_runner_failed_step_exits_nonzero(
 
 
 @patch("fluvo.__main__._run_flow_step")
+def test_flow_runner_partial_import_exits_nonzero(
+    mock_step: MagicMock, runner: CliRunner
+) -> None:
+    """A partial import (fail file has rows) exits non-zero, not 0 (#390)."""
+    from fluvo.lib.flow_runner import StepOutcome
+
+    mock_step.return_value = StepOutcome(ok=True, fail_file="x_fail.csv", fail_rows=6)
+    with runner.isolated_filesystem():
+        with open("flows.yml", "w") as f:
+            f.write(_TWO_FLOWS)
+        result = runner.invoke(__main__.cli, ["--flow-file", "flows.yml"])
+        assert result.exit_code != 0
+        # on_error defaults to abort: the second flow's step must not run.
+        assert mock_step.call_count == 1
+
+
+@patch("fluvo.__main__._run_flow_step")
 def test_flow_runner_run_selects_one_flow(
     mock_step: MagicMock, runner: CliRunner
 ) -> None:
@@ -2052,6 +2069,8 @@ def test_render_flow_summary_lists_fail_files(
     out = unstyle(capsys.readouterr().out)
     assert "x_fail.csv" in out
     assert "failed" in out.lower()
+    # The partial step (ok exit, failed rows) is marked PARTIAL, not ok.
+    assert "partial" in out.lower()
 
 
 _DRY_RUN_FLOW = """

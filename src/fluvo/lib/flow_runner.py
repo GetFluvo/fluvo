@@ -6,14 +6,21 @@ is unit-testable without the CLI. ``__main__`` supplies the real ``run_step``,
 which invokes the matching fluvo command (``import`` / ``export`` / ``write`` /
 ``migrate``) through exactly one code path.
 
-Failure semantics (agreed on #251):
+Failure semantics (agreed on #251; partial refined in #390):
 
-- A step "fails" when its command exits non-zero. A *partial* import (fail file
-  written, CLI exit 0) is **not** a step failure — a step behaves exactly as the
-  same command run by hand.
-- ``on_error: abort`` (the default) stops the whole run at the first failing step;
-  ``on_error: continue`` records the failure and proceeds.
-- The whole run exits non-zero if **any** step failed, even under ``continue``.
+- A step has three outcomes: ``ok`` (command exited zero, no failed rows),
+  ``partial`` (command exited zero but some rows went to a fail file), and
+  ``failed`` (command exited non-zero).
+- A *partial* step is **not** silently a success: Odoo rejected rows and the
+  loss must be visible. It drives ``on_error`` and the run's exit code exactly
+  like a failure — only a fully ``ok`` step lets the run converge quietly. This
+  closes #390, where a partial import was reported ``ok`` and exited 0, hiding
+  dropped rows from CI and cron and letting later steps load children of
+  rows that were never created.
+- ``on_error: abort`` (the default) stops the whole run at the first step that
+  is not ``ok``; ``on_error: continue`` records it and proceeds.
+- The whole run exits non-zero if **any** step was not ``ok``, even under
+  ``continue``.
 """
 
 from collections.abc import Callable
@@ -28,7 +35,9 @@ class StepOutcome:
     """The result of running one step.
 
     Attributes:
-        ok: Whether the step's command exited zero (a partial import counts as ok).
+        ok: Whether the step's command exited zero. This alone does not mean the
+            step converged: a partial import exits zero but has ``fail_rows`` > 0.
+            Use :attr:`status` / :attr:`succeeded` for the run-level decision.
         fail_file: Path to a fail file the step produced, if any.
         fail_rows: Number of failed rows in ``fail_file``.
         error: A short error description when the step failed.
@@ -38,6 +47,30 @@ class StepOutcome:
     fail_file: str | None = None
     fail_rows: int = 0
     error: str | None = None
+
+    @property
+    def status(self) -> str:
+        """The step's outcome: ``ok``, ``partial``, or ``failed``.
+
+        Returns:
+            str: ``failed`` if the command exited non-zero, ``partial`` if it
+            exited zero but produced failed rows, else ``ok``.
+        """
+        if not self.ok:
+            return "failed"
+        if self.fail_rows > 0:
+            return "partial"
+        return "ok"
+
+    @property
+    def succeeded(self) -> bool:
+        """Whether the step fully converged (``ok`` — no failed rows).
+
+        Returns:
+            bool: True only for a clean step; False for ``partial`` or ``failed``.
+            This, not :attr:`ok`, drives ``on_error`` and the run exit code.
+        """
+        return self.status == "ok"
 
 
 @dataclass
@@ -70,18 +103,21 @@ def run_flows(flows: list[Flow], run_step: RunStep) -> tuple[list[StepResult], b
         for step in flow.steps:
             outcome = run_step(step.run, step.with_)
             results.append(StepResult(flow.name, step.id, step.run, outcome))
-            if not outcome.ok and step.on_error == "abort":
+            if not outcome.succeeded and step.on_error == "abort":
                 return results, True
     return results, False
 
 
 def any_failed(results: list[StepResult]) -> bool:
-    """Return whether any step in the run failed.
+    """Return whether any step in the run did not fully succeed.
+
+    A ``partial`` step (some rows rejected to a fail file) counts here just like
+    an outright failure, so the run exits non-zero and the loss is visible (#390).
 
     Args:
         results: The step results from :func:`run_flows`.
 
     Returns:
-        bool: True if at least one step failed (drives the non-zero exit).
+        bool: True if at least one step was not ``ok`` (drives the non-zero exit).
     """
-    return any(not r.outcome.ok for r in results)
+    return any(not r.outcome.succeeded for r in results)
