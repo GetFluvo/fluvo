@@ -98,6 +98,53 @@ class TestSelfReferencingCheck:
         assert "strategy" not in import_plan
         mock_sort.assert_not_called()
 
+    def test_detects_hierarchy_on_suffixed_parent_column(
+        self, tmp_path: "Path"
+    ) -> None:
+        """A ``parent_id/id`` column is detected even with children first (#391).
+
+        Runs the real detect+sort path (no mock) over a file whose child row
+        precedes its parent, and checks the plan records the suffixed column.
+        """
+        csv = tmp_path / "dept.csv"
+        csv.write_text(
+            "id;name;parent_id/id\nmod.child;Child;mod.parent\nmod.parent;Parent;\n"
+        )
+        import_plan: dict[str, Any] = {}
+        result = preflight.self_referencing_check(
+            preflight_mode=PreflightMode.NORMAL,
+            filename=str(csv),
+            import_plan=import_plan,
+        )
+        assert result is True
+        assert import_plan["strategy"] == "sort_and_one_pass_load"
+        assert import_plan["id_column"] == "id"
+        assert import_plan["parent_column"] == "parent_id/id"
+
+    def test_resolve_hierarchy_columns_prefers_bare_then_falls_back(
+        self, tmp_path: "Path"
+    ) -> None:
+        """Bare names win; a missing file falls back to the conventional names."""
+        bare = tmp_path / "bare.csv"
+        bare.write_text("id;name;parent_id\n1;a;\n")
+        assert preflight._resolve_hierarchy_columns(str(bare), ";") == (
+            "id",
+            "parent_id",
+        )
+
+        suffixed = tmp_path / "suffixed.csv"
+        suffixed.write_text("id;name;parent_id/.id\n1;a;\n")
+        assert preflight._resolve_hierarchy_columns(str(suffixed), ";") == (
+            "id",
+            "parent_id/.id",
+        )
+
+        # Unreadable file: conventional defaults, so sort's presence guard runs.
+        assert preflight._resolve_hierarchy_columns("does-not-exist.csv", ";") == (
+            "id",
+            "parent_id",
+        )
+
 
 class TestInternalHelpers:
     """Tests for internal helper functions in the preflight module."""
