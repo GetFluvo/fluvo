@@ -371,6 +371,41 @@ def company_context_check(
     return False
 
 
+def _resolve_hierarchy_columns(filename: str, separator: str) -> tuple[str, str]:
+    """Resolve the conventional ``id`` / ``parent_id`` columns from the header.
+
+    A hierarchy file commonly addresses the parent via a relational suffix —
+    ``parent_id/id`` (external id) or ``parent_id/.id`` (db id) — rather than a
+    bare ``parent_id``. Matching only the bare name missed those columns, so a
+    file whose children precede their parents was reported as having no
+    hierarchy and the child rows failed at load (#391). Match by base field
+    name (the part before ``/``), preferring the bare form, and fall back to the
+    conventional names when the header cannot be read so existing behaviour and
+    the "column absent → no hierarchy" guard in ``sort`` are preserved.
+
+    Args:
+        filename: Path to the source CSV file.
+        separator: The field separator used in the CSV file.
+
+    Returns:
+        tuple[str, str]: The resolved ``(id_column, parent_column)`` header names.
+    """
+
+    def _match(header: list[str], base: str) -> str:
+        bare = [c for c in header if c == base]
+        if bare:
+            return bare[0]
+        suffixed = [c for c in header if c.split("/")[0] == base]
+        return suffixed[0] if suffixed else base
+
+    try:
+        with open(filename, encoding="utf-8", newline="") as f:
+            header = next(csv.reader(f, delimiter=separator))
+    except (OSError, StopIteration, csv.Error):
+        return "id", "parent_id"
+    return _match(header, "id"), _match(header, "parent_id")
+
+
 @register_check
 def self_referencing_check(
     preflight_mode: "PreflightMode",
@@ -383,13 +418,15 @@ def self_referencing_check(
         return True  # Skip this check if o2m is enabled
 
     log.info("Running pre-flight check: Detecting self-referencing hierarchy...")
-    # We assume 'id' and 'parent_id' as conventional names.
-    # This could be made configurable later if needed.
+    separator = kwargs.get("separator", ";")
+    # Resolve the id / parent columns, tolerating relational suffixes such as
+    # 'parent_id/id' (#391). 'id'/'parent_id' remain the conventional names.
+    id_column, parent_column = _resolve_hierarchy_columns(filename, separator)
     result = sort.sort_for_self_referencing(
         filename,
-        id_column="id",
-        parent_column="parent_id",
-        separator=kwargs.get("separator", ";"),
+        id_column=id_column,
+        parent_column=parent_column,
+        separator=separator,
     )
     if result is False:
         # This means there was an error in sort_for_self_referencing
@@ -398,11 +435,13 @@ def self_referencing_check(
     elif result:
         # This means sorting was performed and we have a file path
         log.info(
-            "Detected self-referencing hierarchy. Planning one-pass sort strategy."
+            "Detected self-referencing hierarchy on column '%s'. "
+            "Planning one-pass sort strategy.",
+            parent_column,
         )
         import_plan["strategy"] = "sort_and_one_pass_load"
-        import_plan["id_column"] = "id"
-        import_plan["parent_column"] = "parent_id"
+        import_plan["id_column"] = id_column
+        import_plan["parent_column"] = parent_column
         return True
     else:
         # result is None, meaning no hierarchy detected
