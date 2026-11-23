@@ -571,10 +571,14 @@ def _invoke_step_command(command: str, with_: dict[str, Any]) -> StepOutcome:
 
     fail_file: str | None = None
     fail_rows = 0
-    if command == "import" and with_.get("model") and with_.get("file"):
+    # The import source is the `filename` option (the --file flag's param name),
+    # which is the key a real flow step uses; reading "file" here missed it, so a
+    # partial import was never surfaced in a real flow (#402, which made #390
+    # inert outside the unit tests).
+    if command == "import" and with_.get("model") and with_.get("filename"):
         try:
             path = expected_fail_file(
-                with_.get("connection_file", ""), with_["model"], with_["file"]
+                with_.get("connection_file", ""), with_["model"], with_["filename"]
             )
             if os.path.exists(path):
                 with open(path, encoding="utf-8") as handle:
