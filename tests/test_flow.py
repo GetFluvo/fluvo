@@ -428,3 +428,92 @@ def test_missing_pyyaml_gives_actionable_error(
     monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(FlowError, match=r"fluvo\[flows\]"):
         parse_flow_file(_write(tmp_path, VALID))
+
+
+# --- declarative mapping on a step (#352) -----------------------------------
+
+_INLINE_MAPPING_FLOW = """
+version: 1
+flows:
+  - name: partners
+    steps:
+      - run: import
+        with:
+          connection_file: c.conf
+          filename: data/partners.csv
+        mapping:
+          inline:
+            version: 1
+            model: res.partner
+            id: {prefix: mig, from: legacy_id}
+            columns:
+              name: {copy: Name}
+"""
+
+
+def test_step_inline_mapping_parses(tmp_path: Path) -> None:
+    """An inline mapping block parses into a MappingSpec on the step."""
+    ff = parse_flow_file(_write(tmp_path, _INLINE_MAPPING_FLOW))
+    step = ff.flows[0].steps[0]
+    assert step.mapping is not None
+    assert step.mapping.model == "res.partner"
+    assert list(step.mapping.columns) == ["name"]
+
+
+def test_step_file_mapping_parses(tmp_path: Path) -> None:
+    """A sidecar `file:` mapping is read and parsed at flow-load time."""
+    mapfile = tmp_path / "partner_map.yml"
+    mapfile.write_text(
+        "version: 1\n"
+        "model: res.partner\n"
+        "id: {prefix: mig, from: legacy_id}\n"
+        "columns:\n"
+        "  name: {copy: Name}\n"
+    )
+    flow = (
+        "version: 1\n"
+        "flows:\n"
+        "  - name: p\n"
+        "    steps:\n"
+        "      - run: import\n"
+        "        with:\n"
+        "          connection_file: c.conf\n"
+        "          filename: data/partners.csv\n"
+        f"        mapping:\n          file: {mapfile}\n"
+    )
+    ff = parse_flow_file(_write(tmp_path, flow))
+    spec = ff.flows[0].steps[0].mapping
+    assert spec is not None
+    assert spec.model == "res.partner"
+
+
+def test_mapping_only_valid_on_import(tmp_path: Path) -> None:
+    """A mapping on a non-import step is rejected."""
+    flow = _INLINE_MAPPING_FLOW.replace("run: import", "run: export")
+    with pytest.raises(FlowError, match="only valid on `import`"):
+        parse_flow_file(_write(tmp_path, flow))
+
+
+def test_mapping_needs_exactly_one_of_file_or_inline(tmp_path: Path) -> None:
+    """A mapping block with neither file nor inline is rejected."""
+    flow = (
+        "version: 1\n"
+        "flows:\n"
+        "  - name: p\n"
+        "    steps:\n"
+        "      - run: import\n"
+        "        with: {connection_file: c.conf, filename: x.csv}\n"
+        "        mapping: {}\n"
+    )
+    with pytest.raises(FlowError, match="exactly one of `file` or `inline`"):
+        parse_flow_file(_write(tmp_path, flow))
+
+
+def test_mapping_and_with_model_conflict(tmp_path: Path) -> None:
+    """Setting the model in both the mapping and `with` is rejected."""
+    flow = _INLINE_MAPPING_FLOW.replace(
+        "          filename: data/partners.csv",
+        "          filename: data/partners.csv\n          model: res.partner",
+    )
+    with pytest.raises(FlowError, match="both `mapping.model` and `with.model`"):
+        parse_flow_file(_write(tmp_path, flow))

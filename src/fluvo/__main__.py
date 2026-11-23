@@ -31,6 +31,7 @@ from .lib.flow_runner import StepOutcome, StepResult
 
 if TYPE_CHECKING:
     from .lib.flow import Flow, FlowFile
+    from .lib.mapping import MappingSpec
 from .lib.validation import display_validation_results, validate_csv_data
 from .logging_config import log, setup_logging
 from .migrator import run_migration
@@ -453,15 +454,100 @@ def _build_step_argv(
     return argv
 
 
-def _run_flow_step(command: str, with_: dict[str, Any]) -> StepOutcome:
+def _materialise_mapping(spec: "MappingSpec", with_: dict[str, Any]) -> str:
+    """Transform the step's source through a declarative mapping, return the path.
+
+    Compiles the mapping, validates it against the source rows, runs the existing
+    :class:`~fluvo.lib.transform.Processor` to produce a transformed sibling file,
+    and rewrites ``with_`` to import that file as the mapping's model. No new
+    execution path: the import command runs unchanged over the transformed file.
+
+    Args:
+        spec: The step's compiled mapping.
+        with_: The step's options (mutated: ``filename`` and ``model`` are set).
+
+    Returns:
+        str: Path to the temporary transformed file, for the caller to clean up.
+
+    Raises:
+        InputError: If the mapping does not match the source rows.
+    """
+    import tempfile
+
+    import polars as pl
+
+    from .lib import mapping as mapping_lib
+    from .lib.core import InputError
+    from .lib.transform import Processor
+
+    src = with_.get("filename")
+    if not src:
+        raise InputError("a `mapping` step needs a `filename` (the source to map).")
+    sep = str(with_.get("separator", ";"))
+    source_df = pl.read_csv(
+        src, separator=sep, infer_schema_length=0, truncate_ragged_lines=True
+    )
+    mapping_lib.validate_against_source(spec, source_df)
+    compiled = mapping_lib.compile_mapping(spec)
+
+    src_dir = os.path.dirname(os.path.abspath(src))
+    fd, tmp = tempfile.mkstemp(prefix=".fluvo_mapped_", suffix=".csv", dir=src_dir)
+    os.close(fd)
+    result_df = Processor(dataframe=source_df, mapping=compiled, separator=sep).process(
+        filename_out=tmp
+    )
+    result_df.write_csv(tmp, separator=sep)
+
+    with_["filename"] = tmp
+    with_["model"] = spec.model
+    return tmp
+
+
+def _run_flow_step(
+    command: str, with_: dict[str, Any], mapping: "MappingSpec | None" = None
+) -> StepOutcome:
     """Execute one flow step by invoking its fluvo command (one code path).
 
     Args:
         command: The command name (import/export/write/migrate).
         with_: The step's resolved options.
+        mapping: The step's compiled ``mapping:`` block, or None. When present,
+            the source is transformed through it first and the import runs over
+            the result.
 
     Returns:
         StepOutcome: Whether the step succeeded and any fail file it produced.
+    """
+    with_ = dict(with_)
+    mapped_tmp: str | None = None
+    if mapping is not None:
+        from .lib.core import FluvoError
+
+        try:
+            mapped_tmp = _materialise_mapping(mapping, with_)
+        except FluvoError as exc:
+            return StepOutcome(ok=False, error=str(exc))
+        except Exception as exc:  # a malformed source, a polars error, etc.
+            return StepOutcome(ok=False, error=f"mapping failed: {exc}")
+    try:
+        return _invoke_step_command(command, with_)
+    finally:
+        if mapped_tmp and os.path.exists(mapped_tmp):
+            try:
+                os.remove(mapped_tmp)
+            except OSError as exc:  # pragma: no cover - cleanup is best-effort
+                log.debug(f"Could not remove temp mapped file {mapped_tmp}: {exc}")
+
+
+def _invoke_step_command(command: str, with_: dict[str, Any]) -> StepOutcome:
+    """Invoke one command for a flow step and capture its outcome.
+
+    Args:
+        command: The command name (import/export/write/migrate).
+        with_: The step's options (already mapping-transformed if applicable).
+
+    Returns:
+        StepOutcome: The command's outcome plus any fail file it produced.
     """
     cmd = cli.commands[command]
     argv = _build_step_argv(with_, _command_option_specs(cmd))

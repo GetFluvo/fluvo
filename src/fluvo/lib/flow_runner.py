@@ -25,9 +25,12 @@ Failure semantics (agreed on #251; partial refined in #390):
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .flow import Flow
+
+if TYPE_CHECKING:
+    from .mapping import MappingSpec
 
 
 @dataclass
@@ -83,7 +86,7 @@ class StepResult:
     outcome: StepOutcome
 
 
-RunStep = Callable[[str, dict[str, Any]], StepOutcome]
+RunStep = Callable[[str, dict[str, Any], "MappingSpec | None"], StepOutcome]
 
 
 def run_flows(flows: list[Flow], run_step: RunStep) -> tuple[list[StepResult], bool]:
@@ -91,8 +94,9 @@ def run_flows(flows: list[Flow], run_step: RunStep) -> tuple[list[StepResult], b
 
     Args:
         flows: The flows to run, already selected and in file order.
-        run_step: Callable ``(command, with_) -> StepOutcome`` that executes one
-            step. Injected so the engine can be tested without the CLI.
+        run_step: Callable ``(command, with_, mapping) -> StepOutcome`` that
+            executes one step. Injected so the engine can be tested without the
+            CLI. ``mapping`` is the step's compiled ``mapping:`` block, or None.
 
     Returns:
         tuple[list[StepResult], bool]: All step results in run order, and whether
@@ -101,7 +105,7 @@ def run_flows(flows: list[Flow], run_step: RunStep) -> tuple[list[StepResult], b
     results: list[StepResult] = []
     for flow in flows:
         for step in flow.steps:
-            outcome = run_step(step.run, step.with_)
+            outcome = run_step(step.run, step.with_, step.mapping)
             results.append(StepResult(flow.name, step.id, step.run, outcome))
             if not outcome.succeeded and step.on_error == "abort":
                 return results, True
