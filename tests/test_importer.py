@@ -991,9 +991,12 @@ class TestImporterEdgeCases:
             groupby=None,
         )
 
-        # Verify _ERROR_REASON is in ignore list
+        # Verify both internal meta columns are ignored on re-import (#299):
+        # the fail file now also carries _FLUVO_BUCKET next to _ERROR_REASON.
         call_kwargs = mock_import_data.call_args.kwargs
-        assert "_ERROR_REASON" in call_kwargs.get("ignore", [])
+        ignore = call_kwargs.get("ignore", [])
+        assert "_ERROR_REASON" in ignore
+        assert "_FLUVO_BUCKET" in ignore
 
     @patch("fluvo.importer.import_threaded.import_data")
     @patch("fluvo.importer._run_preflight_checks")

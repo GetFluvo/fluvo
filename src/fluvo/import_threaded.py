@@ -24,8 +24,8 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
+from .lib import buckets, conf_lib
 from .lib import checkpoint as ckpt
-from .lib import conf_lib
 from .lib import idempotent as idempotent_lib
 from .lib import retry as retry_lib
 from .lib import throttle as throttle_lib
@@ -434,6 +434,42 @@ def _filter_ignored_columns(
     return new_header, new_data
 
 
+class _BucketingFailWriter:
+    """A csv.writer wrapper that appends a ``_FLUVO_BUCKET`` cell to each row.
+
+    Every failed row carries its error reason as its last cell (the
+    ``_ERROR_REASON`` column). This classifies that reason into an owner bucket
+    (#299) and appends it, so the whole fail-file annotation lives at this one
+    seam — the many ``failed_lines.append([*line, reason])`` sites on the
+    reconciliation-critical path are untouched. Only already-failed rows pass
+    through here, so it cannot affect the import's counters or success path.
+
+    Args:
+        writer: The underlying csv.writer the header was already written to.
+    """
+
+    def __init__(self, writer: Any) -> None:
+        self._writer = writer
+
+    def writerow(self, row: list[Any]) -> None:
+        """Write one failed row, appending its classified bucket.
+
+        Args:
+            row: The failed row, ending in its ``_ERROR_REASON`` value.
+        """
+        reason = str(row[-1]) if row else ""
+        self._writer.writerow([*row, buckets.classify_failure(reason)])
+
+    def writerows(self, rows: "Iterable[list[Any]]") -> None:
+        """Write several failed rows, each with its classified bucket.
+
+        Args:
+            rows: The failed rows to write.
+        """
+        for row in rows:
+            self.writerow(row)
+
+
 def _setup_fail_file(
     fail_file: str | None, header: list[str], separator: str, encoding: str
 ) -> tuple[Any | None, TextIO | None]:
@@ -442,14 +478,16 @@ def _setup_fail_file(
         return None, None
     try:
         fail_handle = open(fail_file, "w", newline="", encoding=encoding)
-        fail_writer = csv.writer(
-            fail_handle, delimiter=separator, quoting=csv.QUOTE_ALL
-        )
+        raw_writer = csv.writer(fail_handle, delimiter=separator, quoting=csv.QUOTE_ALL)
         header_to_write = list(header)
         if "_ERROR_REASON" not in header_to_write:
             header_to_write.append("_ERROR_REASON")
-        fail_writer.writerow(header_to_write)
-        return fail_writer, fail_handle
+        # Annotate each failed row with its owner bucket (#299), next to the
+        # reason. The header carries the extra column; the wrapper fills it per
+        # row, so no caller that builds failed rows needs to change.
+        header_to_write.append(buckets.BUCKET_COLUMN)
+        raw_writer.writerow(header_to_write)
+        return _BucketingFailWriter(raw_writer), fail_handle
     except OSError as e:
         log.error(f"Could not open fail file for writing: {fail_file}. Error: {e}")
         return None, None

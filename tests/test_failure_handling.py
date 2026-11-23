@@ -160,9 +160,11 @@ def test_create_fallback_handles_malformed_rows(tmp_path: Path) -> None:
         fail_content = list(reader)
 
     assert len(fail_content) == 2  # Header + one failed row
+    # Fail rows now end with _FLUVO_BUCKET (#299); the reason is the cell before.
+    assert fail_content[0][-1] == "_FLUVO_BUCKET"
     failed_row = fail_content[1]
     assert failed_row[0] == "rec_bad"
-    assert "Row has 2 columns, but header has 3" in failed_row[-1]
+    assert "Row has 2 columns, but header has 3" in failed_row[-2]
 
 
 @patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
@@ -252,11 +254,13 @@ def test_fallback_with_dirty_csv(mock_get_conn: MagicMock, tmp_path: Path) -> No
         failed_rows = list(reader)
 
     assert len(failed_rows) == 3  # Header + 2 failed rows
+    # Fail rows now end with _FLUVO_BUCKET (#299); the reason is the cell before.
+    assert failed_rows[0][-1] == "_FLUVO_BUCKET"
     # Check the error message for the row with bad columns
     assert failed_rows[1][0] == "bad_cols"
-    assert "Row has 1 columns, but header has 3" in failed_rows[1][-1]
+    assert "Row has 1 columns, but header has 3" in failed_rows[1][-2]
     # Check the error message for the empty row
-    assert "Row has 0 columns, but header has 3" in failed_rows[2][-1]
+    assert "Row has 0 columns, but header has 3" in failed_rows[2][-2]
 
 
 @patch("fluvo.import_threaded.conf_lib.get_connection_from_config")
