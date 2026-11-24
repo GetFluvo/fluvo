@@ -58,18 +58,40 @@ audit file ──reader──▶ canonical ledger ──transform──▶ stage
    fail-fast report; stage writes the CSVs, the maps, `preflight.json` and the
    generated `flows.yml`.
 
-### Cutover is the closing position
+### Cutover is the closing position, with open items as real invoices
 
 `cutover` stages the **closing position at the end of the period** — each
-account's opening balance plus the year's movement — as one balanced opening
-move, not a mix of year-start balances and this-year activity. Receivable and
-payable control accounts are itemised **per open item**: the prior-year opening
-subledger plus this year's control-account lines, netted per party and matching
-key (explicit reconciliation key, else invoice reference, else document
-reference), so a settled invoice drops out and a payment leaves no phantom entry;
-any opening balance a subledger did not itemise is carried as a lumped remainder.
-Profit-and-loss accounts carry by default or close into a chosen result account.
-The move balances by construction, and preflight re-checks the generated move.
+account's opening balance plus the year's movement — not a mix of year-start
+balances and this-year activity.
+
+Each open AR/AP item lands as its **own real draft invoice or bill**
+(`out_invoice`/`in_invoice`, or `out_refund`/`in_refund` for a reversed sign —
+a credit note or an unallocated payment, which are flagged rather than guessed),
+carrying the **residual** open amount as one tax-free line on a dedicated
+**clearing account**, keeping the original number, date and partner. Open items
+are the prior-year opening subledger plus this year's control-account lines,
+netted per party and matching key (explicit reconciliation key, else invoice
+reference, else document reference), so a settled invoice drops out and a payment
+leaves no phantom entry. This is a deliberate change from an earlier design that
+put per-item lines on the opening move: real invoices show in the aged balance
+and can be reconciled against incoming payments, which bare journal lines cannot.
+
+The receivable/payable line is forced onto the **source control account** (not
+the partner's or company's default) by staging the partner's
+`property_account_receivable_id` / `property_account_payable_id`. A spike against
+a live Odoo confirmed that a draft invoice created over RPC with a single
+no-tax line on the clearing account yields the exact residual as `amount_total`,
+with the forced control account, no tax recompute and no rounding line. XAF
+carries no due date (confirmed against the 4.0 XSD), so it is derived from the
+invoice date plus a configurable term and the count is reported.
+
+The single opening move then carries each account's closing balance, with the
+**clearing account** holding the counter-amount of all the invoices (so it nets
+to zero) in place of the AR/AP control totals, plus a lumped remainder for any
+control opening a subledger did not itemise. Profit-and-loss accounts carry by
+default or close into a chosen result account. Every move balances by
+construction; preflight re-checks that, and errors if the clearing account does
+not net to zero. The invoices land draft — posting stays with ADR 0001.
 
 ### Parse anomalies and completeness are reported, not hidden
 
@@ -154,10 +176,12 @@ assurance profile is what proves, to an auditor's standard, that it landed right
 - Audit files cannot carry what they do not contain. XAF has **no fixed-asset
   register**; a faithful asset migration needs a separate source and is reported,
   not faked.
-- **History imports as plain journal entries, not invoices.** There are no
-  invoice documents and no `payment_state`; VAT codes are surfaced but lines
-  carry no `tax_ids`/tax tags, so Odoo's VAT reports are empty for imported
-  history. Invoice-level fidelity is a separate, heavier mapping, out of scope.
+- **`full_history` imports plain journal entries, not invoices** — no invoice
+  documents, no `payment_state`; VAT codes are surfaced but lines carry no
+  `tax_ids`/tax tags, so Odoo's VAT reports are empty for imported history. The
+  `cutover` open-item invoices are real invoices but also carry a single
+  tax-free residual line, not the original tax detail. Full tax/invoice fidelity
+  is a separate, heavier mapping, out of scope.
 - **Money is floating-point** with a fixed `0.01` tolerance (ADR 0001's), not
   integer minor units; balances tie to the cent, and a file whose own rounding
   drifts further is flagged, not absorbed. Moving to integer cents is a possible

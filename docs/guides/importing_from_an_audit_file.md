@@ -59,7 +59,8 @@ This writes, into `./stage`:
 | `moves.csv` | `account.move` rows (draft), with their lines |
 | `account_map.csv` | the **editable** account-typing proposals |
 | `partner_aliases.csv` | every source id → surviving partner external id |
-| `open_items.csv` | the per-partner open AR/AP breakdown (cutover) |
+| `open_invoices.csv` | one draft invoice/bill per open AR/AP item (cutover) |
+| `open_items.csv` | the netted open-item breakdown, for audit (cutover) |
 | `preflight.json` | the structured preflight report |
 | `flows.yml` | the generated flow that loads the CSVs in order |
 
@@ -145,18 +146,36 @@ is omitted when no partner carries an account.
 - **`full_history`** (default) — every transaction becomes a draft
   `account.move`, plus one opening-balance move carrying the GL opening balances
   as-is. Use it to carry the complete ledger across.
-- **`cutover`** — a single opening move holding the **closing position at the end
-  of the period**: each account's opening balance plus the year's movement. The
-  AR/AP control accounts are broken out **per open item** — the prior-year
-  opening subledger plus this year's lines, matched on an explicit reconciliation
-  key, else the invoice reference, else the document reference, so a settled
-  invoice drops out and a payment never leaves a phantom entry — plus a lumped
-  remainder for any opening balance a subledger did not itemise. Use it to start
-  fresh in Odoo while keeping the open-invoice position.
+- **`cutover`** — the **closing position at the end of the period**: each
+  account's opening balance plus the year's movement. Each open AR/AP item
+  becomes a **real draft invoice or bill** (`out_invoice` / `in_invoice`, or
+  `out_refund` / `in_refund` for a credit note or an unallocated payment), one
+  per item, carrying the **residual** open amount as a single tax-free line on a
+  dedicated **clearing account**, with the original number, date, derived due
+  date and partner. The receivable/payable line lands on the **source control
+  account** (the connector stages the partner's receivable/payable property to
+  force it, rather than Odoo's default). The one opening move then carries each
+  account's closing balance, with the clearing account holding the counter-amount
+  of all those invoices (so it nets to zero) instead of the AR/AP totals. Open
+  items are the prior-year opening subledger plus this year's lines, matched on
+  an explicit reconciliation key, else the invoice reference, else the document
+  reference, so a settled invoice drops out and a payment never leaves a phantom
+  entry. Use it to start fresh in Odoo while keeping the open invoices as
+  invoices — so they show in the aged balance and can be reconciled against
+  incoming payments.
+
+  The invoices land **draft**, like the moves: reminders and follow-up only see
+  them once they are posted (ADR 0001). The original total is not reconstructed —
+  only the residual — so do not expect a payment history on them. Because XAF
+  carries no due date, each is derived from the invoice date plus
+  `--default-payment-days` (30 by default) and preflight reports the count.
 
   Profit-and-loss accounts carry their closing balance by default. Pass
   `--result-account <code>` to close them into one result/equity account instead,
-  for a clean balance-sheet-only opening. The opening move balances either way.
+  for a clean balance-sheet-only opening. Pass `--clearing-account <code>` to
+  choose the clearing account (a synthetic one is created otherwise). Every
+  staged move balances, and preflight errors if the clearing account does not
+  net to zero.
 
 ## Step 4 — load
 
@@ -166,31 +185,34 @@ Loading is the ordinary flow runner, pointed at the generated flow:
 fluvo --flow-file ./stage/flows.yml
 ```
 
-The flow loads **partners → partner banks → accounts → journals → moves** in
-that order (the bank step is present only when there are banks to load). The
-moves step uses Odoo's one-to-many load format (`--o2m`) so each move and its
-lines are created together. Because every record carries a deterministic
-external id, a second run **updates** rather than duplicates — re-running a
-failed load converges.
+The flow loads **accounts → journals → partners → partner banks → moves → open
+invoices** in that order (accounts before partners, because a partner's
+receivable/payable property references an account; the bank and open-invoice
+steps appear only when they have rows). The moves and open-invoice steps use
+Odoo's one-to-many load format (`--o2m`) so each move/invoice and its lines are
+created together. Because every record carries a deterministic external id, a
+second run **updates** rather than duplicates — re-running a failed load
+converges.
 
 ## What lands, and what is deferred
 
-Moves always land as **draft**. Posting a historical `account.move` is a separate,
-explicit, deliberately non-idempotent step (see
+Everything lands as **draft** — the moves, and the cutover open-item invoices.
+Posting a historical `account.move` or invoice is a separate, explicit,
+deliberately non-idempotent step (see
 [ADR 0001](../adr/0001-account-move-load-and-post.md)), and **auto-reconciliation
-is not performed** by this connector yet. The staged data and the `open_items.csv`
-breakdown are built so that a later post/reconcile step slots in without
-reshaping anything.
+is not performed** by this connector yet. **Reminders and follow-up only see the
+open-item invoices once they are posted.** The staged data is built so that a
+later post/reconcile step slots in without reshaping anything.
 
-**History lands as plain journal entries, not invoices.** A `full_history` import
-creates `account.move` records with lines, not `account.move` *invoices*: there
-are no invoice/bill documents, no `payment_state`, and no customer/vendor invoice
-lists. VAT codes are read and surfaced, but the staged lines carry **no taxes or
-tax tags**, so Odoo's VAT/tax reports will be empty for imported history — the
-figures live in the ledger balances, not in the tax engine. If you need working
-tax reports or invoice documents for prior periods, that is a separate, heavier
-mapping onto `account.move.type` and `tax_ids` which this connector does not
-attempt.
+**`full_history` lands plain journal entries, not invoices.** It creates
+`account.move` records with lines, not `account.move` *invoices*: no invoice/bill
+documents, no `payment_state`, no customer/vendor invoice lists. VAT codes are
+read and surfaced, but the staged lines carry **no taxes or tax tags**, so Odoo's
+VAT/tax reports are empty for imported history — the figures live in the ledger
+balances, not the tax engine. (The `cutover` open-item invoices *are* real
+invoices, but they too carry a single tax-free residual line, not the original
+tax detail.) Recreating prior-period tax reports or full invoice documents is a
+separate, heavier mapping this connector does not attempt.
 
 **Money is handled as floating-point** throughout, compared with a fixed `0.01`
 tolerance (the same tolerance the import engine and [ADR
