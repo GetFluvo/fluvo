@@ -8,6 +8,7 @@ This section provides detailed, step-by-step guides for common tasks and advance
 
 assessing_a_source
 importing_data
+importing_from_an_audit_file
 dataframe_api
 choosing_options
 exporting_data

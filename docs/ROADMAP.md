@@ -42,6 +42,15 @@ Everything in the previous "Near-term" list has landed, as of **0.1.0**:
   and fix reference columns a spreadsheet has silently rewritten (scientific notation,
   dropped leading zeros, dates) before they reach Odoo.
 
+- **Audit-file import (XAF)** — import a company's finances straight from the Dutch
+  tax-authority audit file (XAF 3.2 and 4.0). The connector is a *compiler*: it stages
+  Odoo-shaped CSVs and a `flows.yml` that the existing flow runner loads, so the
+  reconciliation contract is unchanged. `fluvo auditfile inspect` is a free, read-only
+  overview; `fluvo auditfile stage` compiles the file, with partner dedup, an editable
+  account-type mapping, and cutover/full-history modes. See
+  [ADR 0002](adr/0002-audit-file-connectors.md) and the
+  [guide](guides/importing_from_an_audit_file.md).
+
 - **Correct external ids in every export header** ([#339](https://github.com/GetFluvo/fluvo/issues/339)) —
   a bare `id` column now stays the external id even when a selection or binary field is
   present in the header. Previously it silently returned the database id instead, so
@@ -64,6 +73,16 @@ Everything in the previous "Near-term" list has landed, as of **0.1.0**:
   want community contributions. More sources (legacy ERPs, spreadsheets, other Odoo
   instances) and better round-tripping over time. See
   [CONTRIBUTING.md](https://github.com/GetFluvo/fluvo/blob/master/CONTRIBUTING.md).
+
+- **More audit-file formats** — the audit-file connector's canonical model is SAF-T
+  shaped so new formats are thin readers. Next, in rough priority: **DATEV** (the de
+  facto DACH standard), **FEC** (France — mandatory, a clean flat file), the **SAF-T
+  family** (Portugal, Poland, Luxembourg FAIA, Norway — structurally close to XAF 4.0),
+  and **XAS** (Dutch payroll audit file). Formats may also ship out of tree via the
+  `fluvo.auditfile_formats` entry-point group. The paid *assurance profile* is the
+  per-format reconciliation report that proves, to an auditor's standard, that the
+  migration landed right (open-item tie-out, trial-balance proof, post/reconcile
+  sign-off).
 
 - **Reconciliation & data quality** — deepen the integrity guarantees that already
   back every import (the `created + failed + unaccounted == total` contract) and the
