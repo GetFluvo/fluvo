@@ -1057,6 +1057,106 @@ def auditfile_inspect_cmd(file: str, fmt: str | None, as_json: bool) -> None:
         raise SystemExit(exc.exit_code) from exc
 
 
+@auditfile_group.command(name="stage")
+@click.argument("file", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--out",
+    "out_dir",
+    required=True,
+    type=click.Path(file_okay=False),
+    help="Directory to write the stage (CSVs, maps, preflight.json, flows.yml).",
+)
+@click.option(
+    "--mode",
+    type=click.Choice(["full_history", "cutover"], case_sensitive=False),
+    default="full_history",
+    help="full_history: every transaction as a draft move. "
+    "cutover: opening balance only, AR/AP broken out per open item.",
+)
+@click.option(
+    "--connection-file",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="Odoo connection file to embed in the generated flows.yml.",
+)
+@click.option(
+    "--account-map",
+    "account_map",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="An edited account_map.csv whose account_type values override the "
+    "mapper chain.",
+)
+@click.option(
+    "--prefix", default="xaf", help="External-id prefix for the staged records."
+)
+@click.option(
+    "--allow-warnings",
+    is_flag=True,
+    default=False,
+    help="Stage even when preflight has warnings (errors always block).",
+)
+@click.option(
+    "--format",
+    "fmt",
+    default=None,
+    help="Force the audit-file format (e.g. 'xaf') instead of auto-detecting.",
+)
+def auditfile_stage_cmd(
+    file: str,
+    out_dir: str,
+    mode: str,
+    connection_file: str | None,
+    account_map: str | None,
+    prefix: str,
+    allow_warnings: bool,
+    fmt: str | None,
+) -> None:
+    """Compile an audit file into a loadable stage directory.
+
+    Reads FILE, writes Odoo-shaped CSVs plus a generated flows.yml to --out, and
+    runs preflight. Load the result with ``fluvo --flow-file <out>/flows.yml``.
+    Nothing is written to Odoo by this command.
+    """
+    from rich.console import Console
+
+    from .auditfile import read_auditfile
+    from .auditfile.stage import load_account_overrides, stage
+    from .lib.core import FluvoError
+    from .lib.internal.ui import _show_error_panel
+
+    console = Console()
+    try:
+        ledger = read_auditfile(file, fmt=fmt)
+        overrides = load_account_overrides(account_map) if account_map else None
+        result = stage(
+            ledger,
+            out_dir,
+            mode=mode.lower(),
+            prefix=prefix,
+            connection_file=connection_file,
+            account_overrides=overrides,
+            allow_warnings=allow_warnings,
+        )
+    except FluvoError as exc:
+        _show_error_panel("Audit file", str(exc))
+        raise SystemExit(exc.exit_code) from exc
+
+    for line in result.report.summary_lines():
+        console.print(line)
+    if result.blocked:
+        console.print(
+            f"[yellow]Blocked:[/yellow] wrote data + preflight.json to "
+            f"{result.out_dir}, but no flows.yml. Fix the findings (or pass "
+            f"--allow-warnings) and re-run."
+        )
+        raise SystemExit(1)
+    console.print(
+        f"[green]Staged[/green] {result.out_dir}\n"
+        f"Load with: fluvo --flow-file {result.flows_path}"
+    )
+
+
 # --- VAT Validation Command Group ---
 @cli.group(name="vat")
 def vat_group() -> None:

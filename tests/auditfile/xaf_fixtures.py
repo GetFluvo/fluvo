@@ -35,6 +35,7 @@ _NAMESPACE = {
 #: ``(accID, accDesc, accTp, rgs_code)``. The receivable/payable pair lets the
 #: transform exercise control-account handling.
 _CORE_ACCOUNTS = (
+    ("0500", "Eigen vermogen", "B", "BEivKap"),
     ("1100", "Bank", "B", "BLimBanRba"),
     ("1300", "Debiteuren", "B", "BVorHanDeb"),
     ("1600", "Crediteuren", "B", "BSchCreHac"),
