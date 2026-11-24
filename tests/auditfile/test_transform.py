@@ -33,6 +33,32 @@ def _ledger(tmp_path: Path, version: str = "4.0"):  # type: ignore[no-untyped-de
     return read_auditfile(str(path))
 
 
+_NS32 = "http://www.auditfiles.nl/XAF/3.2"
+
+
+def _read_xaf(tmp_path: Path, body: str):  # type: ignore[no-untyped-def]
+    """Write and read a minimal 3.2 XAF whose company holds ``body``."""
+    path = tmp_path / "c.xaf"
+    path.write_text(
+        f'<?xml version="1.0"?><auditfile xmlns="{_NS32}">'
+        "<header><startDate>2025-01-01</startDate><endDate>2025-12-31</endDate>"
+        "<curCode>EUR</curCode></header>"
+        f"<company><companyName>X</companyName>{body}</company></auditfile>",
+        encoding="utf-8",
+    )
+    return read_auditfile(str(path))
+
+
+def _move_net(result, account_xmlid: str) -> float:  # type: ignore[no-untyped-def]
+    """Net (debit - credit) of the opening move's lines for one account."""
+    rows = result.moves.to_dicts()
+    net = 0.0
+    for row in rows:
+        if row["line_ids/account_id/id"] == account_xmlid:
+            net += float(row["line_ids/debit"]) - float(row["line_ids/credit"])
+    return net
+
+
 def test_san_and_xmlid() -> None:
     """External ids sanitise unsafe characters and keep the prefix dot."""
     assert _san("JRN000/000-0001") == "JRN000_000_0001"
@@ -135,8 +161,8 @@ def test_full_history_is_balanced(tmp_path: Path) -> None:
     result = transform(_ledger(tmp_path), prefix="xaf", mode=MODE_FULL_HISTORY)
     debit, credit = _move_balance(result)
     assert debit == pytest.approx(credit)
-    # The opening move plus 6 two-line transactions.
-    assert result.moves.height == 2 + 12
+    # The opening move (3 GL lines) plus 6 two-line transactions.
+    assert result.moves.height == 3 + 12
 
 
 def test_move_line_external_ids(tmp_path: Path) -> None:
@@ -169,6 +195,111 @@ def test_unknown_mode_raises(tmp_path: Path) -> None:
     """An unsupported mode is an input error."""
     with pytest.raises(InputError, match="unknown mode"):
         transform(_ledger(tmp_path), mode="nope")
+
+
+def test_cutover_is_closing_position_and_balances(tmp_path: Path) -> None:
+    """Cutover emits the closing position, balanced, carrying prior open items."""
+    result = transform(_ledger(tmp_path, "3.2"), prefix="xaf", mode=MODE_CUTOVER)
+    debit, credit = _move_balance(result)
+    assert debit == pytest.approx(credit)  # closing TB is balanced by construction
+    refs = result.open_items.get_column("doc_ref").to_list()
+    assert "2023-900" in refs  # the prior-year opening invoice is carried over
+    # 1300 closing = opening (1210) + the year's debits on it (101..106 = 621).
+    assert _move_net(result, "xaf.account_1300") == pytest.approx(1210.0 + 621.0)
+
+
+_RECV_BANK_BODY = (
+    "<generalLedger>"
+    "<ledgerAccount><accID>1300</accID><accDesc>Deb</accDesc><accTp>B</accTp>"
+    "</ledgerAccount>"
+    "<ledgerAccount><accID>1100</accID><accDesc>Bank</accDesc><accTp>B</accTp>"
+    "</ledgerAccount>"
+    "<ledgerAccount><accID>8000</accID><accDesc>Omzet</accDesc><accTp>P</accTp>"
+    "</ledgerAccount></generalLedger>"
+    "<customersSuppliers><customerSupplier><custSupID>C1</custSupID>"
+    "<custSupTp>C</custSupTp><custSupName>Klant</custSupName></customerSupplier>"
+    "</customersSuppliers>"
+    "<transactions>"
+    "<journal><jrnID>VK</jrnID><jrnTp>S</jrnTp>"
+    "<transaction><nr>1</nr><trDt>2025-02-01</trDt>"
+    "<trLine><nr>1</nr><accID>1300</accID><amnt>100.00</amnt><amntTp>D</amntTp>"
+    "<invRef>INV1</invRef><custSupID>C1</custSupID></trLine>"
+    "<trLine><nr>2</nr><accID>8000</accID><amnt>100.00</amnt><amntTp>C</amntTp>"
+    "</trLine></transaction>"
+    "<transaction><nr>2</nr><trDt>2025-03-01</trDt>"
+    "<trLine><nr>1</nr><accID>1300</accID><amnt>50.00</amnt><amntTp>D</amntTp>"
+    "<invRef>INV2</invRef><custSupID>C1</custSupID></trLine>"
+    "<trLine><nr>2</nr><accID>8000</accID><amnt>50.00</amnt><amntTp>C</amntTp>"
+    "</trLine></transaction></journal>"
+    "<journal><jrnID>BNK</jrnID><jrnTp>B</jrnTp>"
+    "<transaction><nr>1</nr><trDt>2025-04-01</trDt>"
+    "<trLine><nr>1</nr><accID>1100</accID><amnt>100.00</amnt><amntTp>D</amntTp>"
+    "<docRef>BANK-7</docRef></trLine>"
+    "<trLine><nr>2</nr><accID>1300</accID><amnt>100.00</amnt><amntTp>C</amntTp>"
+    "<docRef>BANK-7</docRef><invRef>INV1</invRef><custSupID>C1</custSupID></trLine>"
+    "</transaction></journal></transactions>"
+)
+
+
+def test_cutover_nets_payment_against_invoice(tmp_path: Path) -> None:
+    """A payment matched by invRef settles its invoice; only INV2 stays open."""
+    result = transform(_read_xaf(tmp_path, _RECV_BANK_BODY), mode=MODE_CUTOVER)
+    refs = set(result.open_items.get_column("doc_ref").to_list())
+    assert "INV2" in refs  # unpaid invoice is open
+    assert "INV1" not in refs  # invoice + its payment net to zero
+    assert "BANK-7" not in refs  # no phantom open item for the payment
+    debit, credit = _move_balance(result)
+    assert debit == pytest.approx(credit)
+
+
+def test_cutover_result_account_closes_pl(tmp_path: Path) -> None:
+    """With a result account, P&L balances fold into it, off their own lines."""
+    ledger = _read_xaf(tmp_path, _RECV_BANK_BODY)
+    carried = transform(ledger, mode=MODE_CUTOVER)
+    closed = transform(ledger, mode=MODE_CUTOVER, result_account="1100")
+    # Carried: income account has its own closing line. Closed: it does not.
+    assert _move_net(carried, "xaf.account_8000") == pytest.approx(-150.0)
+    assert _move_net(closed, "xaf.account_8000") == pytest.approx(0.0)
+    # Both still balance.
+    for result in (carried, closed):
+        debit, credit = _move_balance(result)
+        assert debit == pytest.approx(credit)
+
+
+def test_dedup_is_transitive_across_kvk_and_vat(tmp_path: Path) -> None:
+    """Records linked by a shared KvK or VAT merge, even transitively."""
+    body = (
+        "<customersSuppliers>"
+        "<customerSupplier><custSupID>A</custSupID><custSupTp>C</custSupTp>"
+        "<custSupName>A</custSupName><commerceNr>12345678</commerceNr>"
+        "</customerSupplier>"
+        "<customerSupplier><custSupID>B</custSupID><custSupTp>C</custSupTp>"
+        "<custSupName>B</custSupName><commerceNr>12345678</commerceNr>"
+        "<taxRegIdent>NL9</taxRegIdent></customerSupplier>"
+        "<customerSupplier><custSupID>C</custSupID><custSupTp>S</custSupTp>"
+        "<custSupName>C</custSupName><taxRegIdent>NL9</taxRegIdent>"
+        "</customerSupplier></customersSuppliers>"
+    )
+    ledger = _read_xaf(tmp_path, body)
+    merged = transform(ledger, prefix="xaf")
+    # A shares KvK with B, B shares VAT with C -> one partner, both ranks.
+    assert merged.partners.height == 1
+    row = merged.partners.row(0, named=True)
+    assert row["customer_rank"] == "1" and row["supplier_rank"] == "1"
+    # With dedup off, all three survive.
+    assert transform(ledger, prefix="xaf", dedup=False).partners.height == 3
+
+
+def test_partner_country_is_staged(tmp_path: Path) -> None:
+    """A partner country resolves to its Odoo external id rather than dropping."""
+    body = (
+        "<customersSuppliers><customerSupplier><custSupID>C1</custSupID>"
+        "<custSupTp>C</custSupTp><custSupName>K</custSupName>"
+        "<streetAddress><country>NL</country></streetAddress>"
+        "</customerSupplier></customersSuppliers>"
+    )
+    result = transform(_read_xaf(tmp_path, body), prefix="xaf")
+    assert result.partners.row(0, named=True)["country_id/id"] == "base.nl"
 
 
 def test_transform_is_deterministic(tmp_path: Path) -> None:

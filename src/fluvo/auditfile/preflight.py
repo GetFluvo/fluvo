@@ -9,8 +9,14 @@ short human summary (for the terminal).
 The checks are deliberately conservative and name what they find rather than
 guess a fix:
 
-* **unbalanced_move** (error) — a move whose debits and credits differ beyond
-  tolerance; Odoo will reject it.
+* **unbalanced_move** (error) — a *source* transaction whose debits and credits
+  differ beyond tolerance; Odoo will reject it.
+* **unbalanced_staged_move** (error) — a *generated* move (opening or history)
+  that does not balance, caught on the staged output itself.
+* **duplicate_move_key / duplicate_line_id** (error) — two records collapsed
+  onto one external id, which would overwrite or merge silently.
+* **parse_anomaly** (error) — a source cell (amount or date) the reader could
+  not parse; it was recorded, not silently zeroed.
 * **unknown_account** (error) — a line or opening balance references an account
   id that is not in the chart; its external id would not resolve.
 * **unknown_journal** (error) — a move references a journal not in the file.
@@ -18,11 +24,17 @@ guess a fix:
   in the party list; the partner link is left empty.
 * **non_eur_currency** (warning) — the file is not in EUR, so amounts need an FX
   review before they mean anything in a EUR company.
+* **foreign_currency_line** (warning) — a line carries its own currency; only
+  the base amount is staged.
+* **control_total_mismatch** (warning) — the file's declared control totals do
+  not match what was parsed, so the parse may be incomplete.
 * **proposed_account_type** (warning) — accounts whose Odoo type came from the
   numbering heuristic or the fallback, not an override or RGS; review
   ``account_map.csv`` before loading.
-* **open_item_tie_out** (warning) — in cutover, the per-partner open items on a
-  control account do not sum to that account's opening balance.
+* **account_kind_conflict** (warning) — an account's Odoo type contradicts the
+  source's balance/P&L kind.
+* **open_item_tie_out** (warning) — in cutover, a control account's staged lines
+  do not sum to its closing balance.
 
 Severity drives staging: by default any finding blocks (fail-fast); with the
 caller's ``allow_warnings`` opt-in, only errors block.
@@ -36,7 +48,7 @@ from typing import Any, Final
 import polars as pl
 
 from .canonical import BALANCE_TOLERANCE, CanonicalLedger, unbalanced_moves
-from .transform import TransformResult
+from .transform import MODE_CUTOVER, TransformResult, _net_by_account
 
 ERROR: Final = "error"
 WARNING: Final = "warning"
@@ -341,40 +353,271 @@ def _check_proposed_types(result: TransformResult) -> list[Finding]:
     ]
 
 
-def _check_open_item_tie_out(
-    ledger: CanonicalLedger, result: TransformResult
-) -> list[Finding]:
-    """Flag control accounts where open items do not sum to the opening balance.
+def _iter_staged_moves(
+    moves: pl.DataFrame,
+) -> list[tuple[str, float, float, list[str]]]:
+    """Reassemble the o2m move rows into per-move totals and line ids.
 
-    Only meaningful in cutover, where the opening balance of a reconcilable
-    account is expected to equal the sum of its open items.
+    A new move starts on each row carrying a non-empty ``id``; the following
+    blank-id rows are its continuation lines.
+
+    Args:
+        moves: The staged ``account.move`` o2m frame.
+
+    Returns:
+        list[tuple[str, float, float, list[str]]]: One tuple per move —
+        ``(move id, debit total, credit total, line ids)``.
+    """
+    out: list[tuple[str, float, float, list[str]]] = []
+    for row in moves.to_dicts():
+        move_id = str(row.get("id") or "")
+        if move_id:
+            out.append((move_id, 0.0, 0.0, []))
+        if not out:
+            continue
+        current_id, debit, credit, lines = out[-1]
+        debit += float(row.get("line_ids/debit") or 0.0)
+        credit += float(row.get("line_ids/credit") or 0.0)
+        line_id = str(row.get("line_ids/id") or "")
+        if line_id:
+            lines.append(line_id)  # same list object as in the tuple
+        out[-1] = (current_id, debit, credit, lines)
+    return out
+
+
+def _check_moves_balance(result: TransformResult) -> list[Finding]:
+    """Flag any *generated* move whose debits and credits do not balance.
+
+    This checks the staged output itself, not just the source lines, so a
+    transform that builds an unbalanced opening or history move is caught before
+    it reaches Odoo.
+
+    Args:
+        result: The transform result.
+
+    Returns:
+        list[Finding]: A single error finding, or empty.
+    """
+    bad = [
+        move_id
+        for move_id, debit, credit, _lines in _iter_staged_moves(result.moves)
+        if abs(debit - credit) > BALANCE_TOLERANCE
+    ]
+    if not bad:
+        return []
+    return [
+        _finding(
+            "unbalanced_staged_move",
+            ERROR,
+            "{n} generated move(s) do not balance; Odoo would reject them.",
+            bad,
+        )
+    ]
+
+
+def _check_move_integrity(result: TransformResult) -> list[Finding]:
+    """Flag duplicate move keys or duplicate move-line external ids.
+
+    Two source transactions that collapsed onto one external id, or a repeated
+    line id, would make the import overwrite or merge records silently.
+
+    Args:
+        result: The transform result.
+
+    Returns:
+        list[Finding]: Error findings for any duplicates, or empty.
+    """
+    moves = _iter_staged_moves(result.moves)
+    move_ids = [m[0] for m in moves]
+    line_ids = [lid for m in moves for lid in m[3]]
+    findings: list[Finding] = []
+    dup_moves = sorted({m for m in move_ids if move_ids.count(m) > 1})
+    if dup_moves:
+        findings.append(
+            _finding(
+                "duplicate_move_key",
+                ERROR,
+                "{n} move external id(s) occur more than once.",
+                dup_moves,
+            )
+        )
+    dup_lines = sorted({x for x in line_ids if line_ids.count(x) > 1})
+    if dup_lines:
+        findings.append(
+            _finding(
+                "duplicate_line_id",
+                ERROR,
+                "{n} move-line external id(s) occur more than once.",
+                dup_lines,
+            )
+        )
+    return findings
+
+
+def _check_parse_anomalies(ledger: CanonicalLedger) -> list[Finding]:
+    """Flag source cells the reader could not parse.
 
     Args:
         ledger: The canonical ledger.
-        result: The transform result carrying the open items.
+
+    Returns:
+        list[Finding]: A single error finding, or empty.
+    """
+    if ledger.anomalies.height == 0:
+        return []
+    samples = tuple(
+        f"{r['location']}={r['raw_value']!r}"
+        for r in ledger.anomalies.head(_SAMPLE).to_dicts()
+    )
+    return [
+        Finding(
+            "parse_anomaly",
+            ERROR,
+            f"{ledger.anomalies.height} source cell(s) could not be parsed "
+            "(a malformed amount or date); fix the file or the export.",
+            count=int(ledger.anomalies.height),
+            sample=samples,
+        )
+    ]
+
+
+def _check_control_totals(ledger: CanonicalLedger) -> list[Finding]:
+    """Flag the file's declared control totals not matching the parse.
+
+    Args:
+        ledger: The canonical ledger.
 
     Returns:
         list[Finding]: A single warning finding, or empty.
     """
-    if result.mode != "cutover" or result.open_items.height == 0:
+    header = ledger.header.to_dicts()[0]
+    gl = ledger.opening_lines.filter(pl.col("source_partner_id").is_null())
+    lines = ledger.lines
+    checks = (
+        ("opening lines", "declared_opening_count", float(gl.height)),
+        ("opening debit", "declared_opening_debit", _sum(gl, "debit")),
+        ("opening credit", "declared_opening_credit", _sum(gl, "credit")),
+        ("transaction lines", "declared_tx_count", float(lines.height)),
+        ("transaction debit", "declared_tx_debit", _sum(lines, "debit")),
+        ("transaction credit", "declared_tx_credit", _sum(lines, "credit")),
+    )
+    mismatches: list[str] = []
+    for label, key, actual in checks:
+        declared = header.get(key)
+        if declared is None:
+            continue
+        if abs(float(declared) - actual) > BALANCE_TOLERANCE:
+            mismatches.append(f"{label}: file {float(declared):g} vs parsed {actual:g}")
+    if not mismatches:
         return []
-    opening = ledger.opening_lines.filter(pl.col("source_partner_id").is_null())
-    opening_net: dict[str, float] = {}
-    for row in opening.to_dicts():
-        account_id = str(row.get("account_id") or "")
-        opening_net[account_id] = opening_net.get(account_id, 0.0) + (
-            float(row.get("debit") or 0.0) - float(row.get("credit") or 0.0)
+    return [
+        _finding(
+            "control_total_mismatch",
+            WARNING,
+            "{n} declared control total(s) do not match the parse; the file may "
+            "be incomplete or non-standard.",
+            mismatches,
         )
-    item_net: dict[str, float] = {}
-    for row in result.open_items.to_dicts():
-        account_id = str(row["account_id"])
-        item_net[account_id] = item_net.get(account_id, 0.0) + (
-            float(row.get("debit") or 0.0) - float(row.get("credit") or 0.0)
+    ]
+
+
+def _sum(frame: pl.DataFrame, column: str) -> float:
+    """Sum a numeric column, treating an empty frame as zero.
+
+    Args:
+        frame: The frame to read.
+        column: The column to sum.
+
+    Returns:
+        float: The column total.
+    """
+    if frame.height == 0:
+        return 0.0
+    return float(frame.get_column(column).sum() or 0.0)
+
+
+def _check_kind_conflicts(result: TransformResult) -> list[Finding]:
+    """Flag accounts whose Odoo type contradicts the source's account kind.
+
+    Args:
+        result: The transform result.
+
+    Returns:
+        list[Finding]: A single warning finding, or empty.
+    """
+    if not result.conflicting_accounts:
+        return []
+    return [
+        _finding(
+            "account_kind_conflict",
+            WARNING,
+            "{n} account(s) are typed against the source's balance/P&L kind; "
+            "review account_map.csv.",
+            list(result.conflicting_accounts),
         )
+    ]
+
+
+def _check_foreign_currency(ledger: CanonicalLedger) -> list[Finding]:
+    """Flag transaction lines carrying their own (foreign) currency.
+
+    Args:
+        ledger: The canonical ledger.
+
+    Returns:
+        list[Finding]: A single warning finding, or empty.
+    """
+    file_currency = ledger.header.get_column("currency").item(0)
+    if ledger.lines.height == 0:
+        return []
+    foreign = ledger.lines.filter(
+        pl.col("currency").is_not_null() & (pl.col("currency") != file_currency)
+    )
+    if foreign.height == 0:
+        return []
+    currencies = sorted({str(c) for c in foreign.get_column("currency").to_list()})
+    return [
+        _finding(
+            "foreign_currency_line",
+            WARNING,
+            f"{foreign.height} line(s) are in a currency other than "
+            f"{file_currency!r}; only the base amount is staged, review the FX.",
+            currencies,
+        )
+    ]
+
+
+def _check_open_item_tie_out(
+    ledger: CanonicalLedger, result: TransformResult
+) -> list[Finding]:
+    """Flag a control account whose opening subledger does not tie to its GL.
+
+    In cutover, each control account's opening subledger items (the carried-over
+    open invoices) should sum to that account's opening GL balance. A mismatch
+    — including a subledger item whose control account did not resolve — means
+    the carried-over open items are inconsistent with the balance sheet, so the
+    per-item cutover cannot be trusted without review.
+
+    Args:
+        ledger: The canonical ledger.
+        result: The transform result (its mode selects the check).
+
+    Returns:
+        list[Finding]: A single warning finding, or empty.
+    """
+    if result.mode != MODE_CUTOVER:
+        return []
+    sub = ledger.opening_lines.filter(pl.col("source_partner_id").is_not_null())
+    if sub.height == 0:
+        return []
+    opening_gl = _net_by_account(
+        ledger.opening_lines.filter(pl.col("source_partner_id").is_null())
+    )
+    sub_net = _net_by_account(sub)
     mismatched = [
-        account_id
-        for account_id, net in item_net.items()
-        if abs(net - opening_net.get(account_id, 0.0)) > BALANCE_TOLERANCE
+        (account_id or "(unresolved)")
+        for account_id, net in sub_net.items()
+        if abs(net - opening_gl.get(account_id, 0.0)) > BALANCE_TOLERANCE
     ]
     if not mismatched:
         return []
@@ -382,8 +625,8 @@ def _check_open_item_tie_out(
         _finding(
             "open_item_tie_out",
             WARNING,
-            "{n} control account(s): open items do not tie out to the "
-            "opening balance; review before posting.",
+            "{n} control account(s): opening subledger items do not tie out to "
+            "the GL opening balance; review before posting.",
             mismatched,
         )
     ]
@@ -401,11 +644,17 @@ def run_preflight(ledger: CanonicalLedger, result: TransformResult) -> Preflight
     """
     findings: list[Finding] = []
     findings += _check_balance(ledger)
+    findings += _check_moves_balance(result)
+    findings += _check_move_integrity(result)
+    findings += _check_parse_anomalies(ledger)
     findings += _check_account_refs(ledger)
     findings += _check_journal_refs(ledger)
     findings += _check_partner_refs(ledger)
     findings += _check_currency(ledger)
+    findings += _check_foreign_currency(ledger)
+    findings += _check_control_totals(ledger)
     findings += _check_proposed_types(result)
+    findings += _check_kind_conflicts(result)
     findings += _check_open_item_tie_out(ledger, result)
     findings.sort(key=lambda f: 0 if f.severity == ERROR else 1)
     return PreflightReport(mode=result.mode, findings=findings)

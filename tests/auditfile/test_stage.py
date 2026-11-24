@@ -75,6 +75,17 @@ def test_stage_allow_warnings_writes_flows(tmp_path: Path) -> None:
     assert (out / "flows.yml").is_file()
 
 
+def test_blocked_restage_removes_stale_flows(tmp_path: Path) -> None:
+    """A re-stage that now blocks deletes the previous (runnable) flows.yml."""
+    out = tmp_path / "stage"
+    ledger = _ledger(tmp_path)
+    first = stage(ledger, str(out), allow_warnings=True)
+    assert first.flows_path is not None and (out / "flows.yml").is_file()
+    second = stage(ledger, str(out))  # warnings now block
+    assert second.blocked is True
+    assert not (out / "flows.yml").exists()  # no stale, runnable flow left behind
+
+
 def test_cutover_writes_open_items(tmp_path: Path) -> None:
     """Cutover staging records at least one open item."""
     out = tmp_path / "stage"
@@ -107,7 +118,11 @@ def test_load_account_overrides_roundtrip(tmp_path: Path) -> None:
     out = tmp_path / "stage"
     stage(_ledger(tmp_path), str(out), allow_warnings=True)
     overrides = load_account_overrides(str(out / "account_map.csv"))
-    assert overrides["1300"] == "asset_receivable"
+    assert overrides.types["1300"] == "asset_receivable"
+    # Receivable control accounts round-trip their reconcile flag, and codes
+    # keep leading zeros (0500 must not be read back as the integer 500).
+    assert overrides.reconcile["1300"] is True
+    assert "0500" in overrides.types
 
 
 def test_load_account_overrides_bad_columns(tmp_path: Path) -> None:

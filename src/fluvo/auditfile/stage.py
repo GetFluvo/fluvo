@@ -22,7 +22,7 @@ caller is told it blocked so the CLI can exit non-zero.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import polars as pl
@@ -69,33 +69,63 @@ class StageResult:
     flows_path: str | None
 
 
-def load_account_overrides(path: str) -> dict[str, str]:
-    """Read an edited ``account_map.csv`` into an override map.
+@dataclass(frozen=True)
+class AccountOverrides:
+    """An edited ``account_map.csv`` parsed into override maps.
+
+    Attributes:
+        types: ``account_id`` → ``account_type`` to force.
+        reconcile: ``account_id`` → whether the account must be reconcilable,
+            for the rows that set the column explicitly.
+    """
+
+    types: dict[str, str] = field(default_factory=dict)
+    reconcile: dict[str, bool] = field(default_factory=dict)
+
+
+def load_account_overrides(path: str) -> AccountOverrides:
+    """Read an edited ``account_map.csv`` into override maps.
+
+    Every column is read as text, so an account code like ``0100`` keeps its
+    leading zeros instead of being inferred as the integer ``100`` (which would
+    never match). The ``reconcile`` column is honoured when present.
 
     Args:
         path: Path to a CSV with at least ``account_id`` and ``account_type``.
 
     Returns:
-        dict[str, str]: ``account_id`` → ``account_type`` for non-empty rows.
+        AccountOverrides: The type and reconcile overrides for non-empty rows.
 
     Raises:
         InputError: If the file cannot be read or lacks the needed columns.
     """
     try:
-        frame = pl.read_csv(path, separator=_CSV_SEP)
+        # infer_schema_length=0 reads every column as a string, preserving
+        # leading zeros in account codes.
+        frame = pl.read_csv(path, separator=_CSV_SEP, infer_schema_length=0)
     except (OSError, pl.exceptions.PolarsError) as exc:
         raise InputError(f"could not read account map '{path}': {exc}") from exc
     if "account_id" not in frame.columns or "account_type" not in frame.columns:
         raise InputError(
             f"account map '{path}' must have 'account_id' and 'account_type' columns."
         )
-    overrides: dict[str, str] = {}
+    has_reconcile = "reconcile" in frame.columns
+    types: dict[str, str] = {}
+    reconcile: dict[str, bool] = {}
     for row in frame.to_dicts():
         account_id = row.get("account_id")
         account_type = row.get("account_type")
-        if account_id and account_type:
-            overrides[str(account_id)] = str(account_type)
-    return overrides
+        if not (account_id and account_type):
+            continue
+        key = str(account_id)
+        types[key] = str(account_type)
+        if has_reconcile:
+            raw = str(row.get("reconcile") or "").strip().lower()
+            if raw in ("true", "1", "yes"):
+                reconcile[key] = True
+            elif raw in ("false", "0", "no"):
+                reconcile[key] = False
+    return AccountOverrides(types=types, reconcile=reconcile)
 
 
 def _yaml_quote(value: str) -> str:
@@ -167,9 +197,11 @@ def stage(
     mode: str = MODE_FULL_HISTORY,
     prefix: str = "xaf",
     connection_file: str | None = None,
-    account_overrides: dict[str, str] | None = None,
+    account_overrides: AccountOverrides | None = None,
     allow_warnings: bool = False,
     company: str | None = None,
+    dedup: bool = True,
+    result_account: str | None = None,
 ) -> StageResult:
     """Transform a ledger and write a loadable stage directory.
 
@@ -180,18 +212,27 @@ def stage(
         prefix: The external-id prefix.
         connection_file: The Odoo connection file to embed in ``flows.yml``; a
             placeholder is written when omitted.
-        account_overrides: An ``account_id`` → ``account_type`` map from an
-            edited ``account_map.csv``.
+        account_overrides: Parsed overrides from an edited ``account_map.csv``.
         allow_warnings: When True, warnings do not block staging.
         company: A company id or external id to target, embedded as
             ``company_id`` on every flow step (required when the target Odoo has
             more than one company).
+        dedup: Merge customer/supplier records sharing a KvK/VAT (default on).
+        result_account: In cutover, a source account id to close the
+            profit-and-loss accounts into; None carries each P&L balance.
 
     Returns:
         StageResult: What was written and the preflight report.
     """
+    overrides = account_overrides or AccountOverrides()
     result: TransformResult = transform(
-        ledger, prefix=prefix, mode=mode, account_overrides=account_overrides
+        ledger,
+        prefix=prefix,
+        mode=mode,
+        account_overrides=overrides.types,
+        reconcile_overrides=overrides.reconcile,
+        dedup=dedup,
+        result_account=result_account,
     )
     report = run_preflight(ledger, result)
 
@@ -220,14 +261,18 @@ def stage(
     files["preflight.json"] = str(preflight_path.resolve())
 
     blocked = report.is_blocking(allow_warnings=allow_warnings)
+    flows = directory / "flows.yml"
     flows_path: str | None = None
-    if not blocked:
+    if blocked:
+        # Never leave a stale, loadable flows.yml next to data that failed
+        # preflight — a re-stage that now blocks must not look runnable.
+        flows.unlink(missing_ok=True)
+    else:
         connection = connection_file or _CONNECTION_PLACEHOLDER
         steps = [
             (step_id, files[csv], model, is_o2m)
             for step_id, csv, model, is_o2m in _STEPS
         ]
-        flows = directory / "flows.yml"
         flows.write_text(_flows_yaml(steps, connection, company), encoding="utf-8")
         flows_path = str(flows.resolve())
         files["flows.yml"] = flows_path

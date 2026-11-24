@@ -1097,6 +1097,19 @@ def auditfile_inspect_cmd(file: str, fmt: str | None, as_json: bool) -> None:
     "required when the target Odoo has more than one company.",
 )
 @click.option(
+    "--no-dedup",
+    "no_dedup",
+    is_flag=True,
+    default=False,
+    help="Do not merge customer/supplier records sharing a KvK/VAT number.",
+)
+@click.option(
+    "--result-account",
+    default=None,
+    help="In cutover, a source account code to close the profit-and-loss "
+    "accounts into (for a clean balance sheet); omit to carry each P&L balance.",
+)
+@click.option(
     "--allow-warnings",
     is_flag=True,
     default=False,
@@ -1116,6 +1129,8 @@ def auditfile_stage_cmd(
     account_map: str | None,
     prefix: str,
     company: str | None,
+    no_dedup: bool,
+    result_account: str | None,
     allow_warnings: bool,
     fmt: str | None,
 ) -> None:
@@ -1145,6 +1160,8 @@ def auditfile_stage_cmd(
             account_overrides=overrides,
             allow_warnings=allow_warnings,
             company=company,
+            dedup=not no_dedup,
+            result_account=result_account,
         )
     except FluvoError as exc:
         _show_error_panel("Audit file", str(exc))
