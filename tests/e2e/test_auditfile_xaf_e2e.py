@@ -14,17 +14,21 @@ e2e database may hold more than one company.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
+import pytest
 from click.testing import CliRunner
 
 from fluvo import __main__
 from fluvo.auditfile import read_auditfile
 from fluvo.auditfile.match import resolve_account_matches
 from fluvo.auditfile.stage import stage
+from fluvo.lib import conf_lib
 from tests.auditfile.xaf_fixtures import generate_xaf
 
+from . import _runtime
 from . import assertions as A
 
 #: A test-specific external-id prefix so assertions never collide with other
@@ -34,7 +38,36 @@ PREFIX = "xafe2e"
 #: A separate prefix for the chart-matching scenario, kept apart from PREFIX.
 PREFIX_MATCH = "xafe2em"
 
+#: A separate prefix for the cutover scenario.
+PREFIX_CUT = "xafe2ec"
+
 _MODELS = ("res.partner", "account.account", "account.journal", "account.move")
+
+#: Name of the dedicated database for the cutover scenario. It gets its own DB
+#: so its synthetic opening/clearing journals never collide with another
+#: audit-file import into a shared company.
+_CUTOVER_DB = os.environ.get("FLUVO_E2E_CUTOVER_DB", "fluvo_e2e_cutover")
+
+
+@pytest.fixture(scope="session")
+def cutover_endpoint(odoo_endpoint: dict[str, Any]) -> dict[str, Any]:
+    """A connection config dict for a fresh, isolated cutover database."""
+    if odoo_endpoint["managed"] and not _runtime.database_exists(_CUTOVER_DB):
+        _runtime.create_database(_CUTOVER_DB)
+    return {
+        "hostname": odoo_endpoint["host"],
+        "port": odoo_endpoint["port"],
+        "database": _CUTOVER_DB,
+        "login": "admin",
+        "password": os.environ.get("FLUVO_E2E_ADMIN_PWD", "admin"),
+        "protocol": os.environ.get("FLUVO_E2E_PROTOCOL", "jsonrpc"),
+    }
+
+
+@pytest.fixture(scope="session")
+def rpc_cutover(cutover_endpoint: dict[str, Any]) -> Any:
+    """An Odoo connection to the dedicated cutover database."""
+    return conf_lib.get_connection_from_dict(cutover_endpoint)
 
 
 def _ensure_account_installed(rpc: Any) -> None:
@@ -263,3 +296,88 @@ def test_xaf_matches_existing_chart_and_imports_banks(
     # upsert on the deterministic external ids changes nothing.
     _run_flow(staged.flows_path)
     assert _counts() == first, "re-running the matched + bank import was not idempotent"
+
+
+def test_xaf_cutover_open_items_as_invoices(
+    cutover_endpoint: dict[str, Any], rpc_cutover: Any, tmp_path: Path
+) -> None:
+    """Cutover stages open items as real draft invoices on a clearing account.
+
+    On a dedicated database: stage a 3.2 file in cutover, load it, and assert
+    each open item is a draft invoice with the exact residual as ``amount_total``
+    (no tax, no rounding line), its receivable line on the source control
+    account, and the clearing account netting to zero. Re-run to prove it is
+    idempotent.
+    """
+    _ensure_account_installed(rpc_cutover)
+
+    xaf = tmp_path / "company.xaf"
+    generate_xaf(xaf, version="3.2", n_journals=1, tx_per_journal=1)
+    ledger = read_auditfile(str(xaf))
+    conn = _write_conn(cutover_endpoint, tmp_path / "conn.conf")
+
+    staged = stage(
+        ledger,
+        str(tmp_path / "stage"),
+        mode="cutover",
+        prefix=PREFIX_CUT,
+        connection_file=conn,
+        allow_warnings=True,
+        company="base.main_company",
+    )
+    assert staged.flows_path is not None
+    _run_flow(staged.flows_path)
+
+    clearing_id = A.xmlid_to_res_id(rpc_cutover, f"{PREFIX_CUT}.account_OPENCL")
+    control_id = A.xmlid_to_res_id(rpc_cutover, f"{PREFIX_CUT}.account_1300")
+    assert clearing_id and control_id
+
+    move_ids = _res_ids(rpc_cutover, PREFIX_CUT, "account.move")
+    invoices = A.search_read(
+        rpc_cutover,
+        "account.move",
+        [
+            ["id", "in", move_ids],
+            [
+                "move_type",
+                "in",
+                ["out_invoice", "out_refund", "in_invoice", "in_refund"],
+            ],
+        ],
+        ["move_type", "state", "amount_total", "name", "line_ids"],
+    )
+    by_name = {inv["name"]: inv for inv in invoices}
+    # Prior-year open invoice (1210.00) and the year's open invoice (101.00).
+    assert by_name["2023-900"]["amount_total"] == 1210.0  # exact residual, no tax
+    assert by_name["DOC1"]["amount_total"] == 101.0
+    for inv in invoices:
+        assert inv["state"] == "draft"
+        line_accounts = {
+            ln["account_id"][0]
+            for ln in A.search_read(
+                rpc_cutover,
+                "account.move.line",
+                [["id", "in", inv["line_ids"]]],
+                ["account_id"],
+            )
+        }
+        assert control_id in line_accounts, "AR line not on the source control account"
+        assert clearing_id in line_accounts, "no clearing line on the invoice"
+
+    def _clearing_net() -> float:
+        lines = A.search_read(
+            rpc_cutover,
+            "account.move.line",
+            [["account_id", "=", clearing_id]],
+            ["debit", "credit"],
+        )
+        return sum(float(ln["debit"]) - float(ln["credit"]) for ln in lines)
+
+    assert abs(_clearing_net()) < 0.01, "clearing account did not net to zero"
+
+    # Idempotent: a second load changes nothing.
+    before = A.count(rpc_cutover, "account.move", [["id", "in", move_ids]])
+    _run_flow(staged.flows_path)
+    assert _res_ids(rpc_cutover, PREFIX_CUT, "account.move")
+    assert A.count(rpc_cutover, "account.move", [["id", "in", move_ids]]) == before
+    assert abs(_clearing_net()) < 0.01
