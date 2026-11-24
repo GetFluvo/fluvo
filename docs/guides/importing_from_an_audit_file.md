@@ -67,15 +67,35 @@ produces an identical stage.
 
 ### Preflight is fail-fast
 
-Before writing `flows.yml`, `stage` runs a preflight over the data and prints a
-summary. **Errors** (a move that does not balance; a line referencing an account
-or journal that is not in the file) always block staging — Odoo would reject the
-import. **Warnings** (a referenced customer/supplier that is not defined; a
-non-EUR currency needing an FX review; account types that came from the numbering
-heuristic; open items that do not tie out to the control balance) block by
-default too, so you see them. Once you have reviewed them, re-run with
-`--allow-warnings` to proceed. When preflight blocks, the data and
-`preflight.json` are still written for inspection — only `flows.yml` is withheld.
+Before writing `flows.yml`, `stage` runs a preflight over both the source data
+and the **generated moves** and prints a summary.
+
+**Errors** always block — Odoo would reject the import, or the data is wrong:
+
+- a source transaction, or a *generated* move (opening or history), that does
+  not balance;
+- a line referencing an account or journal not in the file;
+- a duplicate move or move-line external id (two records collapsed onto one id);
+- a **parse anomaly** — a source amount or date that was present but could not
+  be parsed. It is recorded, never silently coerced to zero, and listed with the
+  offending value so you can fix the file or the export.
+
+**Warnings** block by default too (so you see them); review, then re-run with
+`--allow-warnings`:
+
+- a referenced customer/supplier that is not defined;
+- a non-EUR file currency, or an individual line in a foreign currency, needing
+  an FX review (only the base amount is staged);
+- account types that came from the numbering heuristic, or an account whose type
+  contradicts the source's balance/P&L kind;
+- the file's own declared control totals not matching what was parsed (a
+  completeness check — the file may be truncated or non-standard);
+- in cutover, a control account whose opening subledger does not tie to its GL
+  opening balance.
+
+When preflight blocks, the data and `preflight.json` are still written for
+inspection — only `flows.yml` is withheld, and a stale one from an earlier,
+passing run is removed so nothing looks runnable that is not.
 
 ### Account typing and `account_map.csv`
 
@@ -105,22 +125,37 @@ Accounts typed receivable or payable are set `reconcile = True` automatically.
 Dutch source systems often hold one company as both a customer and a supplier,
 as two records. Fluvo merges records that share a normalised Chamber-of-Commerce
 (KvK) number or VAT number into a single `res.partner` carrying both
-`customer_rank` and `supplier_rank`. The merge is lossless and auditable:
-`partner_aliases.csv` records every source id and the surviving partner it maps
-to, and transaction lines resolve through it.
+`customer_rank` and `supplier_rank`. Matching is **transitive**: a record known
+only by KvK and one known only by VAT still merge when a third record ties the
+two together. The merge is lossless and auditable: `partner_aliases.csv` records
+every source id and the surviving partner it maps to, and transaction lines
+resolve through it. Pass `--no-dedup` to keep every source record as its own
+partner.
+
+The partner **country** is staged (resolved to its Odoo external id, e.g.
+`base.nl`). A partner **bank account** is captured in the canonical model but is
+not written to `res.partner` here — staging bank details needs the accounting
+bank model, which is out of scope for this connector.
 
 ## Step 3 — choose a mode
 
 `--mode` controls what the transaction history becomes:
 
 - **`full_history`** (default) — every transaction becomes a draft
-  `account.move`, plus one opening-balance move. Use it to carry the complete
-  ledger across.
-- **`cutover`** — only an opening-balance move, but the AR/AP control totals are
-  broken out **per open item** (customer/supplier + document reference), so open
-  invoices carry over individually and can later be reconciled against incoming
-  payments. Use it to start fresh in Odoo while keeping the open-invoice
-  position.
+  `account.move`, plus one opening-balance move carrying the GL opening balances
+  as-is. Use it to carry the complete ledger across.
+- **`cutover`** — a single opening move holding the **closing position at the end
+  of the period**: each account's opening balance plus the year's movement. The
+  AR/AP control accounts are broken out **per open item** — the prior-year
+  opening subledger plus this year's lines, matched on an explicit reconciliation
+  key, else the invoice reference, else the document reference, so a settled
+  invoice drops out and a payment never leaves a phantom entry — plus a lumped
+  remainder for any opening balance a subledger did not itemise. Use it to start
+  fresh in Odoo while keeping the open-invoice position.
+
+  Profit-and-loss accounts carry their closing balance by default. Pass
+  `--result-account <code>` to close them into one result/equity account instead,
+  for a clean balance-sheet-only opening. The opening move balances either way.
 
 ## Step 4 — load
 
@@ -144,6 +179,36 @@ explicit, deliberately non-idempotent step (see
 is not performed** by this connector yet. The staged data and the `open_items.csv`
 breakdown are built so that a later post/reconcile step slots in without
 reshaping anything.
+
+**History lands as plain journal entries, not invoices.** A `full_history` import
+creates `account.move` records with lines, not `account.move` *invoices*: there
+are no invoice/bill documents, no `payment_state`, and no customer/vendor invoice
+lists. VAT codes are read and surfaced, but the staged lines carry **no taxes or
+tax tags**, so Odoo's VAT/tax reports will be empty for imported history — the
+figures live in the ledger balances, not in the tax engine. If you need working
+tax reports or invoice documents for prior periods, that is a separate, heavier
+mapping onto `account.move.type` and `tax_ids` which this connector does not
+attempt.
+
+**Money is handled as floating-point** throughout, compared with a fixed `0.01`
+tolerance (the same tolerance the import engine and [ADR
+0001](../adr/0001-account-move-load-and-post.md) use). Balances therefore tie out
+to the cent, not to exact integer minor units; a file whose own rounding differs
+by more than a cent per move is surfaced by preflight rather than absorbed.
+
+## Targeting a company that already has a chart of accounts
+
+Today the connector **creates** the accounts it finds, keyed by code. That fits a
+company set up empty (the end-to-end test installs only the `account` module and
+lets the import create the chart). On a target that already has a localisation
+chart installed (for example `l10n_nl`), creating an account with an existing
+code collides, and nothing yet matches the file's accounts onto the chart's
+existing accounts. Importing into a pre-charted company is therefore **not
+supported yet**; the design for it (resolving existing accounts by code over RPC,
+and/or a target-external-id column in `account_map.csv`) is proposed in
+[ADR 0002](../adr/0002-audit-file-connectors.md), under *Proposed: matching an
+existing chart*, and will land with an end-to-end test on a charted database
+before it is enabled.
 
 ## What XAF cannot give you
 
@@ -174,11 +239,12 @@ class MyReader:
 
 `read` returns a
 {py:class}`~fluvo.auditfile.canonical.CanonicalLedger` — the frames `header`,
-`accounts`, `partners`, `journals`, `moves`, `lines`, `opening_lines` and
-`vat_codes`, each with the fixed schema documented in
+`accounts`, `partners`, `journals`, `moves`, `lines`, `opening_lines`,
+`vat_codes` and `anomalies`, each with the fixed schema documented in
 {py:mod}`fluvo.auditfile.canonical`. Map your format's own element names onto
 those columns and normalise its code sets onto the canonical vocabularies
-(partner role, account kind, journal kind); the transform, preflight and stage
+(partner role, account kind, journal kind); record a present-but-unparseable
+cell in `anomalies` rather than dropping it; the transform, preflight and stage
 layers then work unchanged.
 
 For large files, stream the parse (don't build a DOM) and flush rows in chunks —
