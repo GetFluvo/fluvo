@@ -223,10 +223,28 @@ def test_xaf_matches_existing_chart_and_imports_banks(
     assert staged.flows_path is not None
     _run_flow(staged.flows_path)
 
+    def _counts() -> dict[str, int]:
+        """Snapshot the record counts a re-run must not change."""
+        partner_ids = _res_ids(rpc_source, PREFIX_MATCH, "res.partner")
+        return {
+            "accounts_with_code": A.count(
+                rpc_source, "account.account", [["code", "in", codes]]
+            ),
+            "created_account_xmlids": len(
+                _res_ids(rpc_source, PREFIX_MATCH, "account.account")
+            ),
+            "moves": len(_res_ids(rpc_source, PREFIX_MATCH, "account.move")),
+            "partners": len(partner_ids),
+            "banks": A.count(
+                rpc_source, "res.partner.bank", [["partner_id", "in", partner_ids]]
+            ),
+        }
+
+    first = _counts()
     # No account was duplicated, and the import created no account external ids
     # of its own — every account was referenced onto the existing chart.
-    assert A.count(rpc_source, "account.account", [["code", "in", codes]]) == before
-    assert not _res_ids(rpc_source, PREFIX_MATCH, "account.account")
+    assert first["accounts_with_code"] == before
+    assert first["created_account_xmlids"] == 0
 
     # Move lines on the receivable reference the pre-existing 1300 account.
     move_ids = _res_ids(rpc_source, PREFIX_MATCH, "account.move")
@@ -238,7 +256,10 @@ def test_xaf_matches_existing_chart_and_imports_banks(
     assert recv_lines > 0, "no move line referenced the existing 1300 account"
 
     # Partner bank accounts were imported.
-    partner_ids = _res_ids(rpc_source, PREFIX_MATCH, "res.partner")
-    assert partner_ids
-    banks = A.count(rpc_source, "res.partner.bank", [["partner_id", "in", partner_ids]])
-    assert banks > 0, "no res.partner.bank records were imported"
+    assert first["partners"] > 0
+    assert first["banks"] > 0, "no res.partner.bank records were imported"
+
+    # A production re-run (same file, same company, matched chart) is idempotent:
+    # upsert on the deterministic external ids changes nothing.
+    _run_flow(staged.flows_path)
+    assert _counts() == first, "re-running the matched + bank import was not idempotent"
