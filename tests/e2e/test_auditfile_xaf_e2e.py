@@ -180,13 +180,25 @@ def _res_ids(rpc: Any, module: str, model: str) -> list[int]:
     ]
 
 
+#: The account_type / reconcile a pre-existing target account is created with,
+#: keyed by code. The control accounts must be reconcilable and of the matching
+#: type, or matching them would (rightly) be a preflight error.
+_TARGET_ACCOUNT = {
+    "1300": ("asset_receivable", True),
+    "1600": ("liability_payable", True),
+}
+
+
 def _ensure_account(rpc: Any, code: str) -> int:
     """Ensure an account with ``code`` exists and carries an external id.
 
-    Stands in for a chart the target already has. Returns the account id.
+    Stands in for a chart the target already has. Control accounts are created
+    reconcilable and of the right type (as a real localisation chart would be).
+    Returns the account id.
     """
     accounts = rpc.get_model("account.account")
     found = accounts.search_read([["code", "=", code]], ["id"])
+    account_type, reconcile = _TARGET_ACCOUNT.get(code, ("asset_current", False))
     acc_id = (
         int(found[0]["id"])
         if found
@@ -195,7 +207,8 @@ def _ensure_account(rpc: Any, code: str) -> int:
                 {
                     "code": code,
                     "name": f"Existing {code}",
-                    "account_type": "asset_current",
+                    "account_type": account_type,
+                    "reconcile": reconcile,
                 }
             )
         )
@@ -239,8 +252,10 @@ def test_xaf_matches_existing_chart_and_imports_banks(
     account_ids = {code: _ensure_account(rpc_source, code) for code in codes}
     before = A.count(rpc_source, "account.account", [["code", "in", codes]])
 
-    matches = resolve_account_matches(rpc_source)
-    assert all(matches.get(code) for code in codes), "all codes should be matchable"
+    matches = resolve_account_matches(rpc_source, company="base.main_company")
+    assert all(matches.matches.get(code) for code in codes), (
+        "all codes should be matchable"
+    )
 
     staged = stage(
         ledger,
@@ -306,8 +321,9 @@ def test_xaf_cutover_open_items_as_invoices(
     On a dedicated database: stage a 3.2 file in cutover, load it, and assert
     each open item is a draft invoice with the exact residual as ``amount_total``
     (no tax, no rounding line), its receivable line on the source control
-    account, and the clearing account netting to zero. Re-run to prove it is
-    idempotent.
+    account, the accounting date set to the cutover (not the original invoice
+    date) and the entry in the dedicated opening-sales journal, and the clearing
+    account netting to zero. Re-run to prove it is idempotent.
     """
     _ensure_account_installed(rpc_cutover)
 
@@ -330,7 +346,10 @@ def test_xaf_cutover_open_items_as_invoices(
 
     clearing_id = A.xmlid_to_res_id(rpc_cutover, f"{PREFIX_CUT}.account_OPENCL")
     control_id = A.xmlid_to_res_id(rpc_cutover, f"{PREFIX_CUT}.account_1300")
-    assert clearing_id and control_id
+    sale_journal_id = A.xmlid_to_res_id(
+        rpc_cutover, f"{PREFIX_CUT}.journal__opening_sale"
+    )
+    assert clearing_id and control_id and sale_journal_id
 
     move_ids = _res_ids(rpc_cutover, PREFIX_CUT, "account.move")
     invoices = A.search_read(
@@ -344,14 +363,33 @@ def test_xaf_cutover_open_items_as_invoices(
                 ["out_invoice", "out_refund", "in_invoice", "in_refund"],
             ],
         ],
-        ["move_type", "state", "amount_total", "name", "line_ids"],
+        [
+            "move_type",
+            "state",
+            "amount_total",
+            "ref",
+            "line_ids",
+            "date",
+            "invoice_date",
+            "journal_id",
+        ],
     )
-    by_name = {inv["name"]: inv for inv in invoices}
+    # The source number is in ``ref`` (Odoo numbers the move itself, so the
+    # cutover date cannot clash with a historical number's year).
+    by_ref = {inv["ref"]: inv for inv in invoices}
     # Prior-year open invoice (1210.00) and the year's open invoice (101.00).
-    assert by_name["2023-900"]["amount_total"] == 1210.0  # exact residual, no tax
-    assert by_name["DOC1"]["amount_total"] == 101.0
+    assert by_ref["2023-900"]["amount_total"] == 1210.0  # exact residual, no tax
+    assert by_ref["DOC1"]["amount_total"] == 101.0
+    # The accounting date is the cutover (period end), not the original invoice
+    # date (2023-12-15), so the entry lands in the open period; the invoice date
+    # is still preserved for the aged balance.
+    assert by_ref["2023-900"]["date"] == "2024-12-31"
+    assert by_ref["2023-900"]["invoice_date"] == "2023-12-15"
     for inv in invoices:
         assert inv["state"] == "draft"
+        # Each open-item invoice posts to the dedicated opening-sales journal,
+        # not whatever default Odoo would otherwise pick.
+        assert inv["journal_id"][0] == sale_journal_id
         line_accounts = {
             ln["account_id"][0]
             for ln in A.search_read(
