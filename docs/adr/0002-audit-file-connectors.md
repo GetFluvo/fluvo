@@ -78,12 +78,27 @@ and can be reconciled against incoming payments, which bare journal lines cannot
 
 The receivable/payable line is forced onto the **source control account** (not
 the partner's or company's default) by staging the partner's
-`property_account_receivable_id` / `property_account_payable_id`. A spike against
-a live Odoo confirmed that a draft invoice created over RPC with a single
-no-tax line on the clearing account yields the exact residual as `amount_total`,
-with the forced control account, no tax recompute and no rounding line. XAF
-carries no due date (confirmed against the 4.0 XSD), so it is derived from the
-invoice date plus a configurable term and the count is reported.
+`property_account_receivable_id` / `property_account_payable_id`. That property
+is company-dependent, so it is written in a **separate update** that touches only
+the partners carrying an open item of that kind (loaded under the target
+company) — never the whole partner file, whose blank cells would otherwise clear
+every other migrated partner's default. A spike against a live Odoo confirmed
+that a draft invoice created over RPC with a single no-tax line on the clearing
+account yields the exact residual as `amount_total`, with the forced control
+account, no tax recompute and no rounding line.
+
+The move's **accounting date** is the cutover date, so the entry lands in the
+open period rather than the original invoice's (likely locked) period, while the
+invoice date is kept for the aged balance. XAF carries no due date (confirmed
+against the 4.0 XSD), so the due date is derived from the invoice date plus a
+configurable term and the count is reported. Each invoice posts to a dedicated
+opening **sale or purchase journal** (staged for the purpose, or an existing one
+named on the command line) instead of whatever default Odoo would pick. The
+source document number — invoice or supplier bill alike — is kept in `ref`, and
+the move name is left to the opening journal's own sequence: forcing the
+historical number as the name clashes with the cutover accounting date, because
+Odoo ties a move's sequence to its date and rejects, say, a `2023-…` number
+dated at a 2024 period end (strictly so on Odoo 16).
 
 The single opening move then carries each account's closing balance, with the
 **clearing account** holding the counter-amount of all the invoices (so it nets
@@ -99,7 +114,10 @@ A source amount or date that is present but unparseable is recorded in the
 `anomalies` frame (never coerced silently to zero) and raised as a preflight
 error. The file's own declared control totals (`openingBalance` and
 `transactions` `linesCount`/`totalDebit`/`totalCredit`) are tied out against the
-parse as the cheapest proof it is complete.
+parse as the cheapest proof it is complete; a mismatch is an **error** (not a
+warning), with its own `--allow-control-total-mismatch` override, so that
+`--allow-warnings` — which a first run needs for the account-typing proposals —
+cannot quietly let a truncated or mis-parsed file through.
 
 ### Moves land draft; posting is a separate step
 
@@ -127,7 +145,7 @@ example `l10n_nl`) already owns those codes, so spec item C.1 ("map to the
 existing Odoo account or create") needs the file's accounts **matched** onto the
 existing ones. The connector does this two ways, which combine:
 
-- `stage --match-accounts` reads the target company's `account.account` codes
+- `stage --match-accounts` reads the target company's `account.account` rows
   over `--connection-file` (read-only, the only time `stage` talks to Odoo) and,
   for each file account whose code already exists, references the existing record
   by its external id instead of creating one (`fluvo.auditfile.match`). The RPC
@@ -136,7 +154,8 @@ existing ones. The connector does this two ways, which combine:
   hand, with no live connection; a filled value wins.
 
 Matched accounts are omitted from `accounts.csv` and every move/opening line
-references the existing external id; the match count is reported.
+references the existing external id; the match count is reported, and every
+matched pair is written to a reviewable `account_matches.csv`.
 
 Decisions taken (the rules the proposal flagged for review):
 
@@ -144,9 +163,22 @@ Decisions taken (the rules the proposal flagged for review):
   write the name, type or any field of an account that already exists, so it
   cannot corrupt an installed chart. (The alternative — binding the external id
   and updating fields — was rejected as too destructive.)
+- **A match is verified, not blind.** The read captures the target account's
+  name, type and reconcile flag, not just its code: a matched pair whose target
+  type differs from the source typing is a warning, and a matched
+  receivable/payable account that the target cannot reconcile (or that is the
+  wrong type) is an **error** — booking open-item control lines onto it would
+  misbook silently.
+- **The read is scoped to the target company.** A code is unique only within a
+  company, so a company-wide read (whether the field is the pre-18 `company_id`
+  or the 18+ shared `company_ids`) keeps the same code in two companies from
+  looking ambiguous.
 - **Only an unambiguous, externally-identified code matches.** A code that
-  appears on several accounts (e.g. per company) or an account with no external
-  id is left unmatched and created, rather than guessed.
+  appears on several accounts (e.g. per company) or a target account with no
+  external id cannot be referenced — and, because the code already exists,
+  re-creating it would fail on the unique constraint. Rather than crash at load,
+  the connector names those codes as a preflight **error**; give the target
+  account an external id, or pin it via `target_xmlid`.
 - **Accounts only.** The same question exists for journals and taxes; accounts
   were the blocking case. Journals/taxes matching can follow the same shape.
 - **Bank accounts** read from the party now stage as `res.partner.bank` rows,

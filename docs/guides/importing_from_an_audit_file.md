@@ -53,11 +53,13 @@ This writes, into `./stage`:
 | File | What it is |
 |------|------------|
 | `partners.csv` | `res.partner` rows (deduplicated) |
+| `partner_receivable.csv` / `partner_payable.csv` | the control-account property for the partners with an open item (cutover) |
 | `partner_banks.csv` | `res.partner.bank` rows (one per partner with a bank) |
 | `accounts.csv` | `account.account` rows (only those to **create**) |
 | `journals.csv` | `account.journal` rows |
 | `moves.csv` | `account.move` rows (draft), with their lines |
 | `account_map.csv` | the **editable** account-typing proposals |
+| `account_matches.csv` | the reviewable source↔target account pairing (`--match-accounts`) |
 | `partner_aliases.csv` | every source id → surviving partner external id |
 | `open_invoices.csv` | one draft invoice/bill per open AR/AP item (cutover) |
 | `open_items.csv` | the netted open-item breakdown, for audit (cutover) |
@@ -80,7 +82,15 @@ and the **generated moves** and prints a summary.
 - a duplicate move or move-line external id (two records collapsed onto one id);
 - a **parse anomaly** — a source amount or date that was present but could not
   be parsed. It is recorded, never silently coerced to zero, and listed with the
-  offending value so you can fix the file or the export.
+  offending value so you can fix the file or the export;
+- the file's own declared control totals not matching what was parsed — a
+  completeness check: the file may be truncated or mis-parsed. This has its own
+  `--allow-control-total-mismatch` override (so `--allow-warnings` cannot quietly
+  let a short file through); use it only once you have confirmed the file is
+  whole;
+- with `--match-accounts`, a matched receivable/payable account the target
+  cannot reconcile (or that is the wrong type), or a code that exists in the
+  target but could not be matched (so re-creating it would duplicate the code).
 
 **Warnings** block by default too (so you see them); review, then re-run with
 `--allow-warnings`:
@@ -90,10 +100,13 @@ and the **generated moves** and prints a summary.
   an FX review (only the base amount is staged);
 - account types that came from the numbering heuristic, or an account whose type
   contradicts the source's balance/P&L kind;
-- the file's own declared control totals not matching what was parsed (a
-  completeness check — the file may be truncated or non-standard);
+- with `--match-accounts`, a matched account whose target type differs from the
+  source typing;
+- transactions that share a journal/number with no distinguishing period, so
+  their external id depends on file order;
 - in cutover, a control account whose opening subledger does not tie to its GL
-  opening balance.
+  opening balance, a derived due date, or a reversed-sign open item staged as a
+  refund.
 
 When preflight blocks, the data and `preflight.json` are still written for
 inspection — only `flows.yml` is withheld, and a stale one from an earlier,
@@ -151,10 +164,18 @@ is omitted when no partner carries an account.
   becomes a **real draft invoice or bill** (`out_invoice` / `in_invoice`, or
   `out_refund` / `in_refund` for a credit note or an unallocated payment), one
   per item, carrying the **residual** open amount as a single tax-free line on a
-  dedicated **clearing account**, with the original number, date, derived due
-  date and partner. The receivable/payable line lands on the **source control
-  account** (the connector stages the partner's receivable/payable property to
-  force it, rather than Odoo's default). The one opening move then carries each
+  dedicated **clearing account**, with the original invoice date, derived due
+  date and partner. The **accounting date** is the cutover date (so the entry
+  lands in the open period, not the original invoice's likely-locked one), and
+  the invoice posts to a dedicated opening sale/purchase journal. The source
+  document number — invoice or supplier bill — is kept in `ref`, and Odoo numbers
+  the move from the opening journal's sequence (forcing the historical number as
+  the name would clash with the cutover date). The receivable/payable line lands
+  on the
+  **source control account** — the connector stages the partner's
+  receivable/payable property to force it, rather than Odoo's default, and does
+  so only for the partners that have an open item (in a separate update file),
+  so no other partner's default is touched. The one opening move then carries each
   account's closing balance, with the clearing account holding the counter-amount
   of all those invoices (so it nets to zero) instead of the AR/AP totals. Open
   items are the prior-year opening subledger plus this year's lines, matched on
@@ -173,9 +194,10 @@ is omitted when no partner carries an account.
   Profit-and-loss accounts carry their closing balance by default. Pass
   `--result-account <code>` to close them into one result/equity account instead,
   for a clean balance-sheet-only opening. Pass `--clearing-account <code>` to
-  choose the clearing account (a synthetic one is created otherwise). Every
-  staged move balances, and preflight errors if the clearing account does not
-  net to zero.
+  choose the clearing account (a synthetic one is created otherwise), and
+  `--open-sale-journal` / `--open-purchase-journal` to post the invoices to an
+  existing journal instead of the staged dedicated ones. Every staged move
+  balances, and preflight errors if the clearing account does not net to zero.
 
 ## Step 4 — load
 
@@ -185,10 +207,11 @@ Loading is the ordinary flow runner, pointed at the generated flow:
 fluvo --flow-file ./stage/flows.yml
 ```
 
-The flow loads **accounts → journals → partners → partner banks → moves → open
-invoices** in that order (accounts before partners, because a partner's
-receivable/payable property references an account; the bank and open-invoice
-steps appear only when they have rows). The moves and open-invoice steps use
+The flow loads **accounts → journals → partners → partner receivable/payable →
+partner banks → moves → open invoices** in that order (accounts before partners,
+because a partner's receivable/payable property references an account; the
+property-update, bank and open-invoice steps appear only when they have rows).
+The moves and open-invoice steps use
 Odoo's one-to-many load format (`--o2m`) so each move/invoice and its lines are
 created together. Because every record carries a deterministic external id, a
 second run **updates** rather than duplicates — re-running a failed load
@@ -233,15 +256,22 @@ the accounts already there, not re-created. Two ways, which combine:
 
   ```bash
   fluvo auditfile stage company-2024.xaf --out ./stage \
-      --connection-file prod.conf --match-accounts
+      --connection-file prod.conf --company base.main_company --match-accounts
   ```
 
-  Only codes that are **unique** in the target and already carry an external id
-  are matched; an ambiguous code (the same code on several accounts) or one with
-  no external id is left unmatched and the account is created as usual. Matched
-  accounts are **referenced, never modified** — the connector does not touch the
-  name, type or any other field of an account that already exists. The reads are
-  the only time `stage` talks to Odoo, and it only reads.
+  The read is **scoped to `--company`** (a code is unique only within a company)
+  and captures each account's type and reconcile flag, not just its code. Only
+  codes that are **unique** in the target and already carry an external id are
+  matched; matched accounts are **referenced, never modified** — the connector
+  does not touch the name, type or any other field of an account that already
+  exists. The reads are the only time `stage` talks to Odoo, and it only reads.
+
+  The match is then **verified**: a matched pair whose target type differs from
+  the source typing is a warning, and a matched receivable/payable account the
+  target cannot reconcile is an error. A code that exists in the target but could
+  not be matched (ambiguous, or no external id) is also an error — re-creating it
+  would duplicate the code; give that account an external id or pin it by hand.
+  Every pairing is written to `account_matches.csv` for review.
 
 - **`target_xmlid` in `account_map.csv`** pins an account onto an existing
   external id by hand, with no live connection — useful to review or override
