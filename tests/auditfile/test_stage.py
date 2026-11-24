@@ -95,9 +95,15 @@ def test_cutover_writes_open_invoices_and_step(tmp_path: Path) -> None:
     assert "move_type" in rows[0]
     flows = (out / "flows.yml").read_text()
     assert flows.count("account.move") == 2  # the opening move + the invoices
-    # The partner receivable property is staged so the invoice AR line is forced.
-    partners = (out / "partners.csv").read_text()
-    assert "property_account_receivable_id/id" in partners.splitlines()[0]
+    # The receivable property is staged in its own update file (not on the main
+    # partner frame), so the invoice AR line is forced onto the source control.
+    assert (
+        "property_account_receivable_id/id"
+        not in (out / "partners.csv").read_text().splitlines()[0]
+    )
+    recv = (out / "partner_receivable.csv").read_text()
+    assert "property_account_receivable_id/id" in recv.splitlines()[0]
+    assert "partner_receivable.csv" in flows
 
 
 def test_full_history_has_no_open_invoices_step(tmp_path: Path) -> None:
@@ -238,6 +244,92 @@ def test_cli_stage_blocked_exits_nonzero(tmp_path: Path) -> None:
     )
     assert result.exit_code == 1
     assert "Blocked" in result.output
+
+
+def test_full_history_omits_property_steps(tmp_path: Path) -> None:
+    """full_history writes empty property files and no property flow steps."""
+    out = tmp_path / "stage"
+    stage(_ledger(tmp_path, "3.2"), str(out), allow_warnings=True)
+    assert (out / "partner_receivable.csv").is_file()  # header only
+    flows = (out / "flows.yml").read_text()
+    assert "partner_receivable.csv" not in flows
+    assert "partner_payable.csv" not in flows
+
+
+def test_account_matches_file_is_written(tmp_path: Path) -> None:
+    """The reviewable account_matches.csv is always written (header at least)."""
+    out = tmp_path / "stage"
+    stage(_ledger(tmp_path), str(out), allow_warnings=True)
+    header = (out / "account_matches.csv").read_text().splitlines()[0]
+    assert "target_xmlid" in header
+    assert "status" in header
+
+
+_NS32 = "http://www.auditfiles.nl/XAF/3.2"
+
+#: A minimal 3.2 file whose declared transaction totals do NOT match the parse.
+_BAD_TOTALS_XAF = (
+    f'<?xml version="1.0"?><auditfile xmlns="{_NS32}">'
+    "<header><startDate>2024-01-01</startDate><endDate>2024-12-31</endDate>"
+    "<curCode>EUR</curCode></header><company><companyName>X</companyName>"
+    "<generalLedger><ledgerAccount><accID>1300</accID><accDesc>Deb</accDesc>"
+    "<accTp>B</accTp></ledgerAccount></generalLedger>"
+    "<transactions><linesCount>2</linesCount>"
+    "<totalDebit>999.00</totalDebit><totalCredit>999.00</totalCredit>"
+    "<journal><jrnID>S</jrnID><jrnTp>S</jrnTp>"
+    "<transaction><nr>1</nr><trDt>2024-06-30</trDt>"
+    "<trLine><nr>1</nr><accID>1300</accID><amnt>100.00</amnt><amntTp>D</amntTp>"
+    "</trLine>"
+    "<trLine><nr>2</nr><accID>1300</accID><amnt>100.00</amnt><amntTp>C</amntTp>"
+    "</trLine></transaction></journal></transactions>"
+    "</company></auditfile>"
+)
+
+
+def test_control_total_mismatch_blocks_even_with_allow_warnings(tmp_path: Path) -> None:
+    """A control-total mismatch is an error; --allow-warnings does not clear it."""
+    path = tmp_path / "bad.xaf"
+    path.write_text(_BAD_TOTALS_XAF, encoding="utf-8")
+    out = tmp_path / "stage"
+    result = stage(read_auditfile(str(path)), str(out), allow_warnings=True)
+    assert result.blocked is True
+    assert not (out / "flows.yml").exists()
+
+
+def test_allow_control_total_mismatch_unblocks(tmp_path: Path) -> None:
+    """Its own explicit override lets a mismatching file stage."""
+    path = tmp_path / "bad.xaf"
+    path.write_text(_BAD_TOTALS_XAF, encoding="utf-8")
+    out = tmp_path / "stage"
+    result = stage(
+        read_auditfile(str(path)),
+        str(out),
+        allow_warnings=True,
+        allow_control_total_mismatch=True,
+    )
+    assert result.blocked is False
+    assert (out / "flows.yml").is_file()
+
+
+def test_cli_allow_control_total_mismatch(tmp_path: Path) -> None:
+    """The CLI exposes --allow-control-total-mismatch and it unblocks staging."""
+    path = tmp_path / "bad.xaf"
+    path.write_text(_BAD_TOTALS_XAF, encoding="utf-8")
+    out = tmp_path / "stage"
+    result = CliRunner().invoke(
+        __main__.cli,
+        [
+            "auditfile",
+            "stage",
+            str(path),
+            "--out",
+            str(out),
+            "--allow-warnings",
+            "--allow-control-total-mismatch",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (out / "flows.yml").is_file()
 
 
 def test_cli_stage_with_account_map(tmp_path: Path) -> None:

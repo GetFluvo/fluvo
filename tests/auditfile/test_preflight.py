@@ -315,9 +315,9 @@ def test_parse_anomaly_is_error() -> None:
     assert report.is_blocking(allow_warnings=True) is True
 
 
-def test_control_total_mismatch_is_warning() -> None:
-    """A declared transactions total not matching the parse warns."""
-    ledger = _ledger(
+def _control_total_mismatch_ledger() -> CanonicalLedger:
+    """A ledger whose declared transaction totals do not match the parse."""
+    return _ledger(
         accounts=[{"account_id": "1300", "kind": "balance"}],
         journals=[{"journal_id": "S", "kind": "sale"}],
         moves=[{"move_key": "S/1", "journal_id": "S", "number": "1"}],
@@ -332,7 +332,27 @@ def test_control_total_mismatch_is_warning() -> None:
         ],
         header_extra={"declared_tx_debit": 999.0, "declared_tx_credit": 999.0},
     )
-    assert "control_total_mismatch" in _codes(_report(ledger))
+
+
+def test_control_total_mismatch_is_error() -> None:
+    """A declared total not matching the parse is an error, not a warning.
+
+    A first run needs --allow-warnings for the account proposals, so a warning
+    would slip a truncated or mis-parsed file through; it must block by default.
+    """
+    report = _report(_control_total_mismatch_ledger())
+    assert "control_total_mismatch" in _codes(report)
+    mismatch = next(f for f in report.findings if f.code == "control_total_mismatch")
+    assert mismatch.severity == ERROR
+    # Even with warnings allowed, the error still blocks...
+    assert report.is_blocking(allow_warnings=True) is True
+    # ...unless its own explicit override is given.
+    assert (
+        report.is_blocking(
+            allow_warnings=True, allowed_errors=frozenset({"control_total_mismatch"})
+        )
+        is False
+    )
 
 
 def test_account_kind_conflict_is_warning() -> None:
@@ -385,7 +405,7 @@ def test_clearing_not_zero_is_error(tmp_path: Path) -> None:
     result = transform(ledger, mode=MODE_CUTOVER)
     # Tamper one invoice residual so the clearing account no longer nets to zero.
     broken = result.open_invoices.with_columns(
-        pl.when(pl.col("name") == "2023-900")
+        pl.when(pl.col("ref") == "2023-900")
         .then(pl.lit("999.99"))
         .otherwise(pl.col("invoice_line_ids/price_unit"))
         .alias("invoice_line_ids/price_unit")
@@ -405,6 +425,68 @@ def test_derived_due_date_warning(tmp_path: Path) -> None:
     ledger = read_auditfile(str(path))
     report = run_preflight(ledger, transform(ledger, mode=MODE_CUTOVER))
     assert "derived_due_date" in _codes(report)
+
+
+def test_match_collision_is_error() -> None:
+    """A code present in the target but unmatchable blocks (duplicate-code)."""
+    ledger = _ledger(accounts=[{"account_id": "1300", "kind": "balance"}])
+    result = transform(ledger, match_collisions={"1300": "no external id"})
+    report = run_preflight(ledger, result)
+    assert "match_collision" in _codes(report)
+    assert report.is_blocking(allow_warnings=True) is True
+
+
+def test_matched_control_mismatch_is_error() -> None:
+    """A receivable matched onto a non-reconcilable target blocks."""
+    from fluvo.auditfile.match import AccountMatch
+
+    ledger = _ledger(accounts=[{"account_id": "1300", "kind": "balance"}])
+    meta = {"1300": AccountMatch("1300", "l10n.x", "X", "asset_current", False)}
+    result = transform(ledger, account_matches={"1300": "l10n.x"}, match_meta=meta)
+    report = run_preflight(ledger, result)
+    assert "matched_control_mismatch" in _codes(report)
+    assert report.is_blocking(allow_warnings=True) is True
+
+
+def test_matched_type_mismatch_is_warning() -> None:
+    """A non-control account matched onto a different type warns (not blocks)."""
+    from fluvo.auditfile.match import AccountMatch
+
+    ledger = _ledger(accounts=[{"account_id": "8000", "kind": "profit_loss"}])
+    meta = {"8000": AccountMatch("8000", "l10n.y", "Y", "expense", False)}
+    result = transform(ledger, account_matches={"8000": "l10n.y"}, match_meta=meta)
+    report = run_preflight(ledger, result)
+    assert "matched_type_mismatch" in _codes(report)
+    assert all(
+        f.severity == WARNING
+        for f in report.findings
+        if f.code == "matched_type_mismatch"
+    )
+
+
+def test_duplicate_tx_number_is_warning() -> None:
+    """A move keyed by parse order (duplicate number, no period) is flagged."""
+    ledger = _ledger(
+        accounts=[{"account_id": "1300", "kind": "balance"}],
+        journals=[{"journal_id": "S", "kind": "sale"}],
+        moves=[{"move_key": "S/1#3", "journal_id": "S", "number": "1"}],
+        lines=[
+            {
+                "move_key": "S/1#3",
+                "line_number": 1,
+                "account_id": "1300",
+                "debit": 1.0,
+            },
+            {
+                "move_key": "S/1#3",
+                "line_number": 2,
+                "account_id": "1300",
+                "credit": 1.0,
+            },
+        ],
+    )
+    report = _report(ledger)
+    assert "duplicate_tx_number" in _codes(report)
 
 
 def test_empty_summary() -> None:

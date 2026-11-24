@@ -28,8 +28,19 @@ guess a fix:
   review before they mean anything in a EUR company.
 * **foreign_currency_line** (warning) — a line carries its own currency; only
   the base amount is staged.
-* **control_total_mismatch** (warning) — the file's declared control totals do
-  not match what was parsed, so the parse may be incomplete.
+* **control_total_mismatch** (error) — the file's declared control totals do
+  not match what was parsed, so the parse may be incomplete or mis-parsed;
+  override explicitly with ``--allow-control-total-mismatch``.
+* **match_collision** (error) — a source account's code already exists in the
+  target but could not be matched (ambiguous / no external id); re-creating it
+  would fail on the unique code.
+* **matched_control_mismatch** (error) — a matched receivable/payable account is
+  not reconcilable or not the right type on the target; open-item control lines
+  would misbook.
+* **matched_type_mismatch** (warning) — a matched account's target type differs
+  from the source typing; review ``account_matches.csv``.
+* **duplicate_tx_number** (warning) — two transactions share a journal/number
+  with no distinguishing period, so the move key fell back to parse order.
 * **proposed_account_type** (warning) — accounts whose Odoo type came from the
   numbering heuristic or the fallback, not an override or RGS; review
   ``account_map.csv`` before loading.
@@ -50,6 +61,7 @@ caller's ``allow_warnings`` opt-in, only errors block.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Final
 
@@ -128,17 +140,22 @@ class PreflightReport:
         """
         return [f for f in self.findings if f.severity == WARNING]
 
-    def is_blocking(self, *, allow_warnings: bool) -> bool:
+    def is_blocking(
+        self, *, allow_warnings: bool, allowed_errors: frozenset[str] = frozenset()
+    ) -> bool:
         """Whether this report should stop staging.
 
         Args:
             allow_warnings: When True, only errors block; when False, any
                 finding blocks (fail-fast).
+            allowed_errors: Error codes the caller has explicitly opted to
+                accept (each error otherwise always blocks, regardless of
+                ``allow_warnings``).
 
         Returns:
             bool: True if staging must not proceed.
         """
-        if self.errors:
+        if [f for f in self.errors if f.code not in allowed_errors]:
             return True
         return bool(self.warnings) and not allow_warnings
 
@@ -521,9 +538,10 @@ def _check_control_totals(ledger: CanonicalLedger) -> list[Finding]:
     return [
         _finding(
             "control_total_mismatch",
-            WARNING,
+            ERROR,
             "{n} declared control total(s) do not match the parse; the file may "
-            "be incomplete or non-standard.",
+            "be incomplete or mis-parsed. Fix the file, or pass "
+            "--allow-control-total-mismatch to proceed anyway.",
             mismatches,
         )
     ]
@@ -713,6 +731,114 @@ def _check_ambiguous_partner_controls(result: TransformResult) -> list[Finding]:
     ]
 
 
+def _check_match_collisions(result: TransformResult) -> list[Finding]:
+    """Flag source accounts whose code exists in the target but did not match.
+
+    The target has an account with that code (ambiguous, or without an external
+    id), so re-creating the source account would fail on the unique code. Name
+    the codes rather than let the load crash.
+
+    Args:
+        result: The transform result.
+
+    Returns:
+        list[Finding]: A single error finding, or empty.
+    """
+    if not result.collision_accounts:
+        return []
+    return [
+        _finding(
+            "match_collision",
+            ERROR,
+            "{n} account code(s) already exist in the target but could not be "
+            "matched (ambiguous, or no external id); they would be created as "
+            "duplicates. Give each target account an external id, or pin it via "
+            "account_map.csv's target_xmlid.",
+            list(result.collision_accounts),
+        )
+    ]
+
+
+def _check_matched_controls(result: TransformResult) -> list[Finding]:
+    """Flag a matched receivable/payable account the target cannot reconcile.
+
+    A source control account matched onto a target account that is not
+    reconcilable, or not of the matching receivable/payable type, would misbook
+    every open-item control line — an error, not a warning.
+
+    Args:
+        result: The transform result.
+
+    Returns:
+        list[Finding]: A single error finding, or empty.
+    """
+    if not result.match_control_errors:
+        return []
+    return [
+        _finding(
+            "matched_control_mismatch",
+            ERROR,
+            "{n} matched receivable/payable account(s) are not reconcilable or "
+            "not the right type on the target; open-item control lines would "
+            "misbook. Review account_matches.csv.",
+            list(result.match_control_errors),
+        )
+    ]
+
+
+def _check_matched_types(result: TransformResult) -> list[Finding]:
+    """Flag matched accounts whose target type differs from the source typing.
+
+    Args:
+        result: The transform result.
+
+    Returns:
+        list[Finding]: A single warning finding, or empty.
+    """
+    if not result.match_type_mismatches:
+        return []
+    return [
+        _finding(
+            "matched_type_mismatch",
+            WARNING,
+            "{n} matched account(s) have a different account_type on the target "
+            "than the source typing; review account_matches.csv.",
+            list(result.match_type_mismatches),
+        )
+    ]
+
+
+def _check_sequence_disambiguated(ledger: CanonicalLedger) -> list[Finding]:
+    """Flag moves keyed by parse order (duplicate journal/number, no period).
+
+    When two transactions share a journal and number and carry no distinguishing
+    period, the move key falls back to the parse sequence, so the external id
+    depends on file order — a re-export in another order would not upsert. Name
+    them for review.
+
+    Args:
+        ledger: The canonical ledger.
+
+    Returns:
+        list[Finding]: A single warning finding, or empty.
+    """
+    if ledger.moves.height == 0:
+        return []
+    keys = [str(k) for k in ledger.moves.get_column("move_key").to_list()]
+    by_seq = [k for k in keys if re.search(r"#\d+$", k)]
+    if not by_seq:
+        return []
+    return [
+        _finding(
+            "duplicate_tx_number",
+            WARNING,
+            "{n} transaction(s) share a journal/number and were keyed by parse "
+            "order; their external id depends on file order — review.",
+            by_seq,
+        )
+    ]
+
+
 def _check_open_item_tie_out(
     ledger: CanonicalLedger, result: TransformResult
 ) -> list[Finding]:
@@ -780,8 +906,12 @@ def run_preflight(ledger: CanonicalLedger, result: TransformResult) -> Preflight
     findings += _check_currency(ledger)
     findings += _check_foreign_currency(ledger)
     findings += _check_control_totals(ledger)
+    findings += _check_match_collisions(result)
+    findings += _check_matched_controls(result)
     findings += _check_proposed_types(result)
     findings += _check_kind_conflicts(result)
+    findings += _check_matched_types(result)
+    findings += _check_sequence_disambiguated(ledger)
     findings += _check_due_dates_derived(result)
     findings += _check_reversed_open_items(result)
     findings += _check_ambiguous_partner_controls(result)

@@ -4,12 +4,18 @@
 
 * ``partners.csv``, ``accounts.csv``, ``journals.csv``, ``moves.csv`` — the
   Odoo-shaped data, upsert-keyed on deterministic external ids.
+* ``partner_receivable.csv`` / ``partner_payable.csv`` — in cutover, a res.partner
+  update setting the control-account property for the partners that carry an open
+  item of that kind (so no other partner's company default is overwritten);
+  omitted when empty.
 * ``partner_banks.csv`` — ``res.partner.bank`` rows (one per partner that
   carries a bank account); its load step is omitted when there are none.
 * ``open_invoices.csv`` — in cutover, one draft invoice/bill per open AR/AP item
   on the clearing account (``invoice_line_ids/...`` shape); omitted when none.
 * ``account_map.csv`` — the editable account-typing proposals. Edit it and pass
   ``--account-map`` on a re-stage to override the mapper chain.
+* ``account_matches.csv`` — in a ``--match-accounts`` run, the reviewable pairing
+  of each source account with the existing target account it was referenced onto.
 * ``partner_aliases.csv`` — every source customer/supplier id mapped to the
   surviving ``res.partner`` external id (dedup is lossless and auditable).
 * ``open_items.csv`` — the per-partner open AR/AP breakdown (cutover).
@@ -33,6 +39,7 @@ import polars as pl
 
 from ..lib.core import InputError
 from .canonical import CanonicalLedger
+from .match import MatchResult
 from .preflight import PreflightReport, run_preflight
 from .transform import (
     _DEFAULT_PAYMENT_DAYS as DEFAULT_PAYMENT_DAYS,
@@ -52,13 +59,20 @@ _STEPS: tuple[tuple[str, str, str, bool], ...] = (
     ("accounts", "accounts.csv", "account.account", False),
     ("journals", "journals.csv", "account.journal", False),
     ("partners", "partners.csv", "res.partner", False),
+    # Re-opens res.partner only to set the company-dependent control-account
+    # property, and only for the partners that carry an open item of that kind —
+    # so no other partner's company default is overwritten.
+    ("partner_receivable", "partner_receivable.csv", "res.partner", False),
+    ("partner_payable", "partner_payable.csv", "res.partner", False),
     ("partner_banks", "partner_banks.csv", "res.partner.bank", False),
     ("moves", "moves.csv", "account.move", True),
     ("open_invoices", "open_invoices.csv", "account.move", True),
 )
 
 #: Steps dropped from the generated flow when their CSV has no data rows.
-_OPTIONAL_STEPS = frozenset({"partner_banks", "open_invoices"})
+_OPTIONAL_STEPS = frozenset(
+    {"partner_receivable", "partner_payable", "partner_banks", "open_invoices"}
+)
 
 #: Placeholder written into flows.yml when no connection file is supplied.
 _CONNECTION_PLACEHOLDER = "connection.conf"
@@ -244,13 +258,16 @@ def stage(
     prefix: str = "xaf",
     connection_file: str | None = None,
     account_overrides: AccountOverrides | None = None,
-    account_matches: dict[str, str] | None = None,
+    account_matches: MatchResult | None = None,
     allow_warnings: bool = False,
+    allow_control_total_mismatch: bool = False,
     company: str | None = None,
     dedup: bool = True,
     result_account: str | None = None,
     clearing_account: str | None = None,
     default_payment_days: int = DEFAULT_PAYMENT_DAYS,
+    open_sale_journal: str | None = None,
+    open_purchase_journal: str | None = None,
 ) -> StageResult:
     """Transform a ledger and write a loadable stage directory.
 
@@ -262,10 +279,12 @@ def stage(
         connection_file: The Odoo connection file to embed in ``flows.yml``; a
             placeholder is written when omitted.
         account_overrides: Parsed overrides from an edited ``account_map.csv``.
-        account_matches: Source account id → existing Odoo external id, for
-            accounts that already exist in the target chart (e.g. resolved over
-            RPC by ``--match-accounts``). Merged over the map's ``target_xmlid``.
+        account_matches: The RPC match result from ``--match-accounts`` (its
+            external ids are merged over the map's ``target_xmlid`` pins, and its
+            metadata drives the match review and checks).
         allow_warnings: When True, warnings do not block staging.
+        allow_control_total_mismatch: When True, a ``control_total_mismatch``
+            error does not block (its own explicit override).
         company: A company id or external id to target, embedded as
             ``company_id`` on every flow step (required when the target Odoo has
             more than one company).
@@ -275,12 +294,18 @@ def stage(
         clearing_account: In cutover, the open-item clearing account id; a
             synthetic default is used (and staged) when omitted.
         default_payment_days: Days after the invoice date for a derived due date.
+        open_sale_journal: In cutover, a source journal id for sale open-item
+            invoices; a dedicated sale journal is staged when omitted.
+        open_purchase_journal: In cutover, a source journal id for the bills; a
+            dedicated purchase journal is staged when omitted.
 
     Returns:
         StageResult: What was written and the preflight report.
     """
     overrides = account_overrides or AccountOverrides()
-    matches = {**overrides.matches, **(account_matches or {})}
+    rpc_matches = account_matches or MatchResult()
+    match_xmlids = {code: m.xmlid for code, m in rpc_matches.matches.items()}
+    matches = {**overrides.matches, **match_xmlids}
     result: TransformResult = transform(
         ledger,
         prefix=prefix,
@@ -288,10 +313,14 @@ def stage(
         account_overrides=overrides.types,
         reconcile_overrides=overrides.reconcile,
         account_matches=matches,
+        match_meta=rpc_matches.matches,
+        match_collisions=rpc_matches.unmatched_present,
         dedup=dedup,
         result_account=result_account,
         clearing_account=clearing_account,
         default_payment_days=default_payment_days,
+        open_sale_journal=open_sale_journal,
+        open_purchase_journal=open_purchase_journal,
     )
     report = run_preflight(ledger, result)
 
@@ -305,12 +334,15 @@ def stage(
         files[name] = str(path.resolve())
 
     _emit("partners.csv", result.partners)
+    _emit("partner_receivable.csv", result.partner_receivable)
+    _emit("partner_payable.csv", result.partner_payable)
     _emit("partner_banks.csv", result.partner_banks)
     _emit("accounts.csv", result.accounts)
     _emit("journals.csv", result.journals)
     _emit("moves.csv", result.moves)
     _emit("open_invoices.csv", result.open_invoices)
     _emit("account_map.csv", result.account_map)
+    _emit("account_matches.csv", result.account_matches)
     _emit("partner_aliases.csv", result.alias_map)
     _emit("open_items.csv", result.open_items)
 
@@ -321,7 +353,14 @@ def stage(
     )
     files["preflight.json"] = str(preflight_path.resolve())
 
-    blocked = report.is_blocking(allow_warnings=allow_warnings)
+    allowed_errors = (
+        frozenset({"control_total_mismatch"})
+        if allow_control_total_mismatch
+        else frozenset()
+    )
+    blocked = report.is_blocking(
+        allow_warnings=allow_warnings, allowed_errors=allowed_errors
+    )
     flows = directory / "flows.yml"
     flows_path: str | None = None
     if blocked:
@@ -331,6 +370,8 @@ def stage(
     else:
         connection = connection_file or _CONNECTION_PLACEHOLDER
         empty = {
+            "partner_receivable.csv": result.partner_receivable.height == 0,
+            "partner_payable.csv": result.partner_payable.height == 0,
             "partner_banks.csv": result.partner_banks.height == 0,
             "open_invoices.csv": result.open_invoices.height == 0,
         }

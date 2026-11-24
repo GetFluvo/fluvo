@@ -30,6 +30,7 @@ from .lib.actions.vies_manager import (
 from .lib.flow_runner import StepOutcome, StepResult
 
 if TYPE_CHECKING:
+    from .auditfile.match import MatchResult
     from .lib.flow import Flow, FlowFile
     from .lib.mapping import MappingSpec
 from .lib.validation import display_validation_results, validate_csv_data
@@ -1058,17 +1059,19 @@ def auditfile_inspect_cmd(file: str, fmt: str | None, as_json: bool) -> None:
 
 
 def _auditfile_account_matches(
-    match_accounts: bool, connection_file: str | None
-) -> dict[str, str] | None:
+    match_accounts: bool, connection_file: str | None, company: str | None
+) -> "MatchResult | None":
     """Resolve existing-chart account matches over RPC, when requested.
 
     Args:
         match_accounts: Whether ``--match-accounts`` was passed.
         connection_file: The Odoo connection file (required when matching).
+        company: The target company to scope the chart read to (a code is only
+            unique within a company).
 
     Returns:
-        dict[str, str] | None: ``account code`` → existing external id, or None
-        when matching was not requested.
+        MatchResult | None: The resolved matches and present-but-unmatchable
+        codes, or None when matching was not requested.
 
     Raises:
         InputError: If ``--match-accounts`` is given without a connection file.
@@ -1082,7 +1085,7 @@ def _auditfile_account_matches(
     if not connection_file:
         raise InputError("--match-accounts requires --connection-file.")
     connection = get_connection_from_config(config_file=connection_file)
-    return resolve_account_matches(connection)
+    return resolve_account_matches(connection, company=company)
 
 
 @auditfile_group.command(name="stage")
@@ -1152,6 +1155,25 @@ def _auditfile_account_matches(
     "(XAF carries none).",
 )
 @click.option(
+    "--open-sale-journal",
+    default=None,
+    help="In cutover, a source journal code to post sale open-item invoices to "
+    "(a dedicated sale journal is created when omitted).",
+)
+@click.option(
+    "--open-purchase-journal",
+    default=None,
+    help="In cutover, a source journal code for the open-item bills "
+    "(a dedicated purchase journal is created when omitted).",
+)
+@click.option(
+    "--allow-control-total-mismatch",
+    is_flag=True,
+    default=False,
+    help="Stage even when the file's declared control totals do not match the "
+    "parse (otherwise an error). Use only after confirming the file is complete.",
+)
+@click.option(
     "--match-accounts",
     "match_accounts",
     is_flag=True,
@@ -1184,6 +1206,9 @@ def auditfile_stage_cmd(
     result_account: str | None,
     clearing_account: str | None,
     default_payment_days: int,
+    open_sale_journal: str | None,
+    open_purchase_journal: str | None,
+    allow_control_total_mismatch: bool,
     match_accounts: bool,
     allow_warnings: bool,
     fmt: str | None,
@@ -1206,7 +1231,7 @@ def auditfile_stage_cmd(
     try:
         ledger = read_auditfile(file, fmt=fmt)
         overrides = load_account_overrides(account_map) if account_map else None
-        matches = _auditfile_account_matches(match_accounts, connection_file)
+        matches = _auditfile_account_matches(match_accounts, connection_file, company)
         result = stage(
             ledger,
             out_dir,
@@ -1216,11 +1241,14 @@ def auditfile_stage_cmd(
             account_overrides=overrides,
             account_matches=matches,
             allow_warnings=allow_warnings,
+            allow_control_total_mismatch=allow_control_total_mismatch,
             company=company,
             dedup=not no_dedup,
             result_account=result_account,
             clearing_account=clearing_account,
             default_payment_days=default_payment_days,
+            open_sale_journal=open_sale_journal,
+            open_purchase_journal=open_purchase_journal,
         )
     except FluvoError as exc:
         _show_error_panel("Audit file", str(exc))

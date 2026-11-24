@@ -62,6 +62,7 @@ from .canonical import (
     JOURNAL_SALE,
     CanonicalLedger,
 )
+from .match import AccountMatch
 
 MODE_CUTOVER: Final = "cutover"
 MODE_FULL_HISTORY: Final = "full_history"
@@ -90,6 +91,13 @@ _ZERO_TOLERANCE: Final = 0.005
 _OPENING_JOURNAL = "journal__opening"
 _OPENING_MOVE = "move__opening"
 
+#: External ids of the dedicated sale/purchase journals the open-item invoices
+#: post to in cutover. A real ``move_type`` needs a journal of the matching
+#: type; these are staged so the invoices never fall onto whatever default
+#: journal Odoo would otherwise pick.
+_OPENING_SALE_JOURNAL = "journal__opening_sale"
+_OPENING_PURCHASE_JOURNAL = "journal__opening_purchase"
+
 #: Default code/name of the opening open-item clearing account, and the default
 #: payment term (days) used to derive an invoice due date the file does not
 #: carry. The clearing account absorbs the invoice side of every open-item
@@ -108,10 +116,15 @@ _MOVE_TYPE = {
 }
 
 #: Column shape of the staged ``open_invoices.csv`` (one invoice per open item).
+#: ``journal_id/id`` pins a dedicated sale/purchase journal and ``date`` the
+#: accounting date (the cutover date) so the entry lands in the open period, not
+#: the original invoice's (likely locked) period.
 _OPEN_INVOICE_COLUMNS: Final = [
     "id",
     "move_type",
+    "journal_id/id",
     "partner_id/id",
+    "date",
     "invoice_date",
     "invoice_date_due",
     "ref",
@@ -123,6 +136,19 @@ _OPEN_INVOICE_COLUMNS: Final = [
     "invoice_line_ids/quantity",
     "invoice_line_ids/price_unit",
     "invoice_line_ids/tax_ids/id",
+]
+
+#: Column shape of the staged account-match review file (``account_matches.csv``).
+_MATCH_REPORT_COLUMNS: Final = [
+    "account_id",
+    "source_name",
+    "source_account_type",
+    "source_reconcile",
+    "target_xmlid",
+    "target_name",
+    "target_account_type",
+    "target_reconcile",
+    "status",
 ]
 
 #: Source of an account-type decision, most to least authoritative.
@@ -386,6 +412,13 @@ class TransformResult:
         partner_banks: ``res.partner.bank`` rows (one per survivor with a bank).
         mode: The mode the result was built for.
         prefix: The external-id prefix used.
+        partner_receivable: ``res.partner`` rows carrying only the receivable
+            property to force (cutover; one per partner with a receivable open
+            item), kept off the main partner frame so other partners' company
+            default is not overwritten.
+        partner_payable: The same for the payable property.
+        account_matches: The reviewable account-match report
+            (:data:`_MATCH_REPORT_COLUMNS`).
         clearing_account: The open-item clearing account id (cutover).
         clearing_xmlid: The clearing account's resolved external id (cutover).
         heuristic_accounts: Account ids whose type came from the numbering
@@ -395,6 +428,14 @@ class TransformResult:
             source's balance/profit-loss kind — preflight flags these too.
         matched_accounts: Account ids referenced onto an existing Odoo account
             (not created) — reported so the match is reviewable.
+        match_type_mismatches: Matched account ids whose target ``account_type``
+            differs from the source typing — preflight warns.
+        match_control_errors: Matched receivable/payable account ids whose target
+            is not reconcilable or not the right type — preflight errors (an
+            open-item control line would misbook).
+        collision_accounts: Source account ids that share a code with a target
+            account that could not be matched (ambiguous or no external id), so
+            re-creating them would fail on the unique code — preflight errors.
         refund_items: External ids of reversed-sign open items (credit notes /
             unallocated payments) staged as refunds — preflight flags these.
         ambiguous_partners: Source partner ids whose open items span more than
@@ -414,11 +455,29 @@ class TransformResult:
     partner_banks: pl.DataFrame
     mode: str
     prefix: str
+    partner_receivable: pl.DataFrame = field(
+        default_factory=lambda: pl.DataFrame(
+            schema={"id": pl.String, "property_account_receivable_id/id": pl.String}
+        )
+    )
+    partner_payable: pl.DataFrame = field(
+        default_factory=lambda: pl.DataFrame(
+            schema={"id": pl.String, "property_account_payable_id/id": pl.String}
+        )
+    )
+    account_matches: pl.DataFrame = field(
+        default_factory=lambda: pl.DataFrame(
+            schema={c: pl.String for c in _MATCH_REPORT_COLUMNS}
+        )
+    )
     clearing_account: str = ""
     clearing_xmlid: str = ""
     heuristic_accounts: tuple[str, ...] = field(default_factory=tuple)
     conflicting_accounts: tuple[str, ...] = field(default_factory=tuple)
     matched_accounts: tuple[str, ...] = field(default_factory=tuple)
+    match_type_mismatches: tuple[str, ...] = field(default_factory=tuple)
+    match_control_errors: tuple[str, ...] = field(default_factory=tuple)
+    collision_accounts: tuple[str, ...] = field(default_factory=tuple)
     refund_items: tuple[str, ...] = field(default_factory=tuple)
     ambiguous_partners: tuple[str, ...] = field(default_factory=tuple)
     derived_due_dates: int = 0
@@ -590,10 +649,6 @@ def _dedup_partners(
                 "city": _first("city"),
                 "zip": _first("postal_code"),
                 "country_id/id": _country_xmlid(_first("country")),
-                # Filled in cutover so each open-item invoice's control line lands
-                # on the source account, not the partner's default property.
-                "property_account_receivable_id/id": "",
-                "property_account_payable_id/id": "",
             }
         )
         bank = _first("bank_account")
@@ -617,8 +672,6 @@ def _dedup_partners(
         "city",
         "zip",
         "country_id/id",
-        "property_account_receivable_id/id",
-        "property_account_payable_id/id",
     ]
     frame = pl.DataFrame(out_rows, schema={c: pl.String for c in columns})
     banks = pl.DataFrame(bank_rows, schema={c: pl.String for c in _BANK_COLUMNS})
@@ -699,12 +752,110 @@ def _account_map_frame(
     return pl.DataFrame(rows, schema={c: pl.String for c in columns})
 
 
-def _journals_frame(ledger: CanonicalLedger, prefix: str) -> pl.DataFrame:
+def _classify_matches(
+    decisions: list[AccountDecision],
+    matches: dict[str, str],
+    match_meta: dict[str, AccountMatch],
+) -> tuple[tuple[str, ...], tuple[str, ...], dict[str, str]]:
+    """Check each RPC-matched pair's target type/reconcile against the source.
+
+    An offline ``target_xmlid`` pin has no metadata (no RPC read), so it is not
+    checked here — the user asserted it by hand.
+
+    Args:
+        decisions: The per-account typing decisions (the source side).
+        matches: Source account id → referenced external id (all matches).
+        match_meta: Source account id → target metadata (RPC matches only).
+
+    Returns:
+        tuple[tuple[str, ...], tuple[str, ...], dict[str, str]]: the type
+        mismatches (warn), the control errors (matched AR/AP whose target is not
+        reconcilable or the wrong type — error), and ``account_id → status`` for
+        the review file.
+    """
+    mismatches: list[str] = []
+    control_errors: list[str] = []
+    status: dict[str, str] = {}
+    for decision in decisions:
+        if decision.account_id not in matches:
+            continue
+        meta = match_meta.get(decision.account_id)
+        if meta is None:
+            status[decision.account_id] = "pinned"  # offline, not checked
+            continue
+        type_differs = meta.account_type != decision.account_type
+        is_control = decision.account_type in _RECONCILE_TYPES
+        if is_control and (not meta.reconcile or type_differs):
+            control_errors.append(decision.account_id)
+            status[decision.account_id] = "control_mismatch"
+        elif type_differs:
+            mismatches.append(decision.account_id)
+            status[decision.account_id] = "type_mismatch"
+        else:
+            status[decision.account_id] = "ok"
+    return tuple(sorted(mismatches)), tuple(sorted(control_errors)), status
+
+
+def _account_matches_frame(
+    decisions: list[AccountDecision],
+    matches: dict[str, str],
+    match_meta: dict[str, AccountMatch],
+    status: dict[str, str],
+) -> pl.DataFrame:
+    """Build the reviewable account-match report (``account_matches.csv``).
+
+    One row per matched account, pairing the source typing with the target
+    account it was referenced onto and a status, so the match can be reviewed
+    before anything loads.
+
+    Args:
+        decisions: The per-account typing decisions.
+        matches: Source account id → referenced external id (all matches).
+        match_meta: Source account id → target metadata (RPC matches only).
+        status: Source account id → review status from :func:`_classify_matches`.
+
+    Returns:
+        pl.DataFrame: The report rows (:data:`_MATCH_REPORT_COLUMNS`).
+    """
+    rows: list[dict[str, str]] = []
+    for decision in decisions:
+        if decision.account_id not in matches:
+            continue
+        meta = match_meta.get(decision.account_id)
+        rows.append(
+            {
+                "account_id": decision.account_id,
+                "source_name": decision.name,
+                "source_account_type": decision.account_type,
+                "source_reconcile": "True" if decision.reconcile else "False",
+                "target_xmlid": matches[decision.account_id],
+                "target_name": meta.name if meta else "",
+                "target_account_type": meta.account_type if meta else "",
+                "target_reconcile": ("True" if meta.reconcile else "False")
+                if meta
+                else "",
+                "status": status.get(decision.account_id, ""),
+            }
+        )
+    return pl.DataFrame(rows, schema={c: pl.String for c in _MATCH_REPORT_COLUMNS})
+
+
+def _journals_frame(
+    ledger: CanonicalLedger,
+    prefix: str,
+    *,
+    stage_sale_journal: bool = False,
+    stage_purchase_journal: bool = False,
+) -> pl.DataFrame:
     """Build the ``account.journal`` frame, including the opening journal.
 
     Args:
         ledger: The canonical ledger.
         prefix: The external-id prefix.
+        stage_sale_journal: Also stage a dedicated sale journal for the cutover
+            open-item invoices.
+        stage_purchase_journal: Also stage a dedicated purchase journal for the
+            cutover open-item bills.
 
     Returns:
         pl.DataFrame: The ``account.journal`` rows, codes de-duplicated.
@@ -729,6 +880,24 @@ def _journals_frame(ledger: CanonicalLedger, prefix: str) -> pl.DataFrame:
             "type": "general",
         }
     )
+    if stage_sale_journal:
+        rows.append(
+            {
+                "id": f"{prefix}.{_OPENING_SALE_JOURNAL}",
+                "name": "Opening open items (sales)",
+                "code": _unique_code("OPINS", used_codes),
+                "type": "sale",
+            }
+        )
+    if stage_purchase_journal:
+        rows.append(
+            {
+                "id": f"{prefix}.{_OPENING_PURCHASE_JOURNAL}",
+                "name": "Opening open items (purchases)",
+                "code": _unique_code("OPINP", used_codes),
+                "type": "purchase",
+            }
+        )
     columns = ["id", "name", "code", "type"]
     return pl.DataFrame(rows, schema={c: pl.String for c in columns})
 
@@ -1155,15 +1324,23 @@ def _open_invoice_rows(
     prefix: str,
     clearing_xmlid: str,
     default_payment_days: int,
+    cutover_date: str,
+    sale_journal_xmlid: str,
+    purchase_journal_xmlid: str,
 ) -> tuple[list[dict[str, str]], int, tuple[str, ...]]:
     """Turn each open item into a draft invoice/bill row on the clearing account.
 
     Each item becomes its own ``account.move`` with a real ``move_type`` and one
     tax-free line carrying the residual open amount on the clearing account; the
     receivable/payable line lands on the source control account via the partner's
-    staged property. The original number, invoice date, due date and partner are
-    kept. Because the file carries no due date, it is derived from the invoice
-    date plus ``default_payment_days`` and the count is reported.
+    staged property. The source document number is kept in ``ref`` (the move
+    ``name`` is left to Odoo's sequence, so the cutover date cannot clash with a
+    historical number's year), and the invoice date, due date and partner are
+    kept. The **accounting date** is the cutover date so the entry lands in the
+    open period, and the move posts to a dedicated sale/purchase journal rather
+    than whatever default Odoo would pick. Because the file carries no due date,
+    it is derived from the invoice date plus ``default_payment_days`` and the
+    count is reported.
 
     Args:
         open_items: The netted open items from :func:`_open_items`.
@@ -1172,6 +1349,9 @@ def _open_invoice_rows(
         prefix: The external-id prefix.
         clearing_xmlid: The clearing account's external id.
         default_payment_days: Days added to the invoice date for the due date.
+        cutover_date: The accounting date (period end) for every open-item move.
+        sale_journal_xmlid: The journal external id for sale invoices/refunds.
+        purchase_journal_xmlid: The journal external id for bills/refunds.
 
     Returns:
         tuple[list[dict[str, str]], int, tuple[str, ...]]: the invoice rows, how
@@ -1183,11 +1363,8 @@ def _open_invoice_rows(
     refunds: list[str] = []
     for item in open_items.to_dicts():
         account_id = str(item["account_id"])
-        kind = (
-            "receivable"
-            if account_types.get(account_id) == "asset_receivable"
-            else "payable"
-        )
+        is_sale = account_types.get(account_id) == "asset_receivable"
+        kind = "receivable" if is_sale else "payable"
         net = float(item.get("debit") or 0.0) - float(item.get("credit") or 0.0)
         # Normal side: receivable is a debit, payable a credit. A reversed sign
         # is a credit note / unallocated item -> a refund document.
@@ -1201,6 +1378,13 @@ def _open_invoice_rows(
         due = _due_date_str(inv_date, default_payment_days)
         derived_due += 1 if due else 0
         ref = str(item.get("doc_ref") or "")
+        # The source document number (both invoices and bills) stays in ``ref``;
+        # the move ``name`` is left blank so Odoo numbers the entry from the
+        # opening journal's own sequence. Forcing the historical number as the
+        # name would clash with the cutover accounting date — Odoo ties a move's
+        # sequence to its date and rejects e.g. a "2023-…" number dated at a 2024
+        # period end (strictly so on Odoo 16).
+        name = ""
         inv_xmlid = _open_invoice_xmlid(
             prefix, account_id, str(item.get("source_partner_id") or ""), item
         )
@@ -1208,13 +1392,17 @@ def _open_invoice_rows(
             {
                 "id": inv_xmlid,
                 "move_type": move_type,
+                "journal_id/id": sale_journal_xmlid
+                if is_sale
+                else purchase_journal_xmlid,
                 "partner_id/id": alias.get(
                     str(item.get("source_partner_id") or ""), ""
                 ),
+                "date": cutover_date,
                 "invoice_date": invoice_date,
                 "invoice_date_due": due,
                 "ref": ref,
-                "name": ref,
+                "name": name,
                 "narration": "Opening open-item residual (migrated).",
                 # ADR 0001 deterministic line id, so a re-run updates the line
                 # rather than appending a duplicate (idempotent invoice).
@@ -1364,10 +1552,14 @@ def transform(
     account_overrides: dict[str, str] | None = None,
     reconcile_overrides: dict[str, bool] | None = None,
     account_matches: dict[str, str] | None = None,
+    match_meta: dict[str, AccountMatch] | None = None,
+    match_collisions: dict[str, str] | None = None,
     dedup: bool = True,
     result_account: str | None = None,
     clearing_account: str | None = None,
     default_payment_days: int = _DEFAULT_PAYMENT_DAYS,
+    open_sale_journal: str | None = None,
+    open_purchase_journal: str | None = None,
 ) -> TransformResult:
     """Transform a canonical ledger into Odoo-shaped frames.
 
@@ -1382,6 +1574,12 @@ def transform(
         account_matches: A user ``account_id`` → existing Odoo external id map,
             for accounts that already exist in the target chart. Matched
             accounts are referenced, never created and never modified.
+        match_meta: Target metadata (name, type, reconcile) for the RPC-resolved
+            matches, used to check each matched pair agrees and to build the
+            review file; offline ``target_xmlid`` pins have no metadata.
+        match_collisions: Account code → reason it is present in the target but
+            could not be matched (ambiguous / no external id); a source account
+            with such a code must not be re-created, so it becomes an error.
         dedup: Merge customer/supplier records sharing a KvK/VAT (default on).
         result_account: In cutover, a source account id to close the
             profit-and-loss accounts into; None carries each P&L balance.
@@ -1389,6 +1587,10 @@ def transform(
             account; a synthetic default is used (and staged) when omitted.
         default_payment_days: Days after the invoice date used to derive an
             open-item invoice's due date (the file carries none).
+        open_sale_journal: In cutover, a source journal id to post sale open-item
+            invoices to; a dedicated sale journal is staged when omitted.
+        open_purchase_journal: In cutover, a source journal id for the bills; a
+            dedicated purchase journal is staged when omitted.
 
     Returns:
         TransformResult: The Odoo-shaped frames, alias map, account proposals,
@@ -1401,6 +1603,8 @@ def transform(
         raise InputError(f"unknown mode '{mode}'; expected one of {list(MODES)}.")
     overrides = account_overrides or {}
     matches = account_matches or {}
+    meta = match_meta or {}
+    collisions = match_collisions or {}
     decisions = _decide_accounts(ledger, overrides, reconcile_overrides)
     reconcile_accounts = {d.account_id for d in decisions if d.reconcile}
     account_types = {d.account_id: d.account_type for d in decisions}
@@ -1409,12 +1613,24 @@ def transform(
     )
     conflicting = tuple(d.account_id for d in decisions if d.kind_conflict)
     matched = tuple(d.account_id for d in decisions if d.account_id in matches)
+    type_mismatches, control_errors, match_status = _classify_matches(
+        decisions, matches, meta
+    )
+    # A source account whose code exists in the target but could not be matched
+    # would be re-created with a duplicate code: name it as an error, not a crash.
+    collision_accounts = tuple(
+        sorted(
+            d.account_id
+            for d in decisions
+            if d.account_id in collisions and d.account_id not in matches
+        )
+    )
+    matches_report = _account_matches_frame(decisions, matches, meta, match_status)
     account_ref = _account_ref_map(decisions, matches, prefix)
 
     partners, alias, partner_banks = _dedup_partners(ledger, prefix, dedup=dedup)
     accounts = _accounts_frame(decisions, prefix, matches)
     account_map = _account_map_frame(decisions, matches)
-    journals = _journals_frame(ledger, prefix)
     open_items = _open_items(ledger, reconcile_accounts)
 
     open_invoices = _empty_open_invoices()
@@ -1422,6 +1638,15 @@ def transform(
     refund_items: tuple[str, ...] = ()
     ambiguous: tuple[str, ...] = ()
     derived_due = 0
+    partner_receivable, partner_payable = _partner_property_frames({}, {}, {}, {})
+    stage_sale = mode == MODE_CUTOVER and not open_sale_journal
+    stage_purchase = mode == MODE_CUTOVER and not open_purchase_journal
+    journals = _journals_frame(
+        ledger,
+        prefix,
+        stage_sale_journal=stage_sale,
+        stage_purchase_journal=stage_purchase,
+    )
 
     if mode == MODE_CUTOVER:
         # Register (and, unless it already exists, create) the clearing account.
@@ -1430,6 +1655,19 @@ def transform(
         )
         if clearing_id not in matches and clearing_id not in account_types:
             accounts = _with_clearing_account(accounts, prefix, clearing_id)
+        sale_journal_xmlid = (
+            _xmlid(prefix, "journal", open_sale_journal)
+            if open_sale_journal
+            else f"{prefix}.{_OPENING_SALE_JOURNAL}"
+        )
+        purchase_journal_xmlid = (
+            _xmlid(prefix, "journal", open_purchase_journal)
+            if open_purchase_journal
+            else f"{prefix}.{_OPENING_PURCHASE_JOURNAL}"
+        )
+        opening_date = _date_str(ledger.header.get_column("date_end").item(0)) or (
+            _date_str(ledger.header.get_column("date_start").item(0))
+        )
         open_rows, derived_due, refund_items = _open_invoice_rows(
             open_items,
             account_types,
@@ -1437,12 +1675,17 @@ def transform(
             prefix,
             account_ref[clearing_id],
             default_payment_days,
+            opening_date,
+            sale_journal_xmlid,
+            purchase_journal_xmlid,
         )
         open_invoices = pl.DataFrame(
             open_rows, schema={c: pl.String for c in _OPEN_INVOICE_COLUMNS}
         )
         recv, pay, ambiguous = _partner_control_accounts(open_items, account_types)
-        partners = _apply_partner_properties(partners, alias, account_ref, recv, pay)
+        partner_receivable, partner_payable = _partner_property_frames(
+            alias, account_ref, recv, pay
+        )
 
         specs = _cutover_specs(
             ledger,
@@ -1451,9 +1694,6 @@ def transform(
             open_items,
             result_account,
             clearing_id,
-        )
-        opening_date = _date_str(ledger.header.get_column("date_end").item(0)) or (
-            _date_str(ledger.header.get_column("date_start").item(0))
         )
         rows = _opening_move_rows(prefix, specs, opening_date, account_ref)
     else:
@@ -1486,11 +1726,17 @@ def transform(
         partner_banks=partner_banks,
         mode=mode,
         prefix=prefix,
+        partner_receivable=partner_receivable,
+        partner_payable=partner_payable,
+        account_matches=matches_report,
         clearing_account=clearing_id if mode == MODE_CUTOVER else "",
         clearing_xmlid=account_ref.get(clearing_id, "") if mode == MODE_CUTOVER else "",
         heuristic_accounts=heuristic,
         conflicting_accounts=conflicting,
         matched_accounts=matched,
+        match_type_mismatches=type_mismatches,
+        match_control_errors=control_errors,
+        collision_accounts=collision_accounts,
         refund_items=refund_items,
         ambiguous_partners=ambiguous,
         derived_due_dates=derived_due,
@@ -1534,42 +1780,45 @@ def _with_clearing_account(
     return pl.concat([accounts, row])
 
 
-def _apply_partner_properties(
-    partners: pl.DataFrame,
+def _partner_property_frames(
     alias: dict[str, str],
     account_ref: dict[str, str],
     recv: dict[str, str],
     pay: dict[str, str],
-) -> pl.DataFrame:
-    """Set each partner's receivable/payable property to its control account.
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Build the receivable/payable property-override frames (cutover).
 
-    So an open-item invoice's control line lands on the source account, not the
-    partner's (or company's) default property.
+    An open-item invoice's control line must land on the **source** control
+    account, which Odoo takes from the partner's company-dependent property. So
+    the property is forced — but only for the partners that actually carry an
+    open item of that kind, each in its own one-column update frame. Partners
+    without an open item never appear, so their company default is left intact
+    (writing a blank property cell would otherwise *clear* it). The update loads
+    under the target company, so the company-dependent property is written there.
 
     Args:
-        partners: The ``res.partner`` frame.
         alias: Source partner id → surviving partner external id.
         account_ref: Source account id → external id to reference.
         recv: Source partner id → receivable control account id.
         pay: Source partner id → payable control account id.
 
     Returns:
-        pl.DataFrame: ``partners`` with the two property columns filled.
+        tuple[pl.DataFrame, pl.DataFrame]: the receivable and payable property
+        frames (``id`` plus the one property column), one row per overridden
+        partner, sorted by id.
     """
 
-    def _prop(mapping: dict[str, str]) -> dict[str, str]:
-        out: dict[str, str] = {}
+    def _frame(mapping: dict[str, str], column: str) -> pl.DataFrame:
+        seen: dict[str, str] = {}
         for source_id, account_id in mapping.items():
-            out[alias.get(source_id, "")] = account_ref.get(account_id, "")
-        return out
+            xmlid = alias.get(source_id, "")
+            ref = account_ref.get(account_id, "")
+            if xmlid and ref:
+                seen[xmlid] = ref
+        rows = [{"id": xmlid, column: ref} for xmlid, ref in sorted(seen.items())]
+        return pl.DataFrame(rows, schema={"id": pl.String, column: pl.String})
 
-    recv_by_xmlid = _prop(recv)
-    pay_by_xmlid = _prop(pay)
-    return partners.with_columns(
-        pl.col("id")
-        .map_elements(lambda x: recv_by_xmlid.get(x, ""), return_dtype=pl.String)
-        .alias("property_account_receivable_id/id"),
-        pl.col("id")
-        .map_elements(lambda x: pay_by_xmlid.get(x, ""), return_dtype=pl.String)
-        .alias("property_account_payable_id/id"),
+    return (
+        _frame(recv, "property_account_receivable_id/id"),
+        _frame(pay, "property_account_payable_id/id"),
     )

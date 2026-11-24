@@ -349,10 +349,15 @@ def test_account_match_references_existing(tmp_path: Path) -> None:
 
 
 def test_open_item_invoice_fields(tmp_path: Path) -> None:
-    """An open item becomes a draft invoice with number, dates and residual."""
+    """An open item becomes a draft invoice with its number in ref and residual.
+
+    The source number stays in ``ref``; the move ``name`` is left to Odoo's
+    sequence so the cutover date cannot clash with a historical number's year.
+    """
     result = transform(_ledger(tmp_path, "3.2"), prefix="xaf", mode=MODE_CUTOVER)
-    inv = next(r for r in result.open_invoices.to_dicts() if r["name"] == "2023-900")
+    inv = next(r for r in result.open_invoices.to_dicts() if r["ref"] == "2023-900")
     assert inv["move_type"] == "out_invoice"
+    assert inv["name"] == ""  # Odoo numbers the move; the source number is in ref
     assert inv["partner_id/id"] == "xaf.partner_C001"
     assert inv["invoice_date"] == "2023-12-15"
     assert inv["invoice_date_due"] == "2024-01-14"  # invoice date + 30 days
@@ -367,15 +372,41 @@ def test_due_dates_are_derived_and_counted(tmp_path: Path) -> None:
         _ledger(tmp_path, "3.2"), mode=MODE_CUTOVER, default_payment_days=14
     )
     assert result.derived_due_dates == result.open_invoices.height
-    inv = next(r for r in result.open_invoices.to_dicts() if r["name"] == "2023-900")
+    inv = next(r for r in result.open_invoices.to_dicts() if r["ref"] == "2023-900")
     assert inv["invoice_date_due"] == "2023-12-29"  # +14 days
 
 
 def test_partner_receivable_property_is_set(tmp_path: Path) -> None:
-    """Cutover pins the partner's receivable property to the source control."""
+    """Cutover pins the partner's receivable property to the source control.
+
+    The property lives in its own update frame, only for partners with a
+    receivable open item — never on the main partner frame, so no other
+    partner's company default is overwritten.
+    """
     result = transform(_ledger(tmp_path, "3.2"), prefix="xaf", mode=MODE_CUTOVER)
-    row = next(r for r in result.partners.to_dicts() if r["id"] == "xaf.partner_C001")
+    # It is not a column on the main partner frame.
+    assert "property_account_receivable_id/id" not in result.partners.columns
+    row = next(
+        r for r in result.partner_receivable.to_dicts() if r["id"] == "xaf.partner_C001"
+    )
     assert row["property_account_receivable_id/id"] == "xaf.account_1300"
+
+
+def test_partner_property_only_for_open_item_partners(tmp_path: Path) -> None:
+    """Only partners carrying an open item appear in the property update frames.
+
+    So a migrated partner with no open item keeps its company default, rather
+    than having it cleared by a blank cell.
+    """
+    result = transform(_ledger(tmp_path, "3.2"), prefix="xaf", mode=MODE_CUTOVER)
+    recv_ids = set(result.partner_receivable.get_column("id").to_list())
+    # The 3.2 fixture's only open item is C001's; S001/B001 must not be touched.
+    assert recv_ids == {"xaf.partner_C001"}
+    assert "xaf.partner_S001" not in recv_ids
+    # full_history never writes a property at all.
+    hist = transform(_ledger(tmp_path, "3.2"), prefix="xaf")
+    assert hist.partner_receivable.height == 0
+    assert hist.partner_payable.height == 0
 
 
 def test_clearing_account_is_staged(tmp_path: Path) -> None:
@@ -407,10 +438,127 @@ _UNALLOC_BODY = (
 def test_reversed_open_item_is_a_refund(tmp_path: Path) -> None:
     """An unallocated receipt (AR credit) is staged as a refund and flagged."""
     result = transform(_read_xaf(tmp_path, _UNALLOC_BODY), mode=MODE_CUTOVER)
-    inv = next(r for r in result.open_invoices.to_dicts() if r["name"] == "UNALLOC")
+    inv = next(r for r in result.open_invoices.to_dicts() if r["ref"] == "UNALLOC")
     assert inv["move_type"] == "out_refund"
     assert inv["invoice_line_ids/price_unit"] == "100.00"
     assert result.refund_items  # flagged for review
+
+
+def test_open_invoice_has_accounting_date_and_journal(tmp_path: Path) -> None:
+    """An open-item invoice carries the cutover date and a dedicated journal."""
+    result = transform(_ledger(tmp_path, "3.2"), prefix="xaf", mode=MODE_CUTOVER)
+    inv = next(r for r in result.open_invoices.to_dicts() if r["ref"] == "2023-900")
+    # The accounting date is the period end (the cutover), not the invoice date.
+    assert inv["date"] == "2024-12-31"
+    assert inv["invoice_date"] == "2023-12-15"
+    # Sale invoices post to the staged sale journal.
+    assert inv["journal_id/id"] == "xaf.journal__opening_sale"
+    journal_ids = result.journals.get_column("id").to_list()
+    assert "xaf.journal__opening_sale" in journal_ids
+    assert "xaf.journal__opening_purchase" in journal_ids
+
+
+_PAYABLE_BODY = (
+    "<generalLedger>"
+    "<ledgerAccount><accID>1600</accID><accDesc>Cred</accDesc><accTp>B</accTp>"
+    "</ledgerAccount>"
+    "<ledgerAccount><accID>4000</accID><accDesc>Kosten</accDesc><accTp>P</accTp>"
+    "</ledgerAccount></generalLedger>"
+    "<customersSuppliers><customerSupplier><custSupID>S1</custSupID>"
+    "<custSupTp>S</custSupTp><custSupName>Lev</custSupName></customerSupplier>"
+    "</customersSuppliers>"
+    "<transactions><journal><jrnID>INK</jrnID><jrnTp>P</jrnTp>"
+    "<transaction><nr>1</nr><trDt>2025-03-01</trDt>"
+    "<trLine><nr>1</nr><accID>4000</accID><amnt>200.00</amnt><amntTp>D</amntTp>"
+    "<effDate>2025-03-01</effDate><docRef>BILL-77</docRef></trLine>"
+    "<trLine><nr>2</nr><accID>1600</accID><amnt>200.00</amnt><amntTp>C</amntTp>"
+    "<effDate>2025-03-01</effDate><invRef>BILL-77</invRef><custSupID>S1</custSupID>"
+    "</trLine></transaction></journal></transactions>"
+)
+
+
+def test_vendor_bill_name_blank_supplier_ref_kept(tmp_path: Path) -> None:
+    """A vendor bill keeps the supplier doc in ref and lets Odoo number it."""
+    result = transform(_read_xaf(tmp_path, _PAYABLE_BODY), mode=MODE_CUTOVER)
+    inv = next(r for r in result.open_invoices.to_dicts() if r["ref"] == "BILL-77")
+    assert inv["move_type"] == "in_invoice"
+    assert inv["name"] == ""  # Odoo numbers the bill; the supplier ref is not its name
+    assert inv["ref"] == "BILL-77"
+    assert inv["journal_id/id"] == "xaf.journal__opening_purchase"
+    # The payable property is set, not the receivable one.
+    assert result.partner_payable.height == 1
+    assert result.partner_receivable.height == 0
+
+
+def test_matched_control_type_is_checked(tmp_path: Path) -> None:
+    """A receivable matched onto a non-reconcilable target is a control error."""
+    from fluvo.auditfile.match import AccountMatch
+
+    ledger = _read_xaf(tmp_path, _RECV_BANK_BODY)
+    bad = AccountMatch(
+        code="1300",
+        xmlid="l10n_nl.a_recv",
+        name="Some current asset",
+        account_type="asset_current",  # wrong type, and...
+        reconcile=False,  # ...not reconcilable
+    )
+    result = transform(
+        ledger,
+        prefix="xaf",
+        account_matches={"1300": "l10n_nl.a_recv"},
+        match_meta={"1300": bad},
+    )
+    assert result.match_control_errors == ("1300",)
+    row = next(
+        r for r in result.account_matches.to_dicts() if r["account_id"] == "1300"
+    )
+    assert row["status"] == "control_mismatch"
+    assert row["target_account_type"] == "asset_current"
+
+
+def test_matched_type_mismatch_is_flagged(tmp_path: Path) -> None:
+    """A non-control account matched onto a different target type warns."""
+    from fluvo.auditfile.match import AccountMatch
+
+    ledger = _read_xaf(tmp_path, _RECV_BANK_BODY)
+    meta = {
+        "8000": AccountMatch("8000", "l10n_nl.sales", "Sales", "expense", False),
+    }
+    result = transform(
+        ledger,
+        prefix="xaf",
+        account_matches={"8000": "l10n_nl.sales"},
+        match_meta=meta,
+    )
+    assert result.match_type_mismatches == ("8000",)
+    assert result.match_control_errors == ()
+
+
+def test_match_collision_is_flagged(tmp_path: Path) -> None:
+    """A code present in the target but unmatchable must not be re-created."""
+    ledger = _read_xaf(tmp_path, _RECV_BANK_BODY)
+    result = transform(
+        ledger,
+        prefix="xaf",
+        match_collisions={"1300": "ambiguous"},
+    )
+    assert result.collision_accounts == ("1300",)
+
+
+def test_open_sale_journal_override(tmp_path: Path) -> None:
+    """A source sale journal can be reused instead of staging a new one."""
+    result = transform(
+        _ledger(tmp_path, "3.2"),
+        prefix="xaf",
+        mode=MODE_CUTOVER,
+        open_sale_journal="VRK",
+    )
+    inv = next(r for r in result.open_invoices.to_dicts() if r["ref"] == "2023-900")
+    assert inv["journal_id/id"] == "xaf.journal_VRK"
+    # The dedicated sale journal is not staged when overridden...
+    assert "xaf.journal__opening_sale" not in result.journals.get_column("id").to_list()
+    # ...but the purchase one still is (not overridden).
+    assert "xaf.journal__opening_purchase" in result.journals.get_column("id").to_list()
 
 
 def test_transform_is_deterministic(tmp_path: Path) -> None:
