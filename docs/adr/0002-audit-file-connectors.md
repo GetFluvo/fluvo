@@ -97,38 +97,38 @@ do **not** vendor the XSDs; the reader validates structurally from its own code.
 Readers verify element paths against the official schemas during development and
 record the corrections in the pull request, but ship no copied schema file.
 
-### Proposed: matching an existing chart
+### Matching an existing chart
 
-**Status: proposed, not implemented.** Today the transform *creates* every
-account it finds, keyed by code. That is correct for a company set up empty, but
-a company that already has a localisation chart (for example `l10n_nl`) already
-owns those codes: creating them collides, and the file's accounts are never
-matched onto the existing ones. Spec item C.1 ("map to the existing Odoo account
-or create") is therefore only half-met, and the end-to-end test only exercises a
-chart-less database.
+By default the transform *creates* every account it finds, keyed by code — right
+for a company set up empty. A company that already has a localisation chart (for
+example `l10n_nl`) already owns those codes, so spec item C.1 ("map to the
+existing Odoo account or create") needs the file's accounts **matched** onto the
+existing ones. The connector does this two ways, which combine:
 
-The proposed design, to be built and validated on a charted database before it
-is enabled:
+- `stage --match-accounts` reads the target company's `account.account` codes
+  over `--connection-file` (read-only, the only time `stage` talks to Odoo) and,
+  for each file account whose code already exists, references the existing record
+  by its external id instead of creating one (`fluvo.auditfile.match`). The RPC
+  read lives in the CLI; `stage` itself stays a pure, offline compiler.
+- An optional `target_xmlid` column in `account_map.csv` pins the mapping by
+  hand, with no live connection; a filled value wins.
 
-- A new `stage --match-accounts` mode that, given a connection, reads the target
-  company's `account.account` codes over RPC (read-only, during stage) and, for
-  each file account whose code already exists, emits a **reference** to the
-  existing record (by its external id, or by an `xmlid`/`id` resolved from the
-  code) instead of a create. Accounts with no match are still created, and
-  preflight reports the split ("N matched, M to create") so it is reviewable
-  before load.
-- Equivalently, an optional `target_xmlid` column in `account_map.csv`, so the
-  mapping can be pinned and reviewed in the file the user already edits, without
-  a live connection at stage time.
-- The same question exists in principle for journals and for taxes; accounts are
-  the blocking case and are addressed first.
-- A second end-to-end scenario on a database with `l10n_nl` installed, asserting
-  that staging matches the existing chart rather than colliding, is part of the
-  acceptance for this work.
+Matched accounts are omitted from `accounts.csv` and every move/opening line
+references the existing external id; the match count is reported.
 
-This is deliberately left as a proposal here rather than built, because the
-matching rules (code normalisation, what to do on a type mismatch between the
-file and the existing account, multi-company charts) want a design review first.
+Decisions taken (the rules the proposal flagged for review):
+
+- **Matched accounts are referenced, never modified.** The connector does not
+  write the name, type or any field of an account that already exists, so it
+  cannot corrupt an installed chart. (The alternative — binding the external id
+  and updating fields — was rejected as too destructive.)
+- **Only an unambiguous, externally-identified code matches.** A code that
+  appears on several accounts (e.g. per company) or an account with no external
+  id is left unmatched and created, rather than guessed.
+- **Accounts only.** The same question exists for journals and taxes; accounts
+  were the blocking case. Journals/taxes matching can follow the same shape.
+- **Bank accounts** read from the party now stage as `res.partner.bank` rows,
+  rather than being dropped.
 
 ### Open core / premium line
 
@@ -162,9 +162,10 @@ assurance profile is what proves, to an auditor's standard, that it landed right
   integer minor units; balances tie to the cent, and a file whose own rounding
   drifts further is flagged, not absorbed. Moving to integer cents is a possible
   future change, noted here as the known trade-off.
-- **A pre-charted target is not yet supported** (see *Proposed: matching an
-  existing chart*). The connector creates accounts by code, which collides with
-  an installed localisation chart; matching is designed but not built.
+- **A pre-charted target is supported** via `--match-accounts` / `target_xmlid`
+  (see *Matching an existing chart*): existing accounts are referenced, never
+  modified, so an installed localisation chart is safe. Matching journals and
+  taxes the same way is future work.
 - The post/reconcile step still wants validation against a real `l10n_nl` stack
   before production sign-off — tracked with the end-to-end work. Cutover's
   opening-balance semantics are now fixed (the closing position at period end).

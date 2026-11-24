@@ -53,7 +53,8 @@ This writes, into `./stage`:
 | File | What it is |
 |------|------------|
 | `partners.csv` | `res.partner` rows (deduplicated) |
-| `accounts.csv` | `account.account` rows |
+| `partner_banks.csv` | `res.partner.bank` rows (one per partner with a bank) |
+| `accounts.csv` | `account.account` rows (only those to **create**) |
 | `journals.csv` | `account.journal` rows |
 | `moves.csv` | `account.move` rows (draft), with their lines |
 | `account_map.csv` | the **editable** account-typing proposals |
@@ -133,9 +134,9 @@ resolve through it. Pass `--no-dedup` to keep every source record as its own
 partner.
 
 The partner **country** is staged (resolved to its Odoo external id, e.g.
-`base.nl`). A partner **bank account** is captured in the canonical model but is
-not written to `res.partner` here — staging bank details needs the accounting
-bank model, which is out of scope for this connector.
+`base.nl`), and a partner **bank account** becomes a `res.partner.bank` row
+(`partner_banks.csv`), loaded as its own step after the partners. The bank step
+is omitted when no partner carries an account.
 
 ## Step 3 — choose a mode
 
@@ -165,7 +166,8 @@ Loading is the ordinary flow runner, pointed at the generated flow:
 fluvo --flow-file ./stage/flows.yml
 ```
 
-The flow loads **partners → accounts → journals → moves** in that order. The
+The flow loads **partners → partner banks → accounts → journals → moves** in
+that order (the bank step is present only when there are banks to load). The
 moves step uses Odoo's one-to-many load format (`--o2m`) so each move and its
 lines are created together. Because every record carries a deterministic
 external id, a second run **updates** rather than duplicates — re-running a
@@ -198,17 +200,34 @@ by more than a cent per move is surfaced by preflight rather than absorbed.
 
 ## Targeting a company that already has a chart of accounts
 
-Today the connector **creates** the accounts it finds, keyed by code. That fits a
-company set up empty (the end-to-end test installs only the `account` module and
-lets the import create the chart). On a target that already has a localisation
-chart installed (for example `l10n_nl`), creating an account with an existing
-code collides, and nothing yet matches the file's accounts onto the chart's
-existing accounts. Importing into a pre-charted company is therefore **not
-supported yet**; the design for it (resolving existing accounts by code over RPC,
-and/or a target-external-id column in `account_map.csv`) is proposed in
-[ADR 0002](../adr/0002-audit-file-connectors.md), under *Proposed: matching an
-existing chart*, and will land with an end-to-end test on a charted database
-before it is enabled.
+By default the connector **creates** the accounts it finds, keyed by code. That
+fits a company set up empty. On a target that already has a localisation chart
+(for example `l10n_nl`), you instead want the file's accounts **matched** onto
+the accounts already there, not re-created. Two ways, which combine:
+
+- **`--match-accounts`** reads the target chart over `--connection-file` and, for
+  each file account whose code already exists, references the existing account
+  instead of creating one:
+
+  ```bash
+  fluvo auditfile stage company-2024.xaf --out ./stage \
+      --connection-file prod.conf --match-accounts
+  ```
+
+  Only codes that are **unique** in the target and already carry an external id
+  are matched; an ambiguous code (the same code on several accounts) or one with
+  no external id is left unmatched and the account is created as usual. Matched
+  accounts are **referenced, never modified** — the connector does not touch the
+  name, type or any other field of an account that already exists. The reads are
+  the only time `stage` talks to Odoo, and it only reads.
+
+- **`target_xmlid` in `account_map.csv`** pins an account onto an existing
+  external id by hand, with no live connection — useful to review or override
+  the matches in the file you already edit. A filled `target_xmlid` wins.
+
+Matched accounts are left out of `accounts.csv` (nothing to create) and every
+move and opening line references the existing account's external id. `stage`
+reports how many accounts were matched versus created.
 
 ## What XAF cannot give you
 
