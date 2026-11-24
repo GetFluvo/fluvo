@@ -87,6 +87,15 @@ HEADER_SCHEMA: Final[dict[str, type[pl.DataType]]] = {
     "currency": pl.String,
     "software": pl.String,  # producing software, nullable
     "software_version": pl.String,  # nullable
+    # The file's own control totals, as declared in its block headers, for a
+    # cheap completeness tie-out against what we actually parsed. Nullable: a
+    # format (or a file) that does not carry them leaves these None.
+    "declared_opening_count": pl.Int64,  # openingBalance/linesCount
+    "declared_opening_debit": pl.Float64,  # openingBalance/totalDebit
+    "declared_opening_credit": pl.Float64,  # openingBalance/totalCredit
+    "declared_tx_count": pl.Int64,  # transactions/linesCount
+    "declared_tx_debit": pl.Float64,  # transactions/totalDebit
+    "declared_tx_credit": pl.Float64,  # transactions/totalCredit
 }
 
 #: General-ledger accounts (the chart of accounts).
@@ -137,9 +146,12 @@ LINES_SCHEMA: Final[dict[str, type[pl.DataType]]] = {
     "account_id": pl.String,
     "debit": pl.Float64,
     "credit": pl.Float64,
-    "doc_ref": pl.String,  # nullable
+    "doc_ref": pl.String,  # nullable; the line's own document reference
+    "invoice_ref": pl.String,  # nullable; the invoice this line settles/raises
+    "match_ref": pl.String,  # nullable; an explicit reconciliation key, if any
     "effective_date": pl.Date,  # nullable
     "source_partner_id": pl.String,  # nullable
+    "currency": pl.String,  # nullable; the line's own currency when not the file's
     "vat_code": pl.String,  # nullable
     "vat_amount": pl.Float64,  # nullable
     "description": pl.String,  # nullable
@@ -152,6 +164,8 @@ OPENING_LINES_SCHEMA: Final[dict[str, type[pl.DataType]]] = {
     "debit": pl.Float64,
     "credit": pl.Float64,
     "doc_ref": pl.String,  # nullable; present enables per-invoice open items
+    "invoice_ref": pl.String,  # nullable; the open invoice reference
+    "match_ref": pl.String,  # nullable; an explicit reconciliation key, if any
     "date": pl.Date,  # nullable
 }
 
@@ -161,6 +175,15 @@ VAT_CODES_SCHEMA: Final[dict[str, type[pl.DataType]]] = {
     "description": pl.String,  # nullable
     "rate": pl.Float64,  # percentage, nullable
     "account_id": pl.String,  # nullable
+}
+
+#: Values the reader could not parse (a present-but-malformed amount or date),
+#: recorded rather than silently coerced to zero/None, so preflight can surface
+#: them with samples. One row per offending cell.
+ANOMALIES_SCHEMA: Final[dict[str, type[pl.DataType]]] = {
+    "kind": pl.String,  # what failed, e.g. "amount" or "date"
+    "location": pl.String,  # where, e.g. "trLine VK/1 line 2 amnt"
+    "raw_value": pl.String,  # the offending text, verbatim
 }
 
 #: Frame name -> schema, in load order (partners/accounts/journals before
@@ -174,6 +197,7 @@ SCHEMAS: Final[dict[str, dict[str, type[pl.DataType]]]] = {
     "lines": LINES_SCHEMA,
     "opening_lines": OPENING_LINES_SCHEMA,
     "vat_codes": VAT_CODES_SCHEMA,
+    "anomalies": ANOMALIES_SCHEMA,
 }
 
 
@@ -206,6 +230,7 @@ class CanonicalLedger:
         lines: Transaction lines (:data:`LINES_SCHEMA`).
         opening_lines: Opening balances (:data:`OPENING_LINES_SCHEMA`).
         vat_codes: VAT/tax codes (:data:`VAT_CODES_SCHEMA`).
+        anomalies: Cells the reader could not parse (:data:`ANOMALIES_SCHEMA`).
     """
 
     header: pl.DataFrame
@@ -216,6 +241,7 @@ class CanonicalLedger:
     lines: pl.DataFrame
     opening_lines: pl.DataFrame
     vat_codes: pl.DataFrame
+    anomalies: pl.DataFrame
 
     def validate(self) -> None:
         """Check every frame carries exactly its declared columns.
@@ -278,10 +304,12 @@ class LedgerSummary:
         date_start: Period start, as text (``None`` if absent).
         date_end: Period end, as text (``None`` if absent).
         currency: The file's currency code.
-        counts: Row count per frame, keyed by frame name.
+        counts: Row count per frame, keyed by frame name (excluding the
+            internal ``anomalies`` frame, surfaced separately).
         total_debit: Sum of all line debits.
         total_credit: Sum of all line credits.
         unbalanced_moves: How many moves fail the debit==credit tolerance.
+        parse_anomalies: How many source cells could not be parsed.
     """
 
     source_format: str | None
@@ -297,6 +325,7 @@ class LedgerSummary:
     total_debit: float
     total_credit: float
     unbalanced_moves: int
+    parse_anomalies: int = 0
 
     @property
     def balanced(self) -> bool:
@@ -352,7 +381,7 @@ def summarise(ledger: CanonicalLedger) -> LedgerSummary:
     counts = {
         spec.name: int(getattr(ledger, spec.name).height)
         for spec in fields(ledger)
-        if spec.name != "header"
+        if spec.name not in ("header", "anomalies")
     }
     lines = ledger.lines
     total_debit = float(lines.get_column("debit").sum() or 0.0) if lines.height else 0.0
@@ -373,4 +402,5 @@ def summarise(ledger: CanonicalLedger) -> LedgerSummary:
         total_debit=total_debit,
         total_credit=total_credit,
         unbalanced_moves=int(unbalanced_moves(lines).height),
+        parse_anomalies=int(ledger.anomalies.height),
     )

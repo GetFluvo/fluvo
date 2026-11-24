@@ -136,26 +136,41 @@ def _namespace(tag: object) -> str:
     return ""
 
 
-def _version_of(tag: object) -> str | None:
-    """Map a root-element tag to an XAF version, or None if not XAF.
+def _is_auditfile_root(tag: object) -> bool:
+    """Report whether a root-element tag is an XAF ``auditfile`` root.
 
     Args:
         tag: The root element's tag.
 
     Returns:
-        str | None: ``"3.2"``, ``"4.0"``, or None when the element is not an
-        XAF ``auditfile`` root.
+        bool: True for any ``auditfile`` root, regardless of version.
     """
-    if _local(tag) != "auditfile":
+    return _local(tag) == "auditfile"
+
+
+def _version_of(tag: object) -> str | None:
+    """Map a root-element tag to a *supported* XAF version, or None.
+
+    Only the two versions this reader is verified against are recognised. An
+    ``auditfile`` root in any other namespace (3.1, 3.0, 2.0, or a future
+    revision) returns None so the reader can refuse it explicitly rather than
+    mis-parse it as 4.0.
+
+    Args:
+        tag: The root element's tag.
+
+    Returns:
+        str | None: ``"3.2"`` or ``"4.0"``; None when the element is not an XAF
+        root or is an unsupported XAF version.
+    """
+    if not _is_auditfile_root(tag):
         return None
     ns = _namespace(tag)
     if _NS_32 in ns:
         return "3.2"
-    if _NS_40 in ns or "belastingdienst" in ns.lower():
+    if _NS_40 in ns:
         return "4.0"
-    # An auditfile root in an unexpected namespace is still almost certainly XAF
-    # (the local structure is identical); default to the current version.
-    return "4.0"
+    return None
 
 
 def _txt(elem: etree._Element) -> str | None:
@@ -244,20 +259,65 @@ def _date(text: str | None) -> date | None:
         return None
 
 
-def _split_amount(amnt: str | None, amnt_tp: str | None) -> tuple[float, float]:
-    """Split an amount + D/C type into (debit, credit).
+def _match_key(values: dict[str, str | None]) -> str | None:
+    """Pick a line's explicit reconciliation key from its parsed fields.
+
+    4.0 may carry ``matchKeyID``; 3.2 may carry ``recRef``. Either is an
+    explicit matching key that takes precedence over an invoice or document
+    reference when netting open items.
 
     Args:
-        amnt: The amount text.
-        amnt_tp: The amount type, ``"D"`` (debit) or ``"C"`` (credit).
+        values: The parsed ``trLine``/``obSbLine`` child values.
+
+    Returns:
+        str | None: The explicit key, or None when the line carries neither.
+    """
+    return values.get("matchKeyID") or values.get("recRef")
+
+
+def _amount(
+    state: _State, raw: str | None, raw_tp: str | None, location: str
+) -> tuple[float, float]:
+    """Parse an amount + D/C type, recording a present-but-bad value.
+
+    A missing amount is a legitimate zero; an amount that is present but does
+    not parse (e.g. ``"1,5"``) is an anomaly recorded against ``location`` so
+    preflight can surface it, never silently coerced away.
+
+    Args:
+        state: The running parse state (for the anomaly accumulator).
+        raw: The amount text.
+        raw_tp: The amount type, ``"D"`` (debit) or ``"C"`` (credit).
+        location: A human pointer to the offending cell, for the report.
 
     Returns:
         tuple[float, float]: ``(debit, credit)``; the unused side is 0.0.
     """
-    value = _money(amnt) or 0.0
-    if (amnt_tp or "").upper() == "C":
+    value = _money(raw)
+    if value is None:
+        if raw:
+            state.anomalies.add(kind="amount", location=location, raw_value=raw)
+        value = 0.0
+    if (raw_tp or "").upper() == "C":
         return 0.0, value
     return value, 0.0
+
+
+def _tracked_date(state: _State, raw: str | None, location: str) -> date | None:
+    """Parse a date, recording a present-but-malformed value as an anomaly.
+
+    Args:
+        state: The running parse state (for the anomaly accumulator).
+        raw: The date text.
+        location: A human pointer to the offending cell, for the report.
+
+    Returns:
+        date | None: The parsed date, or None (missing or recorded as bad).
+    """
+    parsed = _date(raw)
+    if parsed is None and raw:
+        state.anomalies.add(kind="date", location=location, raw_value=raw)
+    return parsed
 
 
 class _Acc:
@@ -309,8 +369,21 @@ class _Acc:
         return pl.concat(self._chunks)
 
 
-#: ``trLine`` child field names read on the hot path.
-_LINE_FIELDS = ("accID", "amnt", "amntTp", "docRef", "effDate", "custSupID", "desc")
+#: ``trLine`` child field names read on the hot path. ``invRef`` names the
+#: invoice a line raises or settles; ``matchKeyID``/``recRef`` are explicit
+#: reconciliation keys (used to net payments against invoices before docRef).
+_LINE_FIELDS = (
+    "accID",
+    "amnt",
+    "amntTp",
+    "docRef",
+    "invRef",
+    "matchKeyID",
+    "recRef",
+    "effDate",
+    "custSupID",
+    "desc",
+)
 
 #: ``transaction`` header field names read on the hot path.
 _TX_FIELDS = ("nr", "desc", "periodNumber", "trDt")
@@ -351,14 +424,21 @@ class _State:
         self.lines = _Acc(SCHEMAS["lines"])
         self.opening = _Acc(SCHEMAS["opening_lines"])
         self.vat_codes = _Acc(SCHEMAS["vat_codes"])
+        self.anomalies = _Acc(SCHEMAS["anomalies"])
         self.move_seq = 0
         self.q_trline = "trLine"
         self.q_vat = "vat"
+        self.q_currency = "currency"
         self.q_jrnid = "jrnID"
         self.tx_fields: dict[str, str] = {name: name for name in _TX_FIELDS}
         self.line_fields: dict[str, str] = {name: name for name in _LINE_FIELDS}
         self._journal_el: etree._Element | None = None
         self._journal_id: str | None = None
+        #: Move keys already emitted, to disambiguate per-period number resets.
+        self.used_move_keys: set[str] = set()
+        #: ``obLine`` line number -> its GL account, so a 3.2 ``obSbLine`` (which
+        #: carries no account of its own) resolves to its control account.
+        self.ob_line_accounts: dict[str, str] = {}
 
     def configure(self, ns: str) -> None:
         """Precompute namespace-qualified tag lookups for the hot path.
@@ -368,6 +448,7 @@ class _State:
         """
         self.q_trline = _qualify(ns, "trLine")
         self.q_vat = _qualify(ns, "vat")
+        self.q_currency = _qualify(ns, "currency")
         self.q_jrnid = _qualify(ns, "jrnID")
         self.tx_fields = {_qualify(ns, name): name for name in _TX_FIELDS}
         self.line_fields = {_qualify(ns, name): name for name in _LINE_FIELDS}
@@ -396,15 +477,16 @@ class _State:
         return self._journal_id
 
 
-def _sniff_root(path: str) -> tuple[str | None, str]:
+def _sniff_root(path: str) -> tuple[str | None, str, bool]:
     """Read just the root element for the XAF version and namespace.
 
     Args:
         path: The file to sniff.
 
     Returns:
-        tuple[str | None, str]: ``(version, namespace)``; version is None when
-        the root is not an XAF file.
+        tuple[str | None, str, bool]: ``(version, namespace, is_auditfile)``;
+        version is None when the root is not an XAF file or is an unsupported
+        XAF version, which the trailing flag tells apart.
 
     Raises:
         SourceReadError: If the file cannot be parsed as XML.
@@ -413,12 +495,92 @@ def _sniff_root(path: str) -> tuple[str | None, str]:
 
     try:
         for _event, elem in etree.iterparse(path, events=("start",)):
-            return _version_of(elem.tag), _namespace(elem.tag)
+            return (
+                _version_of(elem.tag),
+                _namespace(elem.tag),
+                _is_auditfile_root(elem.tag),
+            )
     except etree.XMLSyntaxError as exc:
         raise SourceReadError(f"malformed XAF file '{path}': {exc}") from exc
     except OSError as exc:
         raise SourceReadError(f"could not read XAF file '{path}': {exc}") from exc
-    return None, ""
+    return None, "", False
+
+
+def _as_int(text: str | None) -> int | None:
+    """Parse a non-negative integer count, leniently.
+
+    Args:
+        text: The raw count text.
+
+    Returns:
+        int | None: The value, or None when missing or unparseable.
+    """
+    if text is None:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+#: ``(local parent name, header key prefix)`` pairs whose ``linesCount`` /
+#: ``totalDebit`` / ``totalCredit`` children are the file's declared control
+#: totals. The subledger blocks roll up into the opening block, so only the two
+#: top-level blocks are tied out.
+_CONTROL_BLOCKS = {"openingBalance": "opening", "transactions": "tx"}
+
+
+def _read_control_totals(path: str, state: _State) -> None:
+    """Capture the file's declared control totals from its block headers.
+
+    ``openingBalance`` and ``transactions`` each declare a ``linesCount`` and
+    ``totalDebit``/``totalCredit`` before their bodies. Reading them lets
+    preflight tie the parse out against the file's own numbers — the cheapest
+    proof the parse is complete. The scan reads only the file's prologue (it
+    stops at the first transaction line), so it costs a few KB, not a second
+    full pass.
+
+    Args:
+        path: The XAF file.
+        state: The parse state whose ``header`` the totals are written into.
+    """
+    try:
+        for _event, elem in etree.iterparse(path, events=("end",)):
+            name = _local(elem.tag)
+            if name in ("linesCount", "totalDebit", "totalCredit"):
+                parent = elem.getparent()
+                prefix = _CONTROL_BLOCKS.get(
+                    _local(parent.tag) if parent is not None else ""
+                )
+                if prefix is not None:
+                    _store_control_total(state, prefix, name, _txt(elem))
+            elif name in ("trLine", "transaction"):
+                return  # the transactions totals precede the first line
+            elem.clear()
+    except (etree.XMLSyntaxError, OSError):
+        return  # totals are a best-effort tie-out; the main parse reports read errors
+
+
+def _store_control_total(
+    state: _State, prefix: str, name: str, text: str | None
+) -> None:
+    """Record one declared control total into the header, if not already set.
+
+    Args:
+        state: The parse state.
+        prefix: ``"opening"`` or ``"tx"``.
+        name: ``"linesCount"``, ``"totalDebit"`` or ``"totalCredit"``.
+        text: The raw value text.
+    """
+    key = {
+        "linesCount": f"declared_{prefix}_count",
+        "totalDebit": f"declared_{prefix}_debit",
+        "totalCredit": f"declared_{prefix}_credit",
+    }[name]
+    if state.header.get(key) is not None:
+        return
+    state.header[key] = _as_int(text) if name == "linesCount" else _money(text)
 
 
 class XafReader:
@@ -433,11 +595,13 @@ class XafReader:
             path: The candidate file.
 
         Returns:
-            bool: True if the root element is an XAF ``auditfile``.
+            bool: True if the root element is an XAF ``auditfile`` (any
+            version), so the reader is selected and can report an unsupported
+            version precisely rather than the file going unrecognised.
         """
         try:
             for _event, elem in etree.iterparse(path, events=("start",)):
-                return _version_of(elem.tag) is not None
+                return _is_auditfile_root(elem.tag)
         except (etree.XMLSyntaxError, OSError):
             return False
         return False
@@ -457,9 +621,17 @@ class XafReader:
         from ...lib.core import SourceReadError
 
         state = _State()
-        version, ns = _sniff_root(path)
+        version, ns, is_auditfile = _sniff_root(path)
+        if version is None:
+            if is_auditfile:
+                raise SourceReadError(
+                    f"unsupported XAF version in '{path}' (namespace {ns!r}); "
+                    "this reader supports XAF 3.2 and 4.0 only."
+                )
+            raise SourceReadError(f"'{path}' is not an XAF audit file.")
         state.header["source_version"] = version
         state.configure(ns)
+        _read_control_totals(path, state)
         try:
             context = etree.iterparse(path, events=("end",), tag=_WANTED_TAGS)
             for _event, elem in context:
@@ -495,10 +667,10 @@ def _handle(state: _State, elem: etree._Element) -> None:
         _read_vat(state.vat_codes, elem)
         elem.clear()
     elif name == "obLine":
-        _read_opening_gl(state.opening, elem)
+        _read_opening_gl(state, elem)
         elem.clear()
     elif name == "obSbLine":
-        _read_opening_subledger(state.opening, elem)
+        _read_opening_subledger(state, elem)
         elem.clear()
     elif name == "transaction":
         state.move_seq += 1
@@ -616,43 +788,69 @@ def _read_vat(acc: _Acc, elem: etree._Element) -> None:
     )
 
 
-def _read_opening_gl(acc: _Acc, elem: etree._Element) -> None:
+def _read_opening_gl(state: _State, elem: etree._Element) -> None:
     """Append a GL-account opening balance (``obLine``).
 
+    Also records the line's ``nr`` → account mapping, so a 3.2 ``obSbLine`` that
+    references this line by ``obLineNr`` can resolve its control account.
+
     Args:
-        acc: The opening_lines accumulator.
+        state: The running parse state.
         elem: An ``obLine`` element.
     """
-    debit, credit = _split_amount(_text(elem, "amnt"), _text(elem, "amntTp"))
-    acc.add(
-        account_id=_text(elem, "accID"),
+    account_id = _text(elem, "accID")
+    nr = _text(elem, "nr")
+    if nr and account_id:
+        state.ob_line_accounts[nr] = account_id
+    debit, credit = _amount(
+        state, _text(elem, "amnt"), _text(elem, "amntTp"), f"obLine {account_id} amnt"
+    )
+    state.opening.add(
+        account_id=account_id,
         source_partner_id=None,
         debit=debit,
         credit=credit,
         doc_ref=None,
+        invoice_ref=None,
+        match_ref=None,
         date=None,
     )
 
 
-def _read_opening_subledger(acc: _Acc, elem: etree._Element) -> None:
+def _read_opening_subledger(state: _State, elem: etree._Element) -> None:
     """Append a per-debtor/creditor opening item (3.2 ``obSbLine``).
 
-    These carry the open invoices at cutover: a ``custSupID`` and an invoice
-    reference, but no GL account (the control account sits on the enclosing
-    subledger), so ``account_id`` is left blank for the transform to resolve.
+    These carry the invoices still open at the start of the year: a
+    ``custSupID`` and an invoice reference. The item has no account of its own
+    (the control account sits on the enclosing ``obLine``), so it is resolved
+    via ``obLineNr``; a reference that does not resolve leaves ``account_id``
+    blank for preflight to flag rather than guessing.
 
     Args:
-        acc: The opening_lines accumulator.
+        state: The running parse state.
         elem: An ``obSbLine`` element.
     """
-    debit, credit = _split_amount(_text(elem, "amnt"), _text(elem, "amntTp"))
-    acc.add(
-        account_id="",
-        source_partner_id=_text(elem, "custSupID"),
+    partner = _text(elem, "custSupID")
+    ob_line_nr = _text(elem, "obLineNr")
+    account_id = state.ob_line_accounts.get(ob_line_nr or "", "")
+    inv_ref = _text(elem, "invRef")
+    debit, credit = _amount(
+        state,
+        _text(elem, "amnt"),
+        _text(elem, "amntTp"),
+        f"obSbLine {partner or '?'}/{inv_ref or '?'} amnt",
+    )
+    state.opening.add(
+        account_id=account_id,
+        source_partner_id=partner,
         debit=debit,
         credit=credit,
-        doc_ref=_text(elem, "invRef") or _text(elem, "docRef"),
-        date=_date(_text(elem, "invDt")),
+        doc_ref=_text(elem, "docRef"),
+        invoice_ref=inv_ref,
+        match_ref=_text(elem, "matchKeyID") or _text(elem, "recRef"),
+        date=_tracked_date(
+            state, _text(elem, "invDt"), f"obSbLine {partner or '?'} invDt"
+        ),
     )
 
 
@@ -691,19 +889,50 @@ def _read_transaction(state: _State, elem: etree._Element) -> None:
             if field is not None:
                 header[field] = _txt(child)
     number = header.get("nr") or f"t{state.move_seq}"
-    move_key = f"{journal_id or 'J'}/{number}"
+    period = header.get("periodNumber")
+    move_key = _unique_move_key(state, journal_id, number, period)
     state.moves.add(
         move_key=move_key,
         journal_id=journal_id,
         number=number,
         description=header.get("desc"),
-        date=_date(header.get("trDt")),
+        date=_tracked_date(state, header.get("trDt"), f"transaction {move_key} trDt"),
         doc_ref=None,
         source_partner_id=None,
-        period=header.get("periodNumber"),
+        period=period,
     )
     for index, child in enumerate(trlines, start=1):
         _read_trline(state, child, move_key, index)
+
+
+def _unique_move_key(
+    state: _State, journal_id: str | None, number: str, period: str | None
+) -> str:
+    """Return a move key unique within the file, disambiguating number resets.
+
+    Transaction numbers are only unique within a journal *and period*: many
+    systems restart numbering each period, so ``journal/number`` collides. The
+    base key is used when free; a collision falls back to adding the period,
+    then the globally-unique parse sequence, so the result is deterministic for
+    a given file and never merges two distinct transactions into one move.
+
+    Args:
+        state: The running parse state (holds the keys already used).
+        journal_id: The enclosing journal id.
+        number: The transaction number.
+        period: The transaction's period number, if any.
+
+    Returns:
+        str: A move key not yet used in this file.
+    """
+    base = f"{journal_id or 'J'}/{number}"
+    candidates = [base]
+    if period:
+        candidates.append(f"{base}/P{period}")
+    candidates.append(f"{base}#{state.move_seq}")
+    key = next(c for c in candidates if c not in state.used_move_keys)
+    state.used_move_keys.add(key)
+    return key
 
 
 def _read_trline(
@@ -719,17 +948,26 @@ def _read_trline(
     """
     line_fields = state.line_fields
     q_vat = state.q_vat
+    q_currency = state.q_currency
     values: dict[str, str | None] = {}
     vat_elem: etree._Element | None = None
+    currency_elem: etree._Element | None = None
     for child in elem:
         tag = child.tag
         if tag == q_vat:
             vat_elem = child
+        elif tag == q_currency:
+            currency_elem = child
         else:
             field = line_fields.get(tag)
             if field is not None:
                 values[field] = _txt(child)
-    debit, credit = _split_amount(values.get("amnt"), values.get("amntTp"))
+    debit, credit = _amount(
+        state,
+        values.get("amnt"),
+        values.get("amntTp"),
+        f"trLine {move_key} line {line_number} amnt",
+    )
     state.lines.add(
         move_key=move_key,
         line_number=line_number,
@@ -737,8 +975,15 @@ def _read_trline(
         debit=debit,
         credit=credit,
         doc_ref=values.get("docRef"),
-        effective_date=_date(values.get("effDate")),
+        invoice_ref=values.get("invRef"),
+        match_ref=_match_key(values),
+        effective_date=_tracked_date(
+            state,
+            values.get("effDate"),
+            f"trLine {move_key} line {line_number} effDate",
+        ),
         source_partner_id=values.get("custSupID"),
+        currency=_text(currency_elem, "curCode"),
         vat_code=_text(vat_elem, "vatID"),
         vat_amount=_money(_text(vat_elem, "vatAmnt")),
         description=values.get("desc"),
@@ -782,6 +1027,7 @@ def _build_ledger(state: _State) -> CanonicalLedger:
         lines=state.lines.build(),
         opening_lines=state.opening.build(),
         vat_codes=state.vat_codes.build(),
+        anomalies=state.anomalies.build(),
     )
 
 

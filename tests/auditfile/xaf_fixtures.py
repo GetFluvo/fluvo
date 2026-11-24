@@ -217,13 +217,20 @@ def _write_opening(handle: TextIO, version: str) -> tuple[int, int]:
     handle.write("<openingBalance>")
     if version == "3.2":
         _tag(handle, "opBalDate", "2024-01-01")
-    _tag(handle, "linesCount", "2")
-    _tag(handle, "totalDebit", "5000.00")
-    _tag(handle, "totalCredit", "5000.00")
-    gl = (("1100", "5000.00", "D"), ("0500", "5000.00", "C"))
-    for acc, amnt, tp in gl:
+    # A realistic, balanced opening: bank + a receivable control balance against
+    # equity. The 1300 line (nr 2) is the control account the 3.2 subledger item
+    # below resolves to via obLineNr.
+    _tag(handle, "linesCount", "3")
+    _tag(handle, "totalDebit", "6210.00")
+    _tag(handle, "totalCredit", "6210.00")
+    gl = (
+        ("1", "1100", "5000.00", "D"),
+        ("2", "1300", "1210.00", "D"),
+        ("3", "0500", "6210.00", "C"),
+    )
+    for nr, acc, amnt, tp in gl:
         handle.write("<obLine>")
-        _tag(handle, "nr", acc)
+        _tag(handle, "nr", nr)
         _tag(handle, "accID", acc)
         _tag(handle, "amnt", amnt)
         _tag(handle, "amntTp", tp)
@@ -232,8 +239,11 @@ def _write_opening(handle: TextIO, version: str) -> tuple[int, int]:
     if version == "3.2":
         handle.write("<obSubledgers><obSubledger>")
         _tag(handle, "sbType", "CU")
-        for cust, amnt, inv in (("C001", "1210.00", "2023-900"),):
+        # The receivable control balance (1300, obLine nr 2) broken out per open
+        # invoice; it ties to the GL opening line above.
+        for cust, line_nr, amnt, inv in (("C001", "2", "1210.00", "2023-900"),):
             handle.write("<obSbLine>")
+            _tag(handle, "obLineNr", line_nr)
             _tag(handle, "custSupID", cust)
             _tag(handle, "amnt", amnt)
             _tag(handle, "amntTp", "D")
@@ -263,7 +273,15 @@ def _write_transactions(
     journal_types = ("S", "P", "B", "C", "M")
     n_moves = 0
     total = 0.0
+    # Pre-compute the block's declared control totals (each move is two lines
+    # totalling 100 + its 1-based index on each side), so the file carries the
+    # linesCount/totalDebit/totalCredit the reader ties the parse out against.
+    expected_moves = n_journals * tx_per_journal
+    declared_total = sum(100.0 + n for n in range(1, expected_moves + 1))
     handle.write("<transactions>")
+    _tag(handle, "linesCount", str(expected_moves * 2))
+    _tag(handle, "totalDebit", f"{declared_total:.2f}")
+    _tag(handle, "totalCredit", f"{declared_total:.2f}")
     for j in range(n_journals):
         jrn_tp = journal_types[j % len(journal_types)]
         handle.write("<journal>")

@@ -108,7 +108,7 @@ def test_subledger_open_item_only_in_3_2(tmp_path: Path) -> None:
     o40 = read_auditfile(str(p40)).opening_lines
     sub = o32.filter(o32["source_partner_id"].is_not_null())
     assert sub.height == 1
-    assert sub["doc_ref"].item(0) == "2023-900"
+    assert sub["invoice_ref"].item(0) == "2023-900"
     assert o40.filter(o40["source_partner_id"].is_not_null()).height == 0
 
 
@@ -246,6 +246,155 @@ def test_broken_plugin_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
     finally:
         formats._READERS[:] = saved
         formats._external_loaded = saved_loaded
+
+
+_NS32 = "http://www.auditfiles.nl/XAF/3.2"
+
+
+def _write_xaf(path: Path, body: str, *, ns: str = _NS32) -> str:
+    """Write a minimal XAF document wrapping ``body`` and return its path.
+
+    Args:
+        path: Where to write the file.
+        body: The XML placed inside ``<company>…</company>``.
+        ns: The root namespace (defaults to 3.2).
+
+    Returns:
+        str: The written path as a string.
+    """
+    path.write_text(
+        f'<?xml version="1.0"?><auditfile xmlns="{ns}"><header/>'
+        f"<company><companyName>X</companyName>{body}</company></auditfile>",
+        encoding="utf-8",
+    )
+    return str(path)
+
+
+def test_opening_subledger_resolves_control_account(tmp_path: Path) -> None:
+    """A 3.2 obSbLine resolves its control account via obLineNr → obLine."""
+    path = _write_xaf(
+        tmp_path / "ob.xaf",
+        "<generalLedger>"
+        "<ledgerAccount><accID>1300</accID><accDesc>Deb</accDesc><accTp>B</accTp>"
+        "</ledgerAccount></generalLedger>"
+        "<openingBalance><opBalDate>2025-01-01</opBalDate>"
+        "<obLine><nr>7</nr><accID>1300</accID><amnt>500.00</amnt><amntTp>D</amntTp>"
+        "</obLine>"
+        "<obSubledgers><obSubledger><sbType>CU</sbType>"
+        "<obSbLine><obLineNr>7</obLineNr><custSupID>C1</custSupID>"
+        "<amnt>500.00</amnt><amntTp>D</amntTp><invRef>INV-9</invRef></obSbLine>"
+        "</obSubledger></obSubledgers></openingBalance>",
+    )
+    opening = read_auditfile(path).opening_lines
+    sub = opening.filter(opening["source_partner_id"].is_not_null())
+    assert sub.height == 1
+    assert sub["account_id"].item(0) == "1300"
+    assert sub["invoice_ref"].item(0) == "INV-9"
+
+
+def test_trline_reads_invoice_and_match_refs(tmp_path: Path) -> None:
+    """Invoice (invRef) and explicit match key (matchKeyID) read onto the line."""
+    path = _write_xaf(
+        tmp_path / "m.xaf",
+        "<transactions><journal><jrnID>BNK</jrnID><jrnTp>B</jrnTp>"
+        "<transaction><nr>1</nr><trDt>2025-03-01</trDt>"
+        "<trLine><nr>1</nr><accID>1300</accID><amnt>50.00</amnt><amntTp>C</amntTp>"
+        "<docRef>BANK-07</docRef><invRef>INV1</invRef><matchKeyID>M42</matchKeyID>"
+        "</trLine></transaction></journal></transactions>",
+    )
+    line = read_auditfile(path).lines.row(0, named=True)
+    assert line["doc_ref"] == "BANK-07"
+    assert line["invoice_ref"] == "INV1"
+    assert line["match_ref"] == "M42"
+
+
+def test_duplicate_transaction_numbers_disambiguated(tmp_path: Path) -> None:
+    """Two transactions sharing journal+number become two distinct moves."""
+    one = (
+        "<transaction><nr>1</nr><periodNumber>{p}</periodNumber>"
+        "<trDt>2025-0{p}-05</trDt>"
+        "<trLine><nr>1</nr><accID>1300</accID><amnt>{a}</amnt><amntTp>D</amntTp>"
+        "</trLine>"
+        "<trLine><nr>2</nr><accID>8000</accID><amnt>{a}</amnt><amntTp>C</amntTp>"
+        "</trLine></transaction>"
+    )
+    path = _write_xaf(
+        tmp_path / "dup.xaf",
+        "<transactions><journal><jrnID>VK</jrnID><jrnTp>S</jrnTp>"
+        + one.format(p=1, a="100.00")
+        + one.format(p=2, a="200.00")
+        + "</journal></transactions>",
+    )
+    ledger = read_auditfile(path)
+    keys = ledger.moves.get_column("move_key").to_list()
+    assert ledger.moves.height == 2
+    assert len(set(keys)) == 2  # not merged into one move
+    assert ledger.lines.height == 4
+
+
+def test_unparseable_amount_recorded_not_dropped(tmp_path: Path) -> None:
+    """A present-but-bad amount (e.g. '1,5') is recorded as a parse anomaly."""
+    path = _write_xaf(
+        tmp_path / "bad.xaf",
+        "<transactions><journal><jrnID>BNK</jrnID><jrnTp>B</jrnTp>"
+        "<transaction><nr>1</nr><trDt>2025-04-15</trDt>"
+        "<trLine><nr>1</nr><accID>1100</accID><amnt>1,5</amnt><amntTp>D</amntTp>"
+        "</trLine></transaction></journal></transactions>",
+    )
+    ledger = read_auditfile(path)
+    anomalies = ledger.anomalies
+    assert anomalies.height == 1
+    assert anomalies["kind"].item(0) == "amount"
+    assert anomalies["raw_value"].item(0) == "1,5"
+    # The bad amount became 0.0 (not a phantom value), and was not dropped.
+    assert ledger.lines["debit"].item(0) == pytest.approx(0.0)
+
+
+def test_unsupported_xaf_version_rejected(tmp_path: Path) -> None:
+    """An auditfile root in an unsupported namespace is refused, not mis-read."""
+    path = tmp_path / "old.xaf"
+    path.write_text(
+        '<?xml version="1.0"?>'
+        '<auditfile xmlns="http://www.auditfiles.nl/XAF/3.1"><header/>'
+        "<company><companyName>X</companyName></company></auditfile>",
+        encoding="utf-8",
+    )
+    # Detected as XAF (so this reader owns it) but refused with a clear version error.
+    assert xaf.READER.detect(str(path)) is True
+    with pytest.raises(SourceReadError, match="unsupported XAF version"):
+        xaf.READER.read(str(path))
+
+
+def test_control_totals_captured(tmp_path: Path) -> None:
+    """The declared transactions-block control totals are read into the header."""
+    path = _write_xaf(
+        tmp_path / "ct.xaf",
+        "<transactions><linesCount>2</linesCount>"
+        "<totalDebit>100.00</totalDebit><totalCredit>100.00</totalCredit>"
+        "<journal><jrnID>VK</jrnID><jrnTp>S</jrnTp>"
+        "<transaction><nr>1</nr><trDt>2025-03-01</trDt>"
+        "<trLine><nr>1</nr><accID>1300</accID><amnt>100.00</amnt><amntTp>D</amntTp>"
+        "</trLine>"
+        "<trLine><nr>2</nr><accID>8000</accID><amnt>100.00</amnt><amntTp>C</amntTp>"
+        "</trLine></transaction></journal></transactions>",
+    )
+    header = read_auditfile(path).header
+    assert header["declared_tx_count"].item(0) == 2
+    assert header["declared_tx_debit"].item(0) == pytest.approx(100.0)
+
+
+def test_per_line_currency_read(tmp_path: Path) -> None:
+    """A trLine foreign-currency block's code is captured on the line."""
+    path = _write_xaf(
+        tmp_path / "fx.xaf",
+        "<transactions><journal><jrnID>BNK</jrnID><jrnTp>B</jrnTp>"
+        "<transaction><nr>1</nr><trDt>2025-03-01</trDt>"
+        "<trLine><nr>1</nr><accID>1100</accID><amnt>100.00</amnt><amntTp>D</amntTp>"
+        "<currency><curCode>USD</curCode><curAmnt>90.00</curAmnt></currency>"
+        "</trLine></transaction></journal></transactions>",
+    )
+    line = read_auditfile(path).lines.row(0, named=True)
+    assert line["currency"] == "USD"
 
 
 def test_unknown_account_type_is_unknown(tmp_path: Path) -> None:

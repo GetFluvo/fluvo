@@ -92,6 +92,12 @@ def render(summary: LedgerSummary, console: Console) -> None:
             parts.append(f"{summary.unbalanced_moves:,} unbalanced transaction(s)")
         console.print("[yellow]⚠ Not balanced[/yellow]  " + "  ·  ".join(parts))
 
+    if summary.parse_anomalies:
+        console.print(
+            f"[yellow]⚠ {summary.parse_anomalies:,} cell(s) could not be "
+            "parsed[/yellow]  ·  run `stage` to see the details in preflight"
+        )
+
 
 def run_inspect(
     path: str,

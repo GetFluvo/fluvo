@@ -49,6 +49,7 @@ def test_validate_rejects_wrong_columns() -> None:
         lines=ledger.lines,
         opening_lines=ledger.opening_lines,
         vat_codes=ledger.vat_codes,
+        anomalies=ledger.anomalies,
     )
     with pytest.raises(InputError, match="accounts"):
         broken.validate()
@@ -67,6 +68,7 @@ def test_validate_rejects_multi_row_header() -> None:
         lines=ledger.lines,
         opening_lines=ledger.opening_lines,
         vat_codes=ledger.vat_codes,
+        anomalies=ledger.anomalies,
     )
     with pytest.raises(InputError, match="one row"):
         broken.validate()
@@ -133,6 +135,7 @@ def test_summarise_counts_and_balance() -> None:
         ),
         opening_lines=ledger.opening_lines,
         vat_codes=ledger.vat_codes,
+        anomalies=ledger.anomalies,
     )
     summary = summarise(ledger)
     assert summary.company_name == "ACME"
@@ -157,6 +160,7 @@ def test_summarise_detects_imbalance() -> None:
         lines=_lines([{"move_key": "a", "debit": 100.0, "credit": 0.0}]),
         opening_lines=ledger.opening_lines,
         vat_codes=ledger.vat_codes,
+        anomalies=ledger.anomalies,
     )
     summary = summarise(ledger)
     assert summary.balanced is False
