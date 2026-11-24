@@ -1018,6 +1018,45 @@ def invoice_v9_cmd(connection_file: str, **kwargs: Any) -> None:
     run_invoice_v9_workflow(**kwargs)
 
 
+# --- Audit-file source connectors (XAF first; FEC, SAF-T, DATEV later) ---
+@cli.group(name="auditfile")
+def auditfile_group() -> None:
+    """Import a company's finances from a tax-authority audit file."""
+    pass
+
+
+@auditfile_group.command(name="inspect")
+@click.argument("file", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--format",
+    "fmt",
+    default=None,
+    help="Force the audit-file format (e.g. 'xaf') instead of auto-detecting.",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    default=False,
+    help="Emit the overview as JSON instead of the rendered summary.",
+)
+def auditfile_inspect_cmd(file: str, fmt: str | None, as_json: bool) -> None:
+    """Report an audit file's format, period, entity counts and balance.
+
+    No Odoo connection is needed and nothing is written: this is a read-only
+    overview of the source file.
+    """
+    from .auditfile.inspect import run_inspect
+    from .lib.core import FluvoError
+    from .lib.internal.ui import _show_error_panel
+
+    try:
+        run_inspect(file, fmt=fmt, as_json=as_json)
+    except FluvoError as exc:
+        _show_error_panel("Audit file", str(exc))
+        raise SystemExit(exc.exit_code) from exc
+
+
 # --- VAT Validation Command Group ---
 @cli.group(name="vat")
 def vat_group() -> None:
