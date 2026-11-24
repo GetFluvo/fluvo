@@ -125,6 +125,65 @@ def test_load_account_overrides_roundtrip(tmp_path: Path) -> None:
     assert "0500" in overrides.types
 
 
+def test_partner_banks_written_and_stepped(tmp_path: Path) -> None:
+    """A 3.2 stage writes partner_banks.csv and a res.partner.bank flow step."""
+    out = tmp_path / "stage"
+    stage(_ledger(tmp_path, "3.2"), str(out), allow_warnings=True)
+    bank_lines = (out / "partner_banks.csv").read_text().strip().splitlines()
+    assert len(bank_lines) >= 2  # header + at least one bank
+    assert "res.partner.bank" in (out / "flows.yml").read_text()
+
+
+def test_partner_banks_step_omitted_when_empty(tmp_path: Path) -> None:
+    """With no bank accounts (4.0), the bank step is left out of the flow."""
+    out = tmp_path / "stage"
+    stage(_ledger(tmp_path, "4.0"), str(out), allow_warnings=True)
+    assert (out / "partner_banks.csv").is_file()  # still written (header only)
+    assert "res.partner.bank" not in (out / "flows.yml").read_text()
+
+
+def test_account_map_target_xmlid_roundtrips(tmp_path: Path) -> None:
+    """An edited target_xmlid column is read back as an account match."""
+    out = tmp_path / "stage"
+    stage(_ledger(tmp_path), str(out), allow_warnings=True)
+    amap = out / "account_map.csv"
+    text = amap.read_text()
+    assert "target_xmlid" in text.splitlines()[0]  # column is present to edit
+    # Pin 1300 onto an existing record and re-read.
+    rows = text.splitlines()
+    header = rows[0].split(";")
+    ti, ci = header.index("target_xmlid"), header.index("account_id")
+    patched = [rows[0]]
+    for row in rows[1:]:
+        cells = row.split(";")
+        if cells[ci] == "1300":
+            cells[ti] = "l10n_nl.recv"
+        patched.append(";".join(cells))
+    amap.write_text("\n".join(patched) + "\n")
+    assert load_account_overrides(str(amap)).matches["1300"] == "l10n_nl.recv"
+
+
+def test_cli_match_accounts_requires_connection(tmp_path: Path) -> None:
+    """--match-accounts without a connection file is a clear input error."""
+    path = tmp_path / "f.xaf"
+    generate_xaf(path, version="4.0")
+    out = tmp_path / "stage"
+    result = CliRunner().invoke(
+        __main__.cli,
+        [
+            "auditfile",
+            "stage",
+            str(path),
+            "--out",
+            str(out),
+            "--match-accounts",
+            "--allow-warnings",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "connection-file" in result.output
+
+
 def test_load_account_overrides_bad_columns(tmp_path: Path) -> None:
     """A map without the needed columns is an input error."""
     bad = tmp_path / "bad.csv"

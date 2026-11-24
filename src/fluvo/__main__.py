@@ -1057,6 +1057,34 @@ def auditfile_inspect_cmd(file: str, fmt: str | None, as_json: bool) -> None:
         raise SystemExit(exc.exit_code) from exc
 
 
+def _auditfile_account_matches(
+    match_accounts: bool, connection_file: str | None
+) -> dict[str, str] | None:
+    """Resolve existing-chart account matches over RPC, when requested.
+
+    Args:
+        match_accounts: Whether ``--match-accounts`` was passed.
+        connection_file: The Odoo connection file (required when matching).
+
+    Returns:
+        dict[str, str] | None: ``account code`` → existing external id, or None
+        when matching was not requested.
+
+    Raises:
+        InputError: If ``--match-accounts`` is given without a connection file.
+    """
+    if not match_accounts:
+        return None
+    from .auditfile.match import resolve_account_matches
+    from .lib.conf_lib import get_connection_from_config
+    from .lib.core import InputError
+
+    if not connection_file:
+        raise InputError("--match-accounts requires --connection-file.")
+    connection = get_connection_from_config(config_file=connection_file)
+    return resolve_account_matches(connection)
+
+
 @auditfile_group.command(name="stage")
 @click.argument("file", type=click.Path(exists=True, dir_okay=False))
 @click.option(
@@ -1110,6 +1138,15 @@ def auditfile_inspect_cmd(file: str, fmt: str | None, as_json: bool) -> None:
     "accounts into (for a clean balance sheet); omit to carry each P&L balance.",
 )
 @click.option(
+    "--match-accounts",
+    "match_accounts",
+    is_flag=True,
+    default=False,
+    help="Read the target chart over --connection-file and reference accounts "
+    "whose code already exists instead of creating them (for a pre-charted "
+    "company, e.g. l10n_nl). Matched accounts are never modified.",
+)
+@click.option(
     "--allow-warnings",
     is_flag=True,
     default=False,
@@ -1131,6 +1168,7 @@ def auditfile_stage_cmd(
     company: str | None,
     no_dedup: bool,
     result_account: str | None,
+    match_accounts: bool,
     allow_warnings: bool,
     fmt: str | None,
 ) -> None:
@@ -1138,7 +1176,8 @@ def auditfile_stage_cmd(
 
     Reads FILE, writes Odoo-shaped CSVs plus a generated flows.yml to --out, and
     runs preflight. Load the result with ``fluvo --flow-file <out>/flows.yml``.
-    Nothing is written to Odoo by this command.
+    Nothing is *written* to Odoo; ``--match-accounts`` only *reads* the target
+    chart to reference accounts that already exist.
     """
     from rich.console import Console
 
@@ -1151,6 +1190,7 @@ def auditfile_stage_cmd(
     try:
         ledger = read_auditfile(file, fmt=fmt)
         overrides = load_account_overrides(account_map) if account_map else None
+        matches = _auditfile_account_matches(match_accounts, connection_file)
         result = stage(
             ledger,
             out_dir,
@@ -1158,6 +1198,7 @@ def auditfile_stage_cmd(
             prefix=prefix,
             connection_file=connection_file,
             account_overrides=overrides,
+            account_matches=matches,
             allow_warnings=allow_warnings,
             company=company,
             dedup=not no_dedup,
@@ -1166,6 +1207,11 @@ def auditfile_stage_cmd(
     except FluvoError as exc:
         _show_error_panel("Audit file", str(exc))
         raise SystemExit(exc.exit_code) from exc
+    if result.matched_accounts:
+        console.print(
+            f"[cyan]Matched[/cyan] {len(result.matched_accounts)} account(s) "
+            "onto the existing chart (referenced, not created)."
+        )
 
     for line in result.report.summary_lines():
         console.print(line)

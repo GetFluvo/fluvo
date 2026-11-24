@@ -302,6 +302,43 @@ def test_partner_country_is_staged(tmp_path: Path) -> None:
     assert result.partners.row(0, named=True)["country_id/id"] == "base.nl"
 
 
+def test_partner_banks_are_staged(tmp_path: Path) -> None:
+    """A 3.2 partner's bank account becomes a res.partner.bank row."""
+    result = transform(_ledger(tmp_path, "3.2"), prefix="xaf")
+    assert result.partner_banks.height >= 1
+    row = result.partner_banks.row(0, named=True)
+    assert row["partner_id/id"].startswith("xaf.partner_")
+    assert row["acc_number"].startswith("NL00BANK")
+    assert row["id"].startswith("xaf.partner_bank_")
+
+
+def test_partner_banks_empty_for_4_0(tmp_path: Path) -> None:
+    """4.0 carries no party bank account, so no bank rows are produced."""
+    assert transform(_ledger(tmp_path, "4.0"), prefix="xaf").partner_banks.height == 0
+
+
+def test_account_match_references_existing(tmp_path: Path) -> None:
+    """A matched account is referenced, not created, and reported."""
+    ledger = _read_xaf(tmp_path, _RECV_BANK_BODY)
+    result = transform(
+        ledger, prefix="xaf", account_matches={"1300": "l10n_nl.recv_existing"}
+    )
+    # 1300 is not in the accounts-to-create frame...
+    assert "1300" not in result.accounts.get_column("code").to_list()
+    # ...and every 1300 line references the existing external id.
+    refs = {
+        r["line_ids/account_id/id"]
+        for r in result.moves.to_dicts()
+        if r["line_ids/account_id/id"]
+    }
+    assert "l10n_nl.recv_existing" in refs
+    assert "xaf.account_1300" not in refs
+    assert result.matched_accounts == ("1300",)
+    # The account map pins the target so the match is reviewable.
+    row = next(r for r in result.account_map.to_dicts() if r["account_id"] == "1300")
+    assert row["target_xmlid"] == "l10n_nl.recv_existing"
+
+
 def test_transform_is_deterministic(tmp_path: Path) -> None:
     """The same ledger transforms to identical frames (idempotent stage)."""
     ledger = _ledger(tmp_path)

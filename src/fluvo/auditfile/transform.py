@@ -342,6 +342,7 @@ class TransformResult:
             name, account_type, reconcile, source).
         open_items: Per-open-item AR/AP breakdown used by cutover, for the
             preflight tie-out and an audit report.
+        partner_banks: ``res.partner.bank`` rows (one per survivor with a bank).
         mode: The mode the result was built for.
         prefix: The external-id prefix used.
         heuristic_accounts: Account ids whose type came from the numbering
@@ -349,6 +350,8 @@ class TransformResult:
             preflight flags for review.
         conflicting_accounts: Account ids whose chosen Odoo type contradicts the
             source's balance/profit-loss kind — preflight flags these too.
+        matched_accounts: Account ids referenced onto an existing Odoo account
+            (not created) — reported so the match is reviewable.
     """
 
     partners: pl.DataFrame
@@ -358,10 +361,12 @@ class TransformResult:
     alias_map: pl.DataFrame
     account_map: pl.DataFrame
     open_items: pl.DataFrame
+    partner_banks: pl.DataFrame
     mode: str
     prefix: str
     heuristic_accounts: tuple[str, ...] = field(default_factory=tuple)
     conflicting_accounts: tuple[str, ...] = field(default_factory=tuple)
+    matched_accounts: tuple[str, ...] = field(default_factory=tuple)
 
 
 # --- partners ---------------------------------------------------------------
@@ -469,15 +474,19 @@ def _country_xmlid(country: str) -> str:
     return f"base.{code.lower()}" if len(code) == 2 and code.isalpha() else ""
 
 
+#: Columns of the staged ``res.partner.bank`` frame.
+_BANK_COLUMNS: Final = ["id", "partner_id/id", "acc_number"]
+
+
 def _dedup_partners(
     ledger: CanonicalLedger, prefix: str, *, dedup: bool = True
-) -> tuple[pl.DataFrame, dict[str, str]]:
-    """Merge customer/supplier records and build the alias map.
+) -> tuple[pl.DataFrame, dict[str, str], pl.DataFrame]:
+    """Merge customer/supplier records and build the alias and bank maps.
 
     Within a merged group the surviving external id is the lowest source id,
     both ranks are set if any member carries that role, and the first non-empty
-    field wins. The country resolves to its Odoo external id so it is staged
-    rather than silently dropped.
+    field wins. The country resolves to its Odoo external id, and a bank account
+    becomes a ``res.partner.bank`` row, so neither is silently dropped.
 
     Args:
         ledger: The canonical ledger.
@@ -485,8 +494,9 @@ def _dedup_partners(
         dedup: Whether to merge records sharing a KvK/VAT (off = one per source).
 
     Returns:
-        tuple[pl.DataFrame, dict[str, str]]: The ``res.partner`` frame and the
-        ``source_id`` → surviving external-id alias map.
+        tuple[pl.DataFrame, dict[str, str], pl.DataFrame]: the ``res.partner``
+        frame, the ``source_id`` → surviving external-id alias map, and the
+        ``res.partner.bank`` frame (one row per survivor that carries a bank).
     """
     partners = ledger.partners.sort("source_id").to_dicts()
     groups = _partner_groups(partners, dedup=dedup)
@@ -497,6 +507,7 @@ def _dedup_partners(
             alias[str(member["source_id"])] = survivor_xmlid
 
     out_rows: list[dict[str, object]] = []
+    bank_rows: list[dict[str, object]] = []
     for survivor in sorted(groups):
         members = groups[survivor]
         roles = {str(m["role"]) for m in members}
@@ -510,9 +521,10 @@ def _dedup_partners(
                     return str(value)
             return ""
 
+        partner_xmlid = _xmlid(prefix, "partner", survivor)
         out_rows.append(
             {
-                "id": _xmlid(prefix, "partner", survivor),
+                "id": partner_xmlid,
                 "name": _first("name") or survivor,
                 "is_company": "True",
                 "customer_rank": "1" if is_customer else "0",
@@ -525,6 +537,15 @@ def _dedup_partners(
                 "country_id/id": _country_xmlid(_first("country")),
             }
         )
+        bank = _first("bank_account")
+        if bank:
+            bank_rows.append(
+                {
+                    "id": _xmlid(prefix, "partner_bank", survivor),
+                    "partner_id/id": partner_xmlid,
+                    "acc_number": bank,
+                }
+            )
     columns = [
         "id",
         "name",
@@ -539,21 +560,28 @@ def _dedup_partners(
         "country_id/id",
     ]
     frame = pl.DataFrame(out_rows, schema={c: pl.String for c in columns})
-    return frame, alias
+    banks = pl.DataFrame(bank_rows, schema={c: pl.String for c in _BANK_COLUMNS})
+    return frame, alias, banks
 
 
 # --- accounts & journals ----------------------------------------------------
 
 
-def _accounts_frame(decisions: list[AccountDecision], prefix: str) -> pl.DataFrame:
-    """Build the ``account.account`` frame from account decisions.
+def _accounts_frame(
+    decisions: list[AccountDecision], prefix: str, matches: dict[str, str]
+) -> pl.DataFrame:
+    """Build the ``account.account`` frame of accounts to *create*.
+
+    Accounts matched onto an existing record are omitted: they already exist in
+    the target chart and are referenced, not re-created.
 
     Args:
         decisions: The per-account typing decisions.
         prefix: The external-id prefix.
+        matches: Source account id → existing external id (matched accounts).
 
     Returns:
-        pl.DataFrame: The ``account.account`` rows.
+        pl.DataFrame: The ``account.account`` rows to create.
     """
     rows = [
         {
@@ -564,16 +592,24 @@ def _accounts_frame(decisions: list[AccountDecision], prefix: str) -> pl.DataFra
             "reconcile": "True" if d.reconcile else "False",
         }
         for d in decisions
+        if d.account_id not in matches
     ]
     columns = ["id", "code", "name", "account_type", "reconcile"]
     return pl.DataFrame(rows, schema={c: pl.String for c in columns})
 
 
-def _account_map_frame(decisions: list[AccountDecision]) -> pl.DataFrame:
+def _account_map_frame(
+    decisions: list[AccountDecision], matches: dict[str, str]
+) -> pl.DataFrame:
     """Build the editable ``account_map.csv`` proposal frame.
+
+    The ``target_xmlid`` column pins an account onto an existing Odoo record:
+    fill it (by hand, or via ``--match-accounts``) and the account is referenced
+    instead of created.
 
     Args:
         decisions: The per-account typing decisions.
+        matches: Source account id → existing external id (matched accounts).
 
     Returns:
         pl.DataFrame: One row per account with its proposed type and source.
@@ -586,10 +622,19 @@ def _account_map_frame(decisions: list[AccountDecision]) -> pl.DataFrame:
             "account_type": d.account_type,
             "reconcile": "True" if d.reconcile else "False",
             "source": d.source,
+            "target_xmlid": matches.get(d.account_id, ""),
         }
         for d in decisions
     ]
-    columns = ["account_id", "code", "name", "account_type", "reconcile", "source"]
+    columns = [
+        "account_id",
+        "code",
+        "name",
+        "account_type",
+        "reconcile",
+        "source",
+        "target_xmlid",
+    ]
     return pl.DataFrame(rows, schema={c: pl.String for c in columns})
 
 
@@ -677,8 +722,52 @@ def _money_str(value: Any) -> str:
     return f"{float(value or 0.0):.2f}"
 
 
+def _account_ref_map(
+    decisions: list[AccountDecision], account_matches: dict[str, str], prefix: str
+) -> dict[str, str]:
+    """Map each source account id to the external id a line should reference.
+
+    A matched account references the *existing* record's external id; every
+    other account references the one this stage will create.
+
+    Args:
+        decisions: The per-account typing decisions.
+        account_matches: Source account id → existing external id (matched).
+        prefix: The external-id prefix.
+
+    Returns:
+        dict[str, str]: Source account id → external id to reference.
+    """
+    return {
+        d.account_id: account_matches.get(d.account_id)
+        or _xmlid(prefix, "account", d.account_id)
+        for d in decisions
+    }
+
+
+def _resolve_account(account_ref: dict[str, str], prefix: str, account_id: str) -> str:
+    """Resolve a line's account reference, falling back to a created id.
+
+    Args:
+        account_ref: Source account id → external id, from :func:`_account_ref_map`.
+        prefix: The external-id prefix.
+        account_id: The source account id, possibly ``""`` or off-chart.
+
+    Returns:
+        str: The external id to reference, or ``""`` when the line has no
+        account. An account referenced but absent from the chart falls back to
+        its would-be created id, which preflight flags as ``unknown_account``.
+    """
+    if not account_id:
+        return ""
+    return account_ref.get(account_id) or _xmlid(prefix, "account", account_id)
+
+
 def _history_move_rows(
-    ledger: CanonicalLedger, prefix: str, alias: dict[str, str]
+    ledger: CanonicalLedger,
+    prefix: str,
+    alias: dict[str, str],
+    account_ref: dict[str, str],
 ) -> list[dict[str, str]]:
     """Build o2m rows for every transaction (full-history moves).
 
@@ -686,6 +775,7 @@ def _history_move_rows(
         ledger: The canonical ledger.
         prefix: The external-id prefix.
         alias: The source-partner → external-id alias map.
+        account_ref: Source account id → external id to reference.
 
     Returns:
         list[dict[str, str]]: Rows in the ``line_ids/...`` o2m shape.
@@ -712,12 +802,13 @@ def _history_move_rows(
                 date=_date_str(move.get("date")) if header else "",
                 ref=str(move.get("doc_ref") or "") if header else "",
                 line_number=int(line["line_number"]),
-                account_id=str(line.get("account_id") or ""),
+                account_xmlid=_resolve_account(
+                    account_ref, prefix, str(line.get("account_id") or "")
+                ),
                 partner=alias.get(str(line.get("source_partner_id") or ""), ""),
                 line_name=str(line.get("description") or ""),
                 debit=_money_str(line.get("debit")),
                 credit=_money_str(line.get("credit")),
-                prefix=prefix,
             )
         )
     return rows
@@ -744,12 +835,11 @@ def _line_row(
     date: str,
     ref: str,
     line_number: int,
-    account_id: str,
+    account_xmlid: str,
     partner: str,
     line_name: str,
     debit: str,
     credit: str,
-    prefix: str,
 ) -> dict[str, str]:
     """Assemble one o2m move row.
 
@@ -761,12 +851,12 @@ def _line_row(
         date: The move date (header only).
         ref: The move reference (header only).
         line_number: The 1-based line ordinal within the move.
-        account_id: The source account id for this line.
+        account_xmlid: The account's external id reference (created or matched),
+            or ``""``.
         partner: The partner external id, or ``""``.
         line_name: The line label.
         debit: The debit amount string.
         credit: The credit amount string.
-        prefix: The external-id prefix.
 
     Returns:
         dict[str, str]: The row keyed by :data:`_MOVE_COLUMNS`.
@@ -780,9 +870,7 @@ def _line_row(
         "date": date,
         "ref": ref,
         "line_ids/id": f"{move_xmlid}_l{line_number}",
-        "line_ids/account_id/id": (
-            _xmlid(prefix, "account", account_id) if account_id else ""
-        ),
+        "line_ids/account_id/id": account_xmlid,
         "line_ids/partner_id/id": partner,
         "line_ids/name": line_name,
         "line_ids/debit": debit,
@@ -1006,6 +1094,7 @@ def _opening_move_rows(
     prefix: str,
     specs: list[tuple[str, str, str, str]],
     date: str,
+    account_ref: dict[str, str],
 ) -> list[dict[str, str]]:
     """Render opening-line specs into the o2m move rows.
 
@@ -1013,6 +1102,7 @@ def _opening_move_rows(
         prefix: The external-id prefix.
         specs: ``(account, partner, debit, credit)`` lines for the opening move.
         date: The move date (ISO string), on the header line only.
+        account_ref: Source account id → external id to reference.
 
     Returns:
         list[dict[str, str]]: The opening move's rows, or ``[]`` when empty.
@@ -1031,12 +1121,11 @@ def _opening_move_rows(
                 date=date if index == 1 else "",
                 ref="opening" if index == 1 else "",
                 line_number=index,
-                account_id=account_id,
+                account_xmlid=_resolve_account(account_ref, prefix, account_id),
                 partner=partner,
                 line_name="Opening balance",
                 debit=debit,
                 credit=credit,
-                prefix=prefix,
             )
         )
     return rows
@@ -1049,6 +1138,7 @@ def transform(
     mode: str = MODE_FULL_HISTORY,
     account_overrides: dict[str, str] | None = None,
     reconcile_overrides: dict[str, bool] | None = None,
+    account_matches: dict[str, str] | None = None,
     dedup: bool = True,
     result_account: str | None = None,
 ) -> TransformResult:
@@ -1062,6 +1152,9 @@ def transform(
             edited ``account_map.csv``; always wins over the mapper chain.
         reconcile_overrides: A user ``account_id`` → reconcile flag from the same
             edited map; absent accounts stay reconcilable-by-type.
+        account_matches: A user ``account_id`` → existing Odoo external id map,
+            for accounts that already exist in the target chart. Matched
+            accounts are referenced, never created and never modified.
         dedup: Merge customer/supplier records sharing a KvK/VAT (default on).
         result_account: In cutover, a source account id to close the
             profit-and-loss accounts into; None carries each P&L balance.
@@ -1076,6 +1169,7 @@ def transform(
     if mode not in MODES:
         raise InputError(f"unknown mode '{mode}'; expected one of {list(MODES)}.")
     overrides = account_overrides or {}
+    matches = account_matches or {}
     decisions = _decide_accounts(ledger, overrides, reconcile_overrides)
     reconcile_accounts = {d.account_id for d in decisions if d.reconcile}
     account_types = {d.account_id: d.account_type for d in decisions}
@@ -1083,10 +1177,12 @@ def transform(
         d.account_id for d in decisions if d.source in (SRC_HEURISTIC, SRC_FALLBACK)
     )
     conflicting = tuple(d.account_id for d in decisions if d.kind_conflict)
+    matched = tuple(d.account_id for d in decisions if d.account_id in matches)
+    account_ref = _account_ref_map(decisions, matches, prefix)
 
-    partners, alias = _dedup_partners(ledger, prefix, dedup=dedup)
-    accounts = _accounts_frame(decisions, prefix)
-    account_map = _account_map_frame(decisions)
+    partners, alias, partner_banks = _dedup_partners(ledger, prefix, dedup=dedup)
+    accounts = _accounts_frame(decisions, prefix, matches)
+    account_map = _account_map_frame(decisions, matches)
     journals = _journals_frame(ledger, prefix)
     open_items = _open_items(ledger, reconcile_accounts)
 
@@ -1097,14 +1193,15 @@ def transform(
         opening_date = _date_str(ledger.header.get_column("date_end").item(0)) or (
             _date_str(ledger.header.get_column("date_start").item(0))
         )
-        rows = _opening_move_rows(prefix, specs, opening_date)
+        rows = _opening_move_rows(prefix, specs, opening_date, account_ref)
     else:
         rows = _opening_move_rows(
             prefix,
             _history_opening_specs(ledger),
             _date_str(ledger.header.get_column("date_start").item(0)),
+            account_ref,
         )
-        rows = rows + _history_move_rows(ledger, prefix, alias)
+        rows = rows + _history_move_rows(ledger, prefix, alias, account_ref)
     moves = pl.DataFrame(rows, schema={c: pl.String for c in _MOVE_COLUMNS})
 
     alias_frame = pl.DataFrame(
@@ -1123,8 +1220,10 @@ def transform(
         alias_map=alias_frame,
         account_map=account_map,
         open_items=open_items,
+        partner_banks=partner_banks,
         mode=mode,
         prefix=prefix,
         heuristic_accounts=heuristic,
         conflicting_accounts=conflicting,
+        matched_accounts=matched,
     )

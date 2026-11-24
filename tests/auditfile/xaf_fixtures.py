@@ -177,8 +177,10 @@ def _write_partners(handle: TextIO, version: str, kvk: str) -> int:
         _tag(handle, "country", "NL")
         handle.write("</streetAddress>")
         if version == "3.2":
+            # Distinct per partner, so staged res.partner.bank rows never clash
+            # on the account-number uniqueness constraint when loaded.
             handle.write("<bankAccount>")
-            _tag(handle, "bankAccNr", "NL00BANK0123456789")
+            _tag(handle, "bankAccNr", f"NL00BANK{commerce}")
             handle.write("</bankAccount>")
         handle.write("</customerSupplier>")
     handle.write("</customersSuppliers>")
