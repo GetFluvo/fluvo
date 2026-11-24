@@ -1091,6 +1091,12 @@ def auditfile_inspect_cmd(file: str, fmt: str | None, as_json: bool) -> None:
     "--prefix", default="xaf", help="External-id prefix for the staged records."
 )
 @click.option(
+    "--company",
+    default=None,
+    help="Company id or external id (e.g. 'base.main_company') to load into; "
+    "required when the target Odoo has more than one company.",
+)
+@click.option(
     "--allow-warnings",
     is_flag=True,
     default=False,
@@ -1109,6 +1115,7 @@ def auditfile_stage_cmd(
     connection_file: str | None,
     account_map: str | None,
     prefix: str,
+    company: str | None,
     allow_warnings: bool,
     fmt: str | None,
 ) -> None:
@@ -1137,6 +1144,7 @@ def auditfile_stage_cmd(
             connection_file=connection_file,
             account_overrides=overrides,
             allow_warnings=allow_warnings,
+            company=company,
         )
     except FluvoError as exc:
         _show_error_panel("Audit file", str(exc))

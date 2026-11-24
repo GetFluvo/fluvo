@@ -145,6 +145,12 @@ def test_move_line_external_ids(tmp_path: Path) -> None:
     first = result.moves.row(0, named=True)
     assert first["id"] == "xaf.move__opening"
     assert first["line_ids/id"] == "xaf.move__opening_l1"
+    # The opening move's second line is a continuation row: blank id (so fluvo's
+    # --o2m groups it with the parent), own line_ids/id, no repeated header.
+    second = result.moves.row(1, named=True)
+    assert second["id"] == ""
+    assert second["name"] == ""
+    assert second["line_ids/id"] == "xaf.move__opening_l2"
 
 
 def test_cutover_breaks_out_open_items(tmp_path: Path) -> None:
@@ -152,7 +158,9 @@ def test_cutover_breaks_out_open_items(tmp_path: Path) -> None:
     result = transform(_ledger(tmp_path), prefix="xaf", mode=MODE_CUTOVER)
     assert result.open_items.height >= 1
     # Only the opening move is produced in cutover (no transaction history).
-    assert set(result.moves.get_column("id").to_list()) == {"xaf.move__opening"}
+    # Continuation lines carry a blank id (fluvo --o2m grouping), so filter them.
+    move_ids = {i for i in result.moves.get_column("id").to_list() if i}
+    assert move_ids == {"xaf.move__opening"}
     partners = [p for p in result.moves["line_ids/partner_id/id"].to_list() if p]
     assert any(p.startswith("xaf.partner_") for p in partners)
 

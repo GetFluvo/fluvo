@@ -622,7 +622,9 @@ def _line_row(
         dict[str, str]: The row keyed by :data:`_MOVE_COLUMNS`.
     """
     return {
-        "id": move_xmlid,
+        # fluvo's --o2m groups a parent row (non-empty id) with the following
+        # continuation rows (blank id); only the first line carries the move id.
+        "id": move_xmlid if header else "",
         "name": name,
         "journal_id/id": journal,
         "date": date,

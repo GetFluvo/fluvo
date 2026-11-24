@@ -157,11 +157,11 @@ def test_cli_stage_with_account_map(tmp_path: Path) -> None:
     # Flip a heuristic account (9006) to an explicit type, as a user would.
     lines = account_map.read_text().splitlines()
     for i, line in enumerate(lines):
-        if line.startswith("9006,"):
-            cols = line.split(",")
+        if line.startswith("9006;"):
+            cols = line.split(";")
             cols[3] = "asset_fixed"
             cols[5] = "override"
-            lines[i] = ",".join(cols)
+            lines[i] = ";".join(cols)
     account_map.write_text("\n".join(lines) + "\n", encoding="utf-8")
     out2 = tmp_path / "stage2"
     result = CliRunner().invoke(
@@ -179,4 +179,4 @@ def test_cli_stage_with_account_map(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     new_map = (out2 / "account_map.csv").read_text()
-    assert "9006,9006,Tussenrekening 6,asset_fixed,False,override" in new_map
+    assert "9006;9006;Tussenrekening 6;asset_fixed;False;override" in new_map

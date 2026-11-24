@@ -44,6 +44,11 @@ _STEPS: tuple[tuple[str, str, str, bool], ...] = (
 #: Placeholder written into flows.yml when no connection file is supplied.
 _CONNECTION_PLACEHOLDER = "connection.conf"
 
+#: CSV delimiter for the staged files. Matches ``fluvo import``'s default
+#: separator, so the generated flow (and a manual ``fluvo import``) read them
+#: without a ``--sep`` override.
+_CSV_SEP = ";"
+
 
 @dataclass(frozen=True)
 class StageResult:
@@ -77,7 +82,7 @@ def load_account_overrides(path: str) -> dict[str, str]:
         InputError: If the file cannot be read or lacks the needed columns.
     """
     try:
-        frame = pl.read_csv(path)
+        frame = pl.read_csv(path, separator=_CSV_SEP)
     except (OSError, pl.exceptions.PolarsError) as exc:
         raise InputError(f"could not read account map '{path}': {exc}") from exc
     if "account_id" not in frame.columns or "account_type" not in frame.columns:
@@ -106,12 +111,18 @@ def _yaml_quote(value: str) -> str:
     return f'"{escaped}"'
 
 
-def _flows_yaml(steps: list[tuple[str, str, str, bool]], connection_file: str) -> str:
+def _flows_yaml(
+    steps: list[tuple[str, str, str, bool]],
+    connection_file: str,
+    company: str | None,
+) -> str:
     """Render the generated ``flows.yml`` for the staged CSVs.
 
     Args:
         steps: ``(step id, absolute csv path, model, is_o2m)`` in load order.
         connection_file: The connection file path to embed in every step.
+        company: A company id or external id to target (``company_id`` on every
+            step), or None to leave it to the import command's default handling.
 
     Returns:
         str: The YAML document.
@@ -132,6 +143,8 @@ def _flows_yaml(steps: list[tuple[str, str, str, bool]], connection_file: str) -
         lines.append(f"          connection_file: {_yaml_quote(connection_file)}")
         lines.append(f"          filename: {_yaml_quote(csv_path)}")
         lines.append(f"          model: {model}")
+        if company:
+            lines.append(f"          company_id: {_yaml_quote(company)}")
         if is_o2m:
             lines.append("          o2m: true")
     return "\n".join(lines) + "\n"
@@ -144,7 +157,7 @@ def _write_csv(frame: pl.DataFrame, path: Path) -> None:
         frame: The frame to write.
         path: The destination path.
     """
-    frame.write_csv(path)
+    frame.write_csv(path, separator=_CSV_SEP)
 
 
 def stage(
@@ -156,6 +169,7 @@ def stage(
     connection_file: str | None = None,
     account_overrides: dict[str, str] | None = None,
     allow_warnings: bool = False,
+    company: str | None = None,
 ) -> StageResult:
     """Transform a ledger and write a loadable stage directory.
 
@@ -169,6 +183,9 @@ def stage(
         account_overrides: An ``account_id`` → ``account_type`` map from an
             edited ``account_map.csv``.
         allow_warnings: When True, warnings do not block staging.
+        company: A company id or external id to target, embedded as
+            ``company_id`` on every flow step (required when the target Odoo has
+            more than one company).
 
     Returns:
         StageResult: What was written and the preflight report.
@@ -211,7 +228,7 @@ def stage(
             for step_id, csv, model, is_o2m in _STEPS
         ]
         flows = directory / "flows.yml"
-        flows.write_text(_flows_yaml(steps, connection), encoding="utf-8")
+        flows.write_text(_flows_yaml(steps, connection, company), encoding="utf-8")
         flows_path = str(flows.resolve())
         files["flows.yml"] = flows_path
 
