@@ -17,6 +17,8 @@ guess a fix:
   onto one external id, which would overwrite or merge silently.
 * **parse_anomaly** (error) — a source cell (amount or date) the reader could
   not parse; it was recorded, not silently zeroed.
+* **clearing_not_zero** (error) — in cutover, the open-item clearing account
+  does not net to zero across the opening move and the open-item invoices.
 * **unknown_account** (error) — a line or opening balance references an account
   id that is not in the chart; its external id would not resolve.
 * **unknown_journal** (error) — a move references a journal not in the file.
@@ -33,8 +35,14 @@ guess a fix:
   ``account_map.csv`` before loading.
 * **account_kind_conflict** (warning) — an account's Odoo type contradicts the
   source's balance/P&L kind.
-* **open_item_tie_out** (warning) — in cutover, a control account's staged lines
-  do not sum to its closing balance.
+* **derived_due_date** (warning) — open-item invoice due dates were derived (XAF
+  carries none); set ``--default-payment-days``.
+* **reversed_open_item** (warning) — a reversed-sign open item (credit note /
+  unallocated payment) staged as a refund; review it.
+* **ambiguous_partner_control** (warning) — a partner's open items span more
+  than one control account; the staged property picks one.
+* **open_item_tie_out** (warning) — in cutover, a control account's opening
+  subledger does not tie to its GL opening balance.
 
 Severity drives staging: by default any finding blocks (fail-fast); with the
 caller's ``allow_warnings`` opt-in, only errors block.
@@ -587,6 +595,124 @@ def _check_foreign_currency(ledger: CanonicalLedger) -> list[Finding]:
     ]
 
 
+#: Sign of an open-item invoice's contribution to the clearing account, by
+#: ``move_type``: the control line and the clearing line are opposite, so the
+#: clearing side is +residual for refunds-in / bills, minus-residual for invoices-out
+#: / refunds-out.
+_CLEARING_SIGN = {
+    "out_invoice": -1.0,
+    "out_refund": 1.0,
+    "in_invoice": 1.0,
+    "in_refund": -1.0,
+}
+
+
+def _check_clearing_nets_zero(result: TransformResult) -> list[Finding]:
+    """Flag a clearing account that does not net to zero (cutover invariant).
+
+    The open-item invoices post the residual on the clearing account; the
+    opening move posts the counter. The two must cancel exactly, or the cutover
+    has invented or lost a balance.
+
+    Args:
+        result: The transform result.
+
+    Returns:
+        list[Finding]: A single error finding, or empty.
+    """
+    if result.mode != MODE_CUTOVER or not result.clearing_xmlid:
+        return []
+    opening = 0.0
+    for row in result.moves.to_dicts():
+        if str(row.get("line_ids/account_id/id") or "") == result.clearing_xmlid:
+            opening += float(row.get("line_ids/debit") or 0.0) - float(
+                row.get("line_ids/credit") or 0.0
+            )
+    invoices = sum(
+        _CLEARING_SIGN.get(str(row.get("move_type") or ""), 0.0)
+        * float(row.get("invoice_line_ids/price_unit") or 0.0)
+        for row in result.open_invoices.to_dicts()
+    )
+    if abs(opening + invoices) <= BALANCE_TOLERANCE:
+        return []
+    return [
+        Finding(
+            "clearing_not_zero",
+            ERROR,
+            f"The open-item clearing account does not net to zero "
+            f"(residual {opening + invoices:+.2f}); the cutover is unbalanced.",
+            1,
+            (f"{opening + invoices:+.2f}",),
+        )
+    ]
+
+
+def _check_due_dates_derived(result: TransformResult) -> list[Finding]:
+    """Note how many open-item due dates were derived (the file carries none).
+
+    Args:
+        result: The transform result.
+
+    Returns:
+        list[Finding]: A single warning finding, or empty.
+    """
+    if result.derived_due_dates == 0:
+        return []
+    return [
+        Finding(
+            "derived_due_date",
+            WARNING,
+            f"{result.derived_due_dates} open-item due date(s) were derived from "
+            "the invoice date (XAF carries none); set --default-payment-days.",
+            result.derived_due_dates,
+        )
+    ]
+
+
+def _check_reversed_open_items(result: TransformResult) -> list[Finding]:
+    """Flag reversed-sign open items staged as refunds (review these).
+
+    Args:
+        result: The transform result.
+
+    Returns:
+        list[Finding]: A single warning finding, or empty.
+    """
+    if not result.refund_items:
+        return []
+    return [
+        _finding(
+            "reversed_open_item",
+            WARNING,
+            "{n} open item(s) have a reversed sign (credit note / unallocated "
+            "payment) and were staged as refunds; review them.",
+            list(result.refund_items),
+        )
+    ]
+
+
+def _check_ambiguous_partner_controls(result: TransformResult) -> list[Finding]:
+    """Flag partners whose open items span more than one control account.
+
+    Args:
+        result: The transform result.
+
+    Returns:
+        list[Finding]: A single warning finding, or empty.
+    """
+    if not result.ambiguous_partners:
+        return []
+    return [
+        _finding(
+            "ambiguous_partner_control",
+            WARNING,
+            "{n} partner(s) have open items on more than one receivable/payable "
+            "account; the staged property picks one — review.",
+            list(result.ambiguous_partners),
+        )
+    ]
+
+
 def _check_open_item_tie_out(
     ledger: CanonicalLedger, result: TransformResult
 ) -> list[Finding]:
@@ -646,6 +772,7 @@ def run_preflight(ledger: CanonicalLedger, result: TransformResult) -> Preflight
     findings += _check_balance(ledger)
     findings += _check_moves_balance(result)
     findings += _check_move_integrity(result)
+    findings += _check_clearing_nets_zero(result)
     findings += _check_parse_anomalies(ledger)
     findings += _check_account_refs(ledger)
     findings += _check_journal_refs(ledger)
@@ -655,6 +782,9 @@ def run_preflight(ledger: CanonicalLedger, result: TransformResult) -> Preflight
     findings += _check_control_totals(ledger)
     findings += _check_proposed_types(result)
     findings += _check_kind_conflicts(result)
+    findings += _check_due_dates_derived(result)
+    findings += _check_reversed_open_items(result)
+    findings += _check_ambiguous_partner_controls(result)
     findings += _check_open_item_tie_out(ledger, result)
     findings.sort(key=lambda f: 0 if f.severity == ERROR else 1)
     return PreflightReport(mode=result.mode, findings=findings)

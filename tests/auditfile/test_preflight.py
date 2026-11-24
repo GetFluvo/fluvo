@@ -368,6 +368,45 @@ def test_foreign_currency_line_is_warning() -> None:
     assert "foreign_currency_line" in _codes(_report(ledger))
 
 
+def test_cutover_clearing_nets_zero_and_no_error(tmp_path: Path) -> None:
+    """A clean cutover's clearing account nets to zero — no clearing error."""
+    path = tmp_path / "f.xaf"
+    generate_xaf(path, version="3.2")
+    ledger = read_auditfile(str(path))
+    report = run_preflight(ledger, transform(ledger, mode=MODE_CUTOVER))
+    assert "clearing_not_zero" not in _codes(report)
+
+
+def test_clearing_not_zero_is_error(tmp_path: Path) -> None:
+    """If the open-item invoices and the opening counter disagree, it errors."""
+    path = tmp_path / "f.xaf"
+    generate_xaf(path, version="3.2")
+    ledger = read_auditfile(str(path))
+    result = transform(ledger, mode=MODE_CUTOVER)
+    # Tamper one invoice residual so the clearing account no longer nets to zero.
+    broken = result.open_invoices.with_columns(
+        pl.when(pl.col("name") == "2023-900")
+        .then(pl.lit("999.99"))
+        .otherwise(pl.col("invoice_line_ids/price_unit"))
+        .alias("invoice_line_ids/price_unit")
+    )
+    import dataclasses
+
+    tampered = dataclasses.replace(result, open_invoices=broken)
+    report = run_preflight(ledger, tampered)
+    assert "clearing_not_zero" in _codes(report)
+    assert report.is_blocking(allow_warnings=True) is True
+
+
+def test_derived_due_date_warning(tmp_path: Path) -> None:
+    """Deriving open-item due dates raises a review warning."""
+    path = tmp_path / "f.xaf"
+    generate_xaf(path, version="3.2")
+    ledger = read_auditfile(str(path))
+    report = run_preflight(ledger, transform(ledger, mode=MODE_CUTOVER))
+    assert "derived_due_date" in _codes(report)
+
+
 def test_empty_summary() -> None:
     """A report with no findings summarises as 'no findings'."""
     ledger = _ledger(

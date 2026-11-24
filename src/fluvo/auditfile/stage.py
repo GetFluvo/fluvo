@@ -6,6 +6,8 @@
   Odoo-shaped data, upsert-keyed on deterministic external ids.
 * ``partner_banks.csv`` — ``res.partner.bank`` rows (one per partner that
   carries a bank account); its load step is omitted when there are none.
+* ``open_invoices.csv`` — in cutover, one draft invoice/bill per open AR/AP item
+  on the clearing account (``invoice_line_ids/...`` shape); omitted when none.
 * ``account_map.csv`` — the editable account-typing proposals. Edit it and pass
   ``--account-map`` on a re-stage to override the mapper chain.
 * ``partner_aliases.csv`` — every source customer/supplier id mapped to the
@@ -32,21 +34,31 @@ import polars as pl
 from ..lib.core import InputError
 from .canonical import CanonicalLedger
 from .preflight import PreflightReport, run_preflight
-from .transform import MODE_FULL_HISTORY, TransformResult, transform
+from .transform import (
+    _DEFAULT_PAYMENT_DAYS as DEFAULT_PAYMENT_DAYS,
+)
+from .transform import (
+    MODE_FULL_HISTORY,
+    TransformResult,
+    transform,
+)
 
-#: The model each staged CSV loads into, in dependency order. The partner-bank
-#: step is included only when there are bank rows to load.
+#: The model each staged CSV loads into, in dependency order. Accounts and
+#: journals come before partners, because a partner's receivable/payable
+#: property (set in cutover) references an account. The partner-bank and
+#: open-invoice steps are included only when their CSV has rows.
 _STEPS: tuple[tuple[str, str, str, bool], ...] = (
     # (step id, csv basename, odoo model, is_o2m)
-    ("partners", "partners.csv", "res.partner", False),
-    ("partner_banks", "partner_banks.csv", "res.partner.bank", False),
     ("accounts", "accounts.csv", "account.account", False),
     ("journals", "journals.csv", "account.journal", False),
+    ("partners", "partners.csv", "res.partner", False),
+    ("partner_banks", "partner_banks.csv", "res.partner.bank", False),
     ("moves", "moves.csv", "account.move", True),
+    ("open_invoices", "open_invoices.csv", "account.move", True),
 )
 
 #: Steps dropped from the generated flow when their CSV has no data rows.
-_OPTIONAL_STEPS = frozenset({"partner_banks"})
+_OPTIONAL_STEPS = frozenset({"partner_banks", "open_invoices"})
 
 #: Placeholder written into flows.yml when no connection file is supplied.
 _CONNECTION_PLACEHOLDER = "connection.conf"
@@ -237,6 +249,8 @@ def stage(
     company: str | None = None,
     dedup: bool = True,
     result_account: str | None = None,
+    clearing_account: str | None = None,
+    default_payment_days: int = DEFAULT_PAYMENT_DAYS,
 ) -> StageResult:
     """Transform a ledger and write a loadable stage directory.
 
@@ -258,6 +272,9 @@ def stage(
         dedup: Merge customer/supplier records sharing a KvK/VAT (default on).
         result_account: In cutover, a source account id to close the
             profit-and-loss accounts into; None carries each P&L balance.
+        clearing_account: In cutover, the open-item clearing account id; a
+            synthetic default is used (and staged) when omitted.
+        default_payment_days: Days after the invoice date for a derived due date.
 
     Returns:
         StageResult: What was written and the preflight report.
@@ -273,6 +290,8 @@ def stage(
         account_matches=matches,
         dedup=dedup,
         result_account=result_account,
+        clearing_account=clearing_account,
+        default_payment_days=default_payment_days,
     )
     report = run_preflight(ledger, result)
 
@@ -290,6 +309,7 @@ def stage(
     _emit("accounts.csv", result.accounts)
     _emit("journals.csv", result.journals)
     _emit("moves.csv", result.moves)
+    _emit("open_invoices.csv", result.open_invoices)
     _emit("account_map.csv", result.account_map)
     _emit("partner_aliases.csv", result.alias_map)
     _emit("open_items.csv", result.open_items)
@@ -312,6 +332,7 @@ def stage(
         connection = connection_file or _CONNECTION_PLACEHOLDER
         empty = {
             "partner_banks.csv": result.partner_banks.height == 0,
+            "open_invoices.csv": result.open_invoices.height == 0,
         }
         steps = [
             (step_id, files[csv], model, is_o2m)

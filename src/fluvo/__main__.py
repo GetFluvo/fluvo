@@ -1138,6 +1138,20 @@ def _auditfile_account_matches(
     "accounts into (for a clean balance sheet); omit to carry each P&L balance.",
 )
 @click.option(
+    "--clearing-account",
+    default=None,
+    help="In cutover, the account code for the open-item clearing account "
+    "(a synthetic one is created when omitted).",
+)
+@click.option(
+    "--default-payment-days",
+    type=int,
+    default=30,
+    show_default=True,
+    help="Days after the invoice date used to derive an open-item due date "
+    "(XAF carries none).",
+)
+@click.option(
     "--match-accounts",
     "match_accounts",
     is_flag=True,
@@ -1168,6 +1182,8 @@ def auditfile_stage_cmd(
     company: str | None,
     no_dedup: bool,
     result_account: str | None,
+    clearing_account: str | None,
+    default_payment_days: int,
     match_accounts: bool,
     allow_warnings: bool,
     fmt: str | None,
@@ -1203,6 +1219,8 @@ def auditfile_stage_cmd(
             company=company,
             dedup=not no_dedup,
             result_account=result_account,
+            clearing_account=clearing_account,
+            default_payment_days=default_payment_days,
         )
     except FluvoError as exc:
         _show_error_panel("Audit file", str(exc))

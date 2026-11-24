@@ -86,6 +86,28 @@ def test_blocked_restage_removes_stale_flows(tmp_path: Path) -> None:
     assert not (out / "flows.yml").exists()  # no stale, runnable flow left behind
 
 
+def test_cutover_writes_open_invoices_and_step(tmp_path: Path) -> None:
+    """Cutover (3.2) writes open_invoices.csv and an extra account.move step."""
+    out = tmp_path / "stage"
+    stage(_ledger(tmp_path, "3.2"), str(out), mode="cutover", allow_warnings=True)
+    rows = (out / "open_invoices.csv").read_text().strip().splitlines()
+    assert len(rows) >= 2  # header + at least one invoice
+    assert "move_type" in rows[0]
+    flows = (out / "flows.yml").read_text()
+    assert flows.count("account.move") == 2  # the opening move + the invoices
+    # The partner receivable property is staged so the invoice AR line is forced.
+    partners = (out / "partners.csv").read_text()
+    assert "property_account_receivable_id/id" in partners.splitlines()[0]
+
+
+def test_full_history_has_no_open_invoices_step(tmp_path: Path) -> None:
+    """full_history writes an empty open_invoices.csv and no extra move step."""
+    out = tmp_path / "stage"
+    stage(_ledger(tmp_path, "3.2"), str(out), allow_warnings=True)
+    assert (out / "open_invoices.csv").is_file()
+    assert (out / "flows.yml").read_text().count("account.move") == 1
+
+
 def test_cutover_writes_open_items(tmp_path: Path) -> None:
     """Cutover staging records at least one open item."""
     out = tmp_path / "stage"

@@ -179,16 +179,22 @@ def test_move_line_external_ids(tmp_path: Path) -> None:
     assert second["line_ids/id"] == "xaf.move__opening_l2"
 
 
-def test_cutover_breaks_out_open_items(tmp_path: Path) -> None:
-    """Cutover emits an opening move with per-partner AR lines and open items."""
-    result = transform(_ledger(tmp_path), prefix="xaf", mode=MODE_CUTOVER)
+def test_cutover_open_items_become_invoices(tmp_path: Path) -> None:
+    """Cutover stages each open item as a draft invoice on the clearing account."""
+    result = transform(_ledger(tmp_path, "3.2"), prefix="xaf", mode=MODE_CUTOVER)
     assert result.open_items.height >= 1
-    # Only the opening move is produced in cutover (no transaction history).
-    # Continuation lines carry a blank id (fluvo --o2m grouping), so filter them.
+    # The moves frame holds only the opening move; AR control is not on it, and
+    # it carries no partner lines (the open items are invoices now).
     move_ids = {i for i in result.moves.get_column("id").to_list() if i}
     assert move_ids == {"xaf.move__opening"}
-    partners = [p for p in result.moves["line_ids/partner_id/id"].to_list() if p]
-    assert any(p.startswith("xaf.partner_") for p in partners)
+    assert all(not p for p in result.moves["line_ids/partner_id/id"].to_list())
+    # One invoice per open item, each on the clearing account, with a partner.
+    assert result.open_invoices.height == result.open_items.height
+    inv = result.open_invoices.row(0, named=True)
+    assert inv["move_type"] in ("out_invoice", "out_refund", "in_invoice", "in_refund")
+    assert inv["partner_id/id"].startswith("xaf.partner_")
+    assert inv["invoice_line_ids/account_id/id"] == result.clearing_xmlid
+    assert inv["id"].startswith("xaf.openinv_")
 
 
 def test_unknown_mode_raises(tmp_path: Path) -> None:
@@ -201,11 +207,14 @@ def test_cutover_is_closing_position_and_balances(tmp_path: Path) -> None:
     """Cutover emits the closing position, balanced, carrying prior open items."""
     result = transform(_ledger(tmp_path, "3.2"), prefix="xaf", mode=MODE_CUTOVER)
     debit, credit = _move_balance(result)
-    assert debit == pytest.approx(credit)  # closing TB is balanced by construction
+    assert debit == pytest.approx(credit)  # opening move balances by construction
     refs = result.open_items.get_column("doc_ref").to_list()
     assert "2023-900" in refs  # the prior-year opening invoice is carried over
-    # 1300 closing = opening (1210) + the year's debits on it (101..106 = 621).
-    assert _move_net(result, "xaf.account_1300") == pytest.approx(1210.0 + 621.0)
+    # The AR control (1300) is on the open-item invoices, not the opening move;
+    # the opening move carries the clearing counter = sum of open-item nets
+    # (prior 1210 + the year's debits 101..106 = 621).
+    assert _move_net(result, "xaf.account_1300") == pytest.approx(0.0)
+    assert _move_net(result, result.clearing_xmlid) == pytest.approx(1210.0 + 621.0)
 
 
 _RECV_BANK_BODY = (
@@ -337,6 +346,71 @@ def test_account_match_references_existing(tmp_path: Path) -> None:
     # The account map pins the target so the match is reviewable.
     row = next(r for r in result.account_map.to_dicts() if r["account_id"] == "1300")
     assert row["target_xmlid"] == "l10n_nl.recv_existing"
+
+
+def test_open_item_invoice_fields(tmp_path: Path) -> None:
+    """An open item becomes a draft invoice with number, dates and residual."""
+    result = transform(_ledger(tmp_path, "3.2"), prefix="xaf", mode=MODE_CUTOVER)
+    inv = next(r for r in result.open_invoices.to_dicts() if r["name"] == "2023-900")
+    assert inv["move_type"] == "out_invoice"
+    assert inv["partner_id/id"] == "xaf.partner_C001"
+    assert inv["invoice_date"] == "2023-12-15"
+    assert inv["invoice_date_due"] == "2024-01-14"  # invoice date + 30 days
+    assert inv["invoice_line_ids/price_unit"] == "1210.00"
+    assert inv["invoice_line_ids/account_id/id"] == result.clearing_xmlid
+    assert inv["invoice_line_ids/tax_ids/id"] == ""  # no tax
+
+
+def test_due_dates_are_derived_and_counted(tmp_path: Path) -> None:
+    """XAF carries no due date, so every invoice's due date is derived."""
+    result = transform(
+        _ledger(tmp_path, "3.2"), mode=MODE_CUTOVER, default_payment_days=14
+    )
+    assert result.derived_due_dates == result.open_invoices.height
+    inv = next(r for r in result.open_invoices.to_dicts() if r["name"] == "2023-900")
+    assert inv["invoice_date_due"] == "2023-12-29"  # +14 days
+
+
+def test_partner_receivable_property_is_set(tmp_path: Path) -> None:
+    """Cutover pins the partner's receivable property to the source control."""
+    result = transform(_ledger(tmp_path, "3.2"), prefix="xaf", mode=MODE_CUTOVER)
+    row = next(r for r in result.partners.to_dicts() if r["id"] == "xaf.partner_C001")
+    assert row["property_account_receivable_id/id"] == "xaf.account_1300"
+
+
+def test_clearing_account_is_staged(tmp_path: Path) -> None:
+    """The clearing account is created when it is not matched to an existing one."""
+    result = transform(_ledger(tmp_path, "3.2"), prefix="xaf", mode=MODE_CUTOVER)
+    assert result.clearing_account == "OPENCL"
+    assert "OPENCL" in result.accounts.get_column("code").to_list()
+
+
+_UNALLOC_BODY = (
+    "<generalLedger>"
+    "<ledgerAccount><accID>1300</accID><accDesc>Deb</accDesc><accTp>B</accTp>"
+    "</ledgerAccount>"
+    "<ledgerAccount><accID>1100</accID><accDesc>Bank</accDesc><accTp>B</accTp>"
+    "</ledgerAccount></generalLedger>"
+    "<customersSuppliers><customerSupplier><custSupID>C1</custSupID>"
+    "<custSupTp>C</custSupTp><custSupName>Klant</custSupName></customerSupplier>"
+    "</customersSuppliers>"
+    "<transactions><journal><jrnID>BNK</jrnID><jrnTp>B</jrnTp>"
+    "<transaction><nr>1</nr><trDt>2025-04-01</trDt>"
+    "<trLine><nr>1</nr><accID>1100</accID><amnt>100.00</amnt><amntTp>D</amntTp>"
+    "<effDate>2025-04-01</effDate><docRef>PMT1</docRef></trLine>"
+    "<trLine><nr>2</nr><accID>1300</accID><amnt>100.00</amnt><amntTp>C</amntTp>"
+    "<effDate>2025-04-01</effDate><invRef>UNALLOC</invRef><custSupID>C1</custSupID>"
+    "</trLine></transaction></journal></transactions>"
+)
+
+
+def test_reversed_open_item_is_a_refund(tmp_path: Path) -> None:
+    """An unallocated receipt (AR credit) is staged as a refund and flagged."""
+    result = transform(_read_xaf(tmp_path, _UNALLOC_BODY), mode=MODE_CUTOVER)
+    inv = next(r for r in result.open_invoices.to_dicts() if r["name"] == "UNALLOC")
+    assert inv["move_type"] == "out_refund"
+    assert inv["invoice_line_ids/price_unit"] == "100.00"
+    assert result.refund_items  # flagged for review
 
 
 def test_transform_is_deterministic(tmp_path: Path) -> None:
