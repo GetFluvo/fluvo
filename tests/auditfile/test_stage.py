@@ -133,8 +133,14 @@ def test_generated_flow_parses_and_resolves(tmp_path: Path) -> None:
         _ledger(tmp_path), str(out), connection_file=str(conn), allow_warnings=True
     )
     assert result.flows_path is not None
+    # Pin a wide terminal so the Rich dry-run panel does not word-wrap the step
+    # command lines: the substring checks below span a space that Rich would
+    # otherwise break across a line (and the panel border), and the runner's
+    # default width differs by platform (this wrapped at 80 cols on macOS CI).
     res = CliRunner().invoke(
-        __main__.cli, ["--flow-file", result.flows_path, "--dry-run"]
+        __main__.cli,
+        ["--flow-file", result.flows_path, "--dry-run"],
+        env={"COLUMNS": "200"},
     )
     assert res.exit_code == 0, res.output
     assert "account.move --o2m" in res.output
