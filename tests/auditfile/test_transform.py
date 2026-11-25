@@ -364,6 +364,9 @@ def test_open_item_invoice_fields(tmp_path: Path) -> None:
     assert inv["invoice_line_ids/price_unit"] == "1210.00"
     assert inv["invoice_line_ids/account_id/id"] == result.clearing_xmlid
     assert inv["invoice_line_ids/tax_ids/id"] == ""  # no tax
+    # Customer invoice: the number is also the payment communication, so
+    # reminders and bank matching keep recognising it after migration.
+    assert inv["payment_reference"] == "2023-900"
 
 
 def test_due_dates_are_derived_and_counted(tmp_path: Path) -> None:
@@ -472,6 +475,7 @@ def test_reversed_open_item_is_a_refund(tmp_path: Path) -> None:
     inv = next(r for r in result.open_invoices.to_dicts() if r["ref"] == "UNALLOC")
     assert inv["move_type"] == "out_refund"
     assert inv["invoice_line_ids/price_unit"] == "100.00"
+    assert inv["payment_reference"] == "UNALLOC"  # customer refund carries it too
     assert result.refund_items  # flagged for review
 
 
@@ -515,6 +519,9 @@ def test_vendor_bill_name_blank_supplier_ref_kept(tmp_path: Path) -> None:
     assert inv["move_type"] == "in_invoice"
     assert inv["name"] == ""  # Odoo numbers the bill; the supplier ref is not its name
     assert inv["ref"] == "BILL-77"
+    # A bill's payment_reference is our outgoing payment's, not the supplier's
+    # number, so it is left empty — the supplier doc stays in ref only.
+    assert inv["payment_reference"] == ""
     assert inv["journal_id/id"] == "xaf.journal__opening_purchase"
     # The payable property is set, not the receivable one.
     assert result.partner_payable.height == 1

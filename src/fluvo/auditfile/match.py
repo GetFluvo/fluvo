@@ -128,6 +128,31 @@ def _company_field(connection: Any) -> str | None:
     return None
 
 
+def _company_context(company_id: int | None) -> dict[str, Any]:
+    """Build the RPC context that pins reads to the target company.
+
+    On Odoo 18+ ``account.account.code`` is **company-dependent** (stored per
+    company), so a read resolves ``code`` in the env's company — the connecting
+    user's default company — unless the target is put in context. Scoping the
+    domain to the company is not enough; the context must carry it too, or a
+    multi-company target returns the wrong (or empty) codes. ``force_company`` is
+    the legacy (≤13) spelling, harmless on newer builds.
+
+    Args:
+        company_id: The target company's database id, or None.
+
+    Returns:
+        dict[str, Any]: the context, or ``{}`` when no company was given.
+    """
+    if company_id is None:
+        return {}
+    return {
+        "allowed_company_ids": [company_id],
+        "company_id": company_id,
+        "force_company": company_id,
+    }
+
+
 def _m2o_id(value: Any) -> int | None:
     """Normalise a many2one RPC value (id, ``[id, name]`` pair, or False).
 
@@ -168,13 +193,7 @@ def _resolve_control_defaults(
         tuple[str | None, str | None]: the receivable and payable default
         account external ids, each None when unknown.
     """
-    context: dict[str, Any] = {}
-    if company_id is not None:
-        context = {
-            "allowed_company_ids": [company_id],
-            "company_id": company_id,
-            "force_company": company_id,
-        }
+    context = _company_context(company_id)
     try:
         defaults = connection.get_model("res.partner").default_get(
             ["property_account_receivable_id", "property_account_payable_id"],
@@ -223,8 +242,13 @@ def resolve_account_matches(connection: Any, company: str | None = None) -> Matc
         field_name = _company_field(connection)
         if field_name is not None:
             domain = [[field_name, "in", [company_id]]]
+    # The context must carry the company too: on Odoo 18+ ``code`` is
+    # company-dependent, so a bare read returns the connecting user's company's
+    # codes rather than the target's.
     accounts = connection.get_model("account.account").search_read(
-        domain, ["code", "name", "account_type", "reconcile"]
+        domain,
+        ["code", "name", "account_type", "reconcile"],
+        context=_company_context(company_id),
     )
     rows_by_code: dict[str, list[dict[str, Any]]] = {}
     for account in accounts:

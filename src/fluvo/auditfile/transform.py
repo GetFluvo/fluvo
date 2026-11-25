@@ -128,6 +128,7 @@ _OPEN_INVOICE_COLUMNS: Final = [
     "invoice_date",
     "invoice_date_due",
     "ref",
+    "payment_reference",
     "name",
     "narration",
     "invoice_line_ids/id",
@@ -1335,7 +1336,9 @@ def _open_invoice_rows(
     receivable/payable line lands on the source control account via the partner's
     staged property. The source document number is kept in ``ref`` (the move
     ``name`` is left to Odoo's sequence, so the cutover date cannot clash with a
-    historical number's year), and the invoice date, due date and partner are
+    historical number's year), and on customer invoices/refunds it is also set as
+    ``payment_reference`` so reminders and bank matching keep recognising it. The
+    invoice date, due date and partner are
     kept. The **accounting date** is the cutover date so the entry lands in the
     open period, and the move posts to a dedicated sale/purchase journal rather
     than whatever default Odoo would pick. Because the file carries no due date,
@@ -1385,6 +1388,12 @@ def _open_invoice_rows(
         # sequence to its date and rejects e.g. a "2023-…" number dated at a 2024
         # period end (strictly so on Odoo 16).
         name = ""
+        # On customer invoices/refunds the number also goes to
+        # ``payment_reference`` — the communication a customer pays with — so
+        # follow-up reminders and bank-statement matching still recognise the
+        # migrated document. Bills use ``ref`` only (the payment reference of a
+        # bill is our outgoing payment's, which we are not migrating here).
+        payment_reference = ref if is_sale else ""
         inv_xmlid = _open_invoice_xmlid(
             prefix, account_id, str(item.get("source_partner_id") or ""), item
         )
@@ -1402,6 +1411,7 @@ def _open_invoice_rows(
                 "invoice_date": invoice_date,
                 "invoice_date_due": due,
                 "ref": ref,
+                "payment_reference": payment_reference,
                 "name": name,
                 "narration": "Opening open-item residual (migrated).",
                 # ADR 0001 deterministic line id, so a re-run updates the line
