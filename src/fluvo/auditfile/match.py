@@ -15,6 +15,12 @@ just the external id but the target account's ``name``, ``account_type`` and
 agrees — a company's own numbering booked blindly onto an ``l10n_nl`` code of a
 different type is a silent misposting the preflight now catches.
 
+The same read also asks the target for its **default partner receivable/payable
+accounts** (``res.partner.default_get`` under the company context). When a
+matched source control account turns out to equal that default, forcing the
+partner property is redundant and is skipped — Odoo falls back to the same
+account on its own.
+
 Only an account whose **code is unique** in the target company and which already
 carries an external id is matched. A code that is ambiguous (several accounts) or
 whose target account has no external id is reported as *present but unmatchable*:
@@ -57,10 +63,16 @@ class MatchResult:
         unmatched_present: Account code → the reason it is present in the target
             but could not be matched (``"ambiguous"`` or ``"no external id"``).
             A source account with one of these codes must not be re-created.
+        default_receivable: The target company's default partner receivable
+            account external id (None if unknown). A matched source control that
+            equals this is left to Odoo's default rather than force-staged.
+        default_payable: The same for the default partner payable account.
     """
 
     matches: dict[str, AccountMatch] = field(default_factory=dict)
     unmatched_present: dict[str, str] = field(default_factory=dict)
+    default_receivable: str | None = None
+    default_payable: str | None = None
 
 
 def _resolve_company_id(connection: Any, company: str | None) -> int | None:
@@ -114,6 +126,76 @@ def _company_field(connection: Any) -> str | None:
     if "company_id" in fields:
         return "company_id"
     return None
+
+
+def _m2o_id(value: Any) -> int | None:
+    """Normalise a many2one RPC value (id, ``[id, name]`` pair, or False).
+
+    Args:
+        value: A raw many2one value as returned by ``default_get``/``read``.
+
+    Returns:
+        int | None: The record id, or None when unset.
+    """
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    if isinstance(value, bool) or value is None:
+        return None
+    return int(value)
+
+
+def _resolve_control_defaults(
+    connection: Any,
+    company_id: int | None,
+    xmlid_by_res: dict[int, str],
+) -> tuple[str | None, str | None]:
+    """Read the company's default partner receivable/payable account xmlids.
+
+    Asks Odoo itself (``res.partner.default_get`` under the company context) for
+    the account a partner's control line falls back to when its property is
+    unset, so the transform can skip force-staging a matched control that
+    already equals that default. Version-robust (the server resolves the
+    company-dependent default); any failure yields ``(None, None)`` so the
+    caller falls back to always staging the property.
+
+    Args:
+        connection: A live Odoo connection.
+        company_id: The target company's database id, or None.
+        xmlid_by_res: ``account.account`` res_id → external id, reused for the
+            lookup (extended in place with the two default account ids).
+
+    Returns:
+        tuple[str | None, str | None]: the receivable and payable default
+        account external ids, each None when unknown.
+    """
+    context: dict[str, Any] = {}
+    if company_id is not None:
+        context = {
+            "allowed_company_ids": [company_id],
+            "company_id": company_id,
+            "force_company": company_id,
+        }
+    try:
+        defaults = connection.get_model("res.partner").default_get(
+            ["property_account_receivable_id", "property_account_payable_id"],
+            context=context,
+        )
+    except Exception:  # any RPC/permission failure → no suppression, always stage
+        return (None, None)
+    recv_id = _m2o_id(defaults.get("property_account_receivable_id"))
+    pay_id = _m2o_id(defaults.get("property_account_payable_id"))
+    missing = [i for i in (recv_id, pay_id) if i and i not in xmlid_by_res]
+    if missing:
+        imd = connection.get_model("ir.model.data").search_read(
+            [["model", "=", "account.account"], ["res_id", "in", missing]],
+            ["res_id", "module", "name"],
+        )
+        for row in imd:
+            xmlid_by_res[int(row["res_id"])] = f"{row['module']}.{row['name']}"
+    return (
+        xmlid_by_res.get(recv_id) if recv_id else None,
+        xmlid_by_res.get(pay_id) if pay_id else None,
+    )
 
 
 def resolve_account_matches(connection: Any, company: str | None = None) -> MatchResult:
@@ -179,4 +261,12 @@ def resolve_account_matches(connection: Any, company: str | None = None) -> Matc
             account_type=str(account.get("account_type") or ""),
             reconcile=bool(account.get("reconcile")),
         )
-    return MatchResult(matches=matches, unmatched_present=unmatched)
+    default_receivable, default_payable = _resolve_control_defaults(
+        connection, company_id, xmlid_by_res
+    )
+    return MatchResult(
+        matches=matches,
+        unmatched_present=unmatched,
+        default_receivable=default_receivable,
+        default_payable=default_payable,
+    )

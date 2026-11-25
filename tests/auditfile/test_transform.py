@@ -409,6 +409,37 @@ def test_partner_property_only_for_open_item_partners(tmp_path: Path) -> None:
     assert hist.partner_payable.height == 0
 
 
+def test_matched_control_equal_to_company_default_is_not_staged(
+    tmp_path: Path,
+) -> None:
+    """A matched control equal to the target's default is left to Odoo.
+
+    When ``--match-accounts`` finds the source control account resolves to the
+    very account that is already the company's default receivable, forcing the
+    partner property is redundant, so the partner drops out of the frame.
+    """
+    ledger = _ledger(tmp_path, "3.2")
+    # Baseline: C001's receivable control resolves to xaf.account_1300.
+    baseline = transform(ledger, prefix="xaf", mode=MODE_CUTOVER)
+    assert baseline.partner_receivable.height == 1
+    # Tell the transform that xaf.account_1300 *is* the company default.
+    result = transform(
+        ledger,
+        prefix="xaf",
+        mode=MODE_CUTOVER,
+        default_receivable="xaf.account_1300",
+    )
+    assert result.partner_receivable.height == 0
+    # A non-matching default still forces the property.
+    other = transform(
+        ledger,
+        prefix="xaf",
+        mode=MODE_CUTOVER,
+        default_receivable="xaf.account_9999",
+    )
+    assert other.partner_receivable.height == 1
+
+
 def test_clearing_account_is_staged(tmp_path: Path) -> None:
     """The clearing account is created when it is not matched to an existing one."""
     result = transform(_ledger(tmp_path, "3.2"), prefix="xaf", mode=MODE_CUTOVER)

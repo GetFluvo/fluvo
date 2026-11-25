@@ -321,6 +321,8 @@ def stage(
         default_payment_days=default_payment_days,
         open_sale_journal=open_sale_journal,
         open_purchase_journal=open_purchase_journal,
+        default_receivable=rpc_matches.default_receivable,
+        default_payable=rpc_matches.default_payable,
     )
     report = run_preflight(ledger, result)
 

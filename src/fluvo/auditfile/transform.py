@@ -1560,6 +1560,8 @@ def transform(
     default_payment_days: int = _DEFAULT_PAYMENT_DAYS,
     open_sale_journal: str | None = None,
     open_purchase_journal: str | None = None,
+    default_receivable: str | None = None,
+    default_payable: str | None = None,
 ) -> TransformResult:
     """Transform a canonical ledger into Odoo-shaped frames.
 
@@ -1591,6 +1593,11 @@ def transform(
             invoices to; a dedicated sale journal is staged when omitted.
         open_purchase_journal: In cutover, a source journal id for the bills; a
             dedicated purchase journal is staged when omitted.
+        default_receivable: The target company's default partner receivable
+            account external id (from a ``--match-accounts`` read). A matched
+            source control equal to it is left to Odoo's default rather than
+            force-staged on the partner; None always stages the property.
+        default_payable: The same for the default partner payable account.
 
     Returns:
         TransformResult: The Odoo-shaped frames, alias map, account proposals,
@@ -1684,7 +1691,7 @@ def transform(
         )
         recv, pay, ambiguous = _partner_control_accounts(open_items, account_types)
         partner_receivable, partner_payable = _partner_property_frames(
-            alias, account_ref, recv, pay
+            alias, account_ref, recv, pay, default_receivable, default_payable
         )
 
         specs = _cutover_specs(
@@ -1785,6 +1792,8 @@ def _partner_property_frames(
     account_ref: dict[str, str],
     recv: dict[str, str],
     pay: dict[str, str],
+    default_receivable: str | None = None,
+    default_payable: str | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Build the receivable/payable property-override frames (cutover).
 
@@ -1796,11 +1805,21 @@ def _partner_property_frames(
     (writing a blank property cell would otherwise *clear* it). The update loads
     under the target company, so the company-dependent property is written there.
 
+    When the matched source control already equals the target company's default
+    receivable/payable account (``default_receivable``/``default_payable``, read
+    over RPC in a ``--match-accounts`` run), forcing the property is redundant —
+    Odoo would pick that account anyway — so that partner is dropped from the
+    frame and left to the company default.
+
     Args:
         alias: Source partner id → surviving partner external id.
         account_ref: Source account id → external id to reference.
         recv: Source partner id → receivable control account id.
         pay: Source partner id → payable control account id.
+        default_receivable: Target company default receivable account external
+            id; a matched control equal to it is left to the default (None
+            forces every open-item partner's property).
+        default_payable: The same for the default payable account.
 
     Returns:
         tuple[pl.DataFrame, pl.DataFrame]: the receivable and payable property
@@ -1808,17 +1827,19 @@ def _partner_property_frames(
         partner, sorted by id.
     """
 
-    def _frame(mapping: dict[str, str], column: str) -> pl.DataFrame:
+    def _frame(
+        mapping: dict[str, str], column: str, default: str | None
+    ) -> pl.DataFrame:
         seen: dict[str, str] = {}
         for source_id, account_id in mapping.items():
             xmlid = alias.get(source_id, "")
             ref = account_ref.get(account_id, "")
-            if xmlid and ref:
+            if xmlid and ref and ref != default:
                 seen[xmlid] = ref
         rows = [{"id": xmlid, column: ref} for xmlid, ref in sorted(seen.items())]
         return pl.DataFrame(rows, schema={"id": pl.String, column: pl.String})
 
     return (
-        _frame(recv, "property_account_receivable_id/id"),
-        _frame(pay, "property_account_payable_id/id"),
+        _frame(recv, "property_account_receivable_id/id", default_receivable),
+        _frame(pay, "property_account_payable_id/id", default_payable),
     )
