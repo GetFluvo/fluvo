@@ -256,6 +256,11 @@ def test_xaf_matches_existing_chart_and_imports_banks(
     assert all(matches.matches.get(code) for code in codes), (
         "all codes should be matchable"
     )
+    # The control-default read (res.partner.default_get over RPC) must run live
+    # and yield either a real account xmlid or None (this build has no chart, so
+    # typically None) — never raise. It drives the F suppression offline.
+    for default in (matches.default_receivable, matches.default_payable):
+        assert default is None or (isinstance(default, str) and "." in default)
 
     staged = stage(
         ledger,
