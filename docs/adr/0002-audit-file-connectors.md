@@ -82,7 +82,10 @@ the partner's or company's default) by staging the partner's
 is company-dependent, so it is written in a **separate update** that touches only
 the partners carrying an open item of that kind (loaded under the target
 company) — never the whole partner file, whose blank cells would otherwise clear
-every other migrated partner's default. A spike against a live Odoo confirmed
+every other migrated partner's default. When `--match-accounts` shows the source
+control already resolves to the company's own default receivable/payable account,
+that partner is dropped from the update too: forcing the property would be
+redundant. A spike against a live Odoo confirmed
 that a draft invoice created over RPC with a single no-tax line on the clearing
 account yields the exact residual as `amount_total`, with the forced control
 account, no tax recompute and no rounding line.

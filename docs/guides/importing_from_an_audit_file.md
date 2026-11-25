@@ -175,7 +175,9 @@ is omitted when no partner carries an account.
   **source control account** — the connector stages the partner's
   receivable/payable property to force it, rather than Odoo's default, and does
   so only for the partners that have an open item (in a separate update file),
-  so no other partner's default is touched. The one opening move then carries each
+  so no other partner's default is touched — and when `--match-accounts` shows the
+  source control is already the company's default receivable/payable account, the
+  property is left unset so Odoo falls back to that same account. The one opening move then carries each
   account's closing balance, with the clearing account holding the counter-amount
   of all those invoices (so it nets to zero) instead of the AR/AP totals. Open
   items are the prior-year opening subledger plus this year's lines, matched on
