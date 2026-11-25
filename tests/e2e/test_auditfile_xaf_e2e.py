@@ -373,6 +373,7 @@ def test_xaf_cutover_open_items_as_invoices(
             "state",
             "amount_total",
             "ref",
+            "payment_reference",
             "line_ids",
             "date",
             "invoice_date",
@@ -390,6 +391,11 @@ def test_xaf_cutover_open_items_as_invoices(
     # is still preserved for the aged balance.
     assert by_ref["2023-900"]["date"] == "2024-12-31"
     assert by_ref["2023-900"]["invoice_date"] == "2023-12-15"
+    # The source number also lands in payment_reference on customer invoices and
+    # survives the load unchanged (the move is draft, so Odoo does not recompute
+    # it), so reminders and bank matching keep recognising the migrated document.
+    assert by_ref["2023-900"]["payment_reference"] == "2023-900"
+    assert by_ref["DOC1"]["payment_reference"] == "DOC1"
     for inv in invoices:
         assert inv["state"] == "draft"
         # Each open-item invoice posts to the dedicated opening-sales journal,
