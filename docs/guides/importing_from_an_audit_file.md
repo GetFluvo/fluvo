@@ -170,7 +170,12 @@ is omitted when no partner carries an account.
   the invoice posts to a dedicated opening sale/purchase journal. The source
   document number — invoice or supplier bill — is kept in `ref`, and Odoo numbers
   the move from the opening journal's sequence (forcing the historical number as
-  the name would clash with the cutover date). The receivable/payable line lands
+  the `name` would clash with the cutover date — Odoo ties a move's sequence to
+  its date and rejects, for example, a `2023-…` number dated at a 2024 period
+  end, strictly so on Odoo 16). On **customer invoices and refunds** the number
+  is also written to `payment_reference`, the communication a customer pays with,
+  so dunning reminders and bank-statement matching keep recognising the migrated
+  document; vendor bills carry it in `ref` only. The receivable/payable line lands
   on the
   **source control account** — the connector stages the partner's
   receivable/payable property to force it, rather than Odoo's default, and does

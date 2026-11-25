@@ -101,7 +101,12 @@ source document number — invoice or supplier bill alike — is kept in `ref`, 
 the move name is left to the opening journal's own sequence: forcing the
 historical number as the name clashes with the cutover accounting date, because
 Odoo ties a move's sequence to its date and rejects, say, a `2023-…` number
-dated at a 2024 period end (strictly so on Odoo 16).
+dated at a 2024 period end (strictly so on Odoo 16). On customer invoices and
+refunds the number is **also** written to `payment_reference` — the structured
+communication a customer pays with — so dunning reminders and bank-statement
+matching keep recognising the migrated document even though its `name` is a new
+sequence number; vendor bills keep it in `ref` only (a bill's payment reference
+belongs to our outgoing payment, which the cutover does not migrate).
 
 The single opening move then carries each account's closing balance, with the
 **clearing account** holding the counter-amount of all the invoices (so it nets
