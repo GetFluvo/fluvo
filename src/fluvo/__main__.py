@@ -30,6 +30,7 @@ from .lib.actions.vies_manager import (
 from .lib.flow_runner import StepOutcome, StepResult
 
 if TYPE_CHECKING:
+    from .auditfile.match import MatchResult
     from .lib.flow import Flow, FlowFile
     from .lib.mapping import MappingSpec
 from .lib.validation import display_validation_results, validate_csv_data
@@ -1055,6 +1056,222 @@ def auditfile_inspect_cmd(file: str, fmt: str | None, as_json: bool) -> None:
     except FluvoError as exc:
         _show_error_panel("Audit file", str(exc))
         raise SystemExit(exc.exit_code) from exc
+
+
+def _auditfile_account_matches(
+    match_accounts: bool, connection_file: str | None, company: str | None
+) -> "MatchResult | None":
+    """Resolve existing-chart account matches over RPC, when requested.
+
+    Args:
+        match_accounts: Whether ``--match-accounts`` was passed.
+        connection_file: The Odoo connection file (required when matching).
+        company: The target company to scope the chart read to (a code is only
+            unique within a company).
+
+    Returns:
+        MatchResult | None: The resolved matches and present-but-unmatchable
+        codes, or None when matching was not requested.
+
+    Raises:
+        InputError: If ``--match-accounts`` is given without a connection file.
+    """
+    if not match_accounts:
+        return None
+    from .auditfile.match import resolve_account_matches
+    from .lib.conf_lib import get_connection_from_config
+    from .lib.core import InputError
+
+    if not connection_file:
+        raise InputError("--match-accounts requires --connection-file.")
+    connection = get_connection_from_config(config_file=connection_file)
+    return resolve_account_matches(connection, company=company)
+
+
+@auditfile_group.command(name="stage")
+@click.argument("file", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--out",
+    "out_dir",
+    required=True,
+    type=click.Path(file_okay=False),
+    help="Directory to write the stage (CSVs, maps, preflight.json, flows.yml).",
+)
+@click.option(
+    "--mode",
+    type=click.Choice(["full_history", "cutover"], case_sensitive=False),
+    default="full_history",
+    help="full_history: every transaction as a draft move. "
+    "cutover: opening balance only, AR/AP broken out per open item.",
+)
+@click.option(
+    "--connection-file",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="Odoo connection file to embed in the generated flows.yml.",
+)
+@click.option(
+    "--account-map",
+    "account_map",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="An edited account_map.csv whose account_type values override the "
+    "mapper chain.",
+)
+@click.option(
+    "--prefix", default="xaf", help="External-id prefix for the staged records."
+)
+@click.option(
+    "--company",
+    default=None,
+    help="Company id or external id (e.g. 'base.main_company') to load into; "
+    "required when the target Odoo has more than one company.",
+)
+@click.option(
+    "--no-dedup",
+    "no_dedup",
+    is_flag=True,
+    default=False,
+    help="Do not merge customer/supplier records sharing a KvK/VAT number.",
+)
+@click.option(
+    "--result-account",
+    default=None,
+    help="In cutover, a source account code to close the profit-and-loss "
+    "accounts into (for a clean balance sheet); omit to carry each P&L balance.",
+)
+@click.option(
+    "--clearing-account",
+    default=None,
+    help="In cutover, the account code for the open-item clearing account "
+    "(a synthetic one is created when omitted).",
+)
+@click.option(
+    "--default-payment-days",
+    type=int,
+    default=30,
+    show_default=True,
+    help="Days after the invoice date used to derive an open-item due date "
+    "(XAF carries none).",
+)
+@click.option(
+    "--open-sale-journal",
+    default=None,
+    help="In cutover, a source journal code to post sale open-item invoices to "
+    "(a dedicated sale journal is created when omitted).",
+)
+@click.option(
+    "--open-purchase-journal",
+    default=None,
+    help="In cutover, a source journal code for the open-item bills "
+    "(a dedicated purchase journal is created when omitted).",
+)
+@click.option(
+    "--allow-control-total-mismatch",
+    is_flag=True,
+    default=False,
+    help="Stage even when the file's declared control totals do not match the "
+    "parse (otherwise an error). Use only after confirming the file is complete.",
+)
+@click.option(
+    "--match-accounts",
+    "match_accounts",
+    is_flag=True,
+    default=False,
+    help="Read the target chart over --connection-file and reference accounts "
+    "whose code already exists instead of creating them (for a pre-charted "
+    "company, e.g. l10n_nl). Matched accounts are never modified.",
+)
+@click.option(
+    "--allow-warnings",
+    is_flag=True,
+    default=False,
+    help="Stage even when preflight has warnings (errors always block).",
+)
+@click.option(
+    "--format",
+    "fmt",
+    default=None,
+    help="Force the audit-file format (e.g. 'xaf') instead of auto-detecting.",
+)
+def auditfile_stage_cmd(
+    file: str,
+    out_dir: str,
+    mode: str,
+    connection_file: str | None,
+    account_map: str | None,
+    prefix: str,
+    company: str | None,
+    no_dedup: bool,
+    result_account: str | None,
+    clearing_account: str | None,
+    default_payment_days: int,
+    open_sale_journal: str | None,
+    open_purchase_journal: str | None,
+    allow_control_total_mismatch: bool,
+    match_accounts: bool,
+    allow_warnings: bool,
+    fmt: str | None,
+) -> None:
+    """Compile an audit file into a loadable stage directory.
+
+    Reads FILE, writes Odoo-shaped CSVs plus a generated flows.yml to --out, and
+    runs preflight. Load the result with ``fluvo --flow-file <out>/flows.yml``.
+    Nothing is *written* to Odoo; ``--match-accounts`` only *reads* the target
+    chart to reference accounts that already exist.
+    """
+    from rich.console import Console
+
+    from .auditfile import read_auditfile
+    from .auditfile.stage import load_account_overrides, stage
+    from .lib.core import FluvoError
+    from .lib.internal.ui import _show_error_panel
+
+    console = Console()
+    try:
+        ledger = read_auditfile(file, fmt=fmt)
+        overrides = load_account_overrides(account_map) if account_map else None
+        matches = _auditfile_account_matches(match_accounts, connection_file, company)
+        result = stage(
+            ledger,
+            out_dir,
+            mode=mode.lower(),
+            prefix=prefix,
+            connection_file=connection_file,
+            account_overrides=overrides,
+            account_matches=matches,
+            allow_warnings=allow_warnings,
+            allow_control_total_mismatch=allow_control_total_mismatch,
+            company=company,
+            dedup=not no_dedup,
+            result_account=result_account,
+            clearing_account=clearing_account,
+            default_payment_days=default_payment_days,
+            open_sale_journal=open_sale_journal,
+            open_purchase_journal=open_purchase_journal,
+        )
+    except FluvoError as exc:
+        _show_error_panel("Audit file", str(exc))
+        raise SystemExit(exc.exit_code) from exc
+    if result.matched_accounts:
+        console.print(
+            f"[cyan]Matched[/cyan] {len(result.matched_accounts)} account(s) "
+            "onto the existing chart (referenced, not created)."
+        )
+
+    for line in result.report.summary_lines():
+        console.print(line)
+    if result.blocked:
+        console.print(
+            f"[yellow]Blocked:[/yellow] wrote data + preflight.json to "
+            f"{result.out_dir}, but no flows.yml. Fix the findings (or pass "
+            f"--allow-warnings) and re-run."
+        )
+        raise SystemExit(1)
+    console.print(
+        f"[green]Staged[/green] {result.out_dir}\n"
+        f"Load with: fluvo --flow-file {result.flows_path}"
+    )
 
 
 # --- VAT Validation Command Group ---

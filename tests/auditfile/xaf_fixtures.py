@@ -35,6 +35,7 @@ _NAMESPACE = {
 #: ``(accID, accDesc, accTp, rgs_code)``. The receivable/payable pair lets the
 #: transform exercise control-account handling.
 _CORE_ACCOUNTS = (
+    ("0500", "Eigen vermogen", "B", "BEivKap"),
     ("1100", "Bank", "B", "BLimBanRba"),
     ("1300", "Debiteuren", "B", "BVorHanDeb"),
     ("1600", "Crediteuren", "B", "BSchCreHac"),
@@ -176,8 +177,10 @@ def _write_partners(handle: TextIO, version: str, kvk: str) -> int:
         _tag(handle, "country", "NL")
         handle.write("</streetAddress>")
         if version == "3.2":
+            # Distinct per partner, so staged res.partner.bank rows never clash
+            # on the account-number uniqueness constraint when loaded.
             handle.write("<bankAccount>")
-            _tag(handle, "bankAccNr", "NL00BANK0123456789")
+            _tag(handle, "bankAccNr", f"NL00BANK{commerce}")
             handle.write("</bankAccount>")
         handle.write("</customerSupplier>")
     handle.write("</customersSuppliers>")
