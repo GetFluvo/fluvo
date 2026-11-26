@@ -374,3 +374,43 @@ def test_cli_stage_with_account_map(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     new_map = (out2 / "account_map.csv").read_text()
     assert "9006;9006;Tussenrekening 6;asset_fixed;False;override" in new_map
+
+
+def test_stage_post_flag_adds_post_steps(tmp_path: Path) -> None:
+    """`stage --post` appends a post step per account.move file; default: none."""
+    out = tmp_path / "stage"
+    stage(
+        _ledger(tmp_path, "3.2"),
+        str(out),
+        mode="cutover",
+        allow_warnings=True,
+        post=True,
+    )
+    text = (out / "flows.yml").read_text()
+    assert "run: post" in text
+    assert "id: post_moves" in text  # the opening entry is posted
+    # posting comes after every import step
+    assert text.index("run: import") < text.index("run: post")
+
+    plain = tmp_path / "stage_plain"
+    stage(_ledger(tmp_path, "3.2"), str(plain), mode="cutover", allow_warnings=True)
+    assert "run: post" not in (plain / "flows.yml").read_text()  # default stays draft
+
+
+def test_generated_post_flow_parses_and_validates(tmp_path: Path) -> None:
+    """The generated post flow parses and its post step's options validate."""
+    from fluvo.__main__ import _command_option_specs, cli
+    from fluvo.lib.flow import VALID_COMMANDS, parse_flow_file
+
+    out = tmp_path / "stage"
+    stage(
+        _ledger(tmp_path, "3.2"),
+        str(out),
+        mode="cutover",
+        allow_warnings=True,
+        post=True,
+    )
+    known = {n: set(_command_option_specs(cli.commands[n])) for n in VALID_COMMANDS}
+    ff = parse_flow_file(str(out / "flows.yml"), known_options=known)
+    runs = [s.run for f in ff.flows for s in f.steps]
+    assert "import" in runs and "post" in runs

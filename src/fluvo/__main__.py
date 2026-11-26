@@ -1217,6 +1217,14 @@ def _auditfile_account_matches(
     default=None,
     help="Force the audit-file format (e.g. 'xaf') instead of auto-detecting.",
 )
+@click.option(
+    "--post",
+    is_flag=True,
+    default=False,
+    help="Also emit a post step in the generated flows.yml, so loading the "
+    "stage posts the journal entries too. Posting is one-way; the default "
+    "stays draft (load only).",
+)
 def auditfile_stage_cmd(
     file: str,
     out_dir: str,
@@ -1235,13 +1243,15 @@ def auditfile_stage_cmd(
     match_accounts: bool,
     allow_warnings: bool,
     fmt: str | None,
+    post: bool,
 ) -> None:
     """Compile an audit file into a loadable stage directory.
 
     Reads FILE, writes Odoo-shaped CSVs plus a generated flows.yml to --out, and
     runs preflight. Load the result with ``fluvo --flow-file <out>/flows.yml``.
     Nothing is *written* to Odoo; ``--match-accounts`` only *reads* the target
-    chart to reference accounts that already exist.
+    chart to reference accounts that already exist, and ``--post`` only changes
+    what the *generated* flow will do (the load stays draft unless asked).
     """
     from rich.console import Console
 
@@ -1272,6 +1282,7 @@ def auditfile_stage_cmd(
             default_payment_days=default_payment_days,
             open_sale_journal=open_sale_journal,
             open_purchase_journal=open_purchase_journal,
+            post=post,
         )
     except FluvoError as exc:
         _show_error_panel("Audit file", str(exc))
