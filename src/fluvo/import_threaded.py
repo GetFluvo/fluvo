@@ -27,8 +27,10 @@ from rich.progress import (
 from .lib import buckets, conf_lib
 from .lib import checkpoint as ckpt
 from .lib import idempotent as idempotent_lib
+from .lib import immutable as immutable_lib
 from .lib import retry as retry_lib
 from .lib import throttle as throttle_lib
+from .lib.core import FluvoError
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch, to_xmlid
 from .logging_config import log, suppress_console_handler
@@ -454,10 +456,19 @@ class _BucketingFailWriter:
     def writerow(self, row: list[Any]) -> None:
         """Write one failed row, appending its classified bucket.
 
+        A row that failed on Odoo's date-vs-sequence rejection (a move named for
+        a different year than its date — raised at create on Odoo 16, #358/#359)
+        has its reason relabelled with the canonical ``sequence_date_mismatch``
+        tag so the load fail file names it exactly as the post step does, while
+        keeping Odoo's own message after it.
+
         Args:
             row: The failed row, ending in its ``_ERROR_REASON`` value.
         """
         reason = str(row[-1]) if row else ""
+        if row and immutable_lib.is_sequence_date_error(reason):
+            reason = f"{immutable_lib.SEQUENCE_DATE_MISMATCH}: {reason}"
+            row = [*row[:-1], reason]
         self._writer.writerow([*row, buckets.classify_failure(reason)])
 
     def writerows(self, rows: "Iterable[list[Any]]") -> None:
@@ -3453,6 +3464,9 @@ def import_data(  # noqa: C901
         and not deferred
         and not force_create
         and not resolve_relations
+        # Guarded models (#358) read live record state before the load to
+        # refuse posted/cancelled targets, which needs the whole dataset.
+        and immutable_lib.rule_for(model) is None
     )
     if stream and not can_stream:
         log.warning(
@@ -3554,6 +3568,34 @@ def import_data(  # noqa: C901
             ["" if v is None else str(v) for v in row] for row in df.iter_rows()
         ]
         log.info("Applied auto-clean coercions before load.")
+
+    # --- Immutable-record guard (#358) ---
+    # Rows targeting a record a re-run must not change (a posted or cancelled
+    # move) are taken out of the load before any write and routed to the fail
+    # file under a named reason, counted as failed. Odoo does not protect a
+    # posted move over RPC (verified #359), so Fluvo reads the live state and
+    # refuses here. record_count is deliberately NOT reduced: the rows stay in
+    # the total, now as failures, so created + failed + unaccounted == total.
+    guarded_rows: list[tuple[list[Any], str]] = []
+    if not can_stream and header and all_data and immutable_lib.rule_for(model):
+        try:
+            all_data, guarded_rows = immutable_lib.guard_rows(
+                connection, model, header, all_data, unique_id_field or "id", o2m
+            )
+        except FluvoError as e:
+            from .lib.internal.ui import _show_error_panel
+
+            _show_error_panel("Immutable Record Check Failed", str(e))
+            return False, {}
+        if guarded_rows:
+            by_reason: dict[str, int] = {}
+            for _row, reason in guarded_rows:
+                by_reason[reason] = by_reason.get(reason, 0) + 1
+            log.info(
+                f"{len(guarded_rows)} row(s) target an already posted/cancelled "
+                f"'{model}' and were not loaded (recorded as failed): "
+                f"{by_reason}."
+            )
 
     # Apply idempotent filtering if enabled (skip unchanged records)
     idempotent_stats = None
@@ -3708,6 +3750,10 @@ def import_data(  # noqa: C901
         fail_writer, fail_handle = _setup_fail_file(
             fail_file, header, separator, encoding
         )
+        # Guarded rows (#358) are genuine failures: write them to the fail file
+        # up front so standard tooling sees them, each with its own reason.
+        if fail_writer is not None and guarded_rows:
+            fail_writer.writerows([[*row, reason] for row, reason in guarded_rows])
 
     # Create throttle controller for adaptive throttling
     throttle_controller = None
@@ -3865,8 +3911,9 @@ def import_data(  # noqa: C901
 
     overall_success = pass_1_successful and pass_2_successful
 
-    # Get failed records count from pass_1_results
-    failed_records = len(pass_1_results.get("failed_lines", []))
+    # Get failed records count from pass_1_results, plus the rows the immutable
+    # guard (#358) refused before the load (already written to the fail file).
+    failed_records = len(pass_1_results.get("failed_lines", [])) + len(guarded_rows)
 
     stats = {
         "total_records": record_count,
@@ -3876,6 +3923,11 @@ def import_data(  # noqa: C901
         "id_map": id_map,
         "fallback_records": pass_1_results.get("fallback_records", 0),
     }
+    if guarded_rows:
+        reasons: dict[str, int] = {}
+        for _row, reason in guarded_rows:
+            reasons[reason] = reasons.get(reason, 0) + 1
+        stats["immutable_guarded"] = reasons
 
     # --- Reconciliation Check ---
     # Verify that created + failed == total (accounting for duplicates)
