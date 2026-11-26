@@ -224,15 +224,37 @@ created together. Because every record carries a deterministic external id, a
 second run **updates** rather than duplicates — re-running a failed load
 converges.
 
+### Posting the entries (`stage --post`)
+
+By default the load lands everything as **draft** and stops there. To also post
+the journal entries, stage with `--post`:
+
+```bash
+fluvo auditfile stage file.xaf --out ./stage --connection-file odoo.conf --post
+fluvo --flow-file ./stage/flows.yml
+```
+
+`--post` adds a `post` step to the generated `flows.yml` for each `account.move`
+file — the opening entry and, in cutover, the open-item invoices — running
+**after every import**, in that order, so the clearing account is only
+momentarily non-zero. Posting is **one-way** (unlike the load, it does not
+converge on re-run), which is why it is opt-in. It is still **safe to re-run**: a
+move already posted — by an earlier run or by someone in Odoo — is left untouched
+and counted, never posted twice. A move Odoo would silently re-date past a lock
+date, or otherwise refuse, is **not posted**; it lands in a `_post_fail.csv` with
+a named reason and aborts the flow, so a partial post is a reported state you
+resolve and re-run, not a silent half-finished cutover. The semantics are in
+[ADR 0001](../adr/0001-account-move-load-and-post.md).
+
 ## What lands, and what is deferred
 
-Everything lands as **draft** — the moves, and the cutover open-item invoices.
-Posting a historical `account.move` or invoice is a separate, explicit,
-deliberately non-idempotent step (see
-[ADR 0001](../adr/0001-account-move-load-and-post.md)), and **auto-reconciliation
-is not performed** by this connector yet. **Reminders and follow-up only see the
-open-item invoices once they are posted.** The staged data is built so that a
-later post/reconcile step slots in without reshaping anything.
+Without `--post` everything lands as **draft** — the moves, and the cutover
+open-item invoices. Posting is the separate, explicit, deliberately
+non-idempotent step above (see
+[ADR 0001](../adr/0001-account-move-load-and-post.md)); **auto-reconciliation is
+not performed** by this connector yet. **Reminders and follow-up only see the
+open-item invoices once they are posted.** The staged data is built so that the
+post step — and a later reconcile step — slot in without reshaping anything.
 
 **`full_history` lands plain journal entries, not invoices.** It creates
 `account.move` records with lines, not `account.move` *invoices*: no invoice/bill

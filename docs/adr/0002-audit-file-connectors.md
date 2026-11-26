@@ -127,15 +127,22 @@ warning), with its own `--allow-control-total-mismatch` override, so that
 `--allow-warnings` — which a first run needs for the account-typing proposals —
 cannot quietly let a truncated or mis-parsed file through.
 
-### Moves land draft; posting is a separate step
+### Moves land draft; posting is opt-in behind `stage --post`
 
 Historical moves are staged as **draft**, exactly as
 [ADR 0001](0001-account-move-load-and-post.md) requires: move lines carry the
 deterministic `<move_xmlid>_l<n>` external id so a re-run converges, and posting
-— the one deliberately non-idempotent action — is left to the explicit post step
-ADR 0001 defines. **Auto-reconciliation is not part of the connector.** The
-staged data and the per-open-item `open_items.csv` are shaped so that a later
-post/reconcile step slots in without reshaping anything.
+— the one deliberately non-idempotent action — is the explicit post step ADR 0001
+defines. The connector exposes that step as **`stage --post`**: it appends a
+`post` step to the generated `flows.yml` for each `account.move` file (the
+opening entry and, in cutover, the open invoices), running after every import so
+the clearing account is only momentarily non-zero. **The default stays draft** —
+a load never posts unless `--post` is given, because posting is one-way. A
+partial post is a reported state (its `_post_fail.csv` aborts the flow) that a
+re-run converges, so a cutover is never left silently half-posted.
+**Auto-reconciliation is not part of the connector.** The staged data and the
+per-open-item `open_items.csv` are shaped so that a later reconcile step slots in
+without reshaping anything.
 
 ### The XSDs are not vendored
 
@@ -230,6 +237,8 @@ assurance profile is what proves, to an auditor's standard, that it landed right
   (see *Matching an existing chart*): existing accounts are referenced, never
   modified, so an installed localisation chart is safe. Matching journals and
   taxes the same way is future work.
-- The post/reconcile step still wants validation against a real `l10n_nl` stack
-  before production sign-off — tracked with the end-to-end work. Cutover's
-  opening-balance semantics are now fixed (the closing position at period end).
+- The post step is now wired as `stage --post` (one-way, opt-in; ADR 0001).
+  **Auto-reconciliation** of the cutover open items is the remaining piece and
+  still wants validation against a real `l10n_nl` stack before production
+  sign-off — tracked with the end-to-end work. Cutover's opening-balance
+  semantics are now fixed (the closing position at period end).
