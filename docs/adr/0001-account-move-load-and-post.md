@@ -86,13 +86,31 @@ The move is the unit of reconciliation: `total` counts moves, not lines.
   leaving open-item `name` blank and letting Odoo number the move.
 
 - **Lock dates.** Fluvo never edits lock dates. The post step reads the company
-  lock dates first; a move dated on or before a lock date is **not attempted**:
-  `failed`, reason `lock_date`, bucket `client_decision`. *Verified on 16/18/19:*
-  posting a move dated on or before `fiscalyear_lock_date` **silently shifts the
-  accounting date forward** instead of raising — exactly why the move is blocked
-  rather than attempted. (On 17 the shift could not be exercised because setting
-  the lock over a plain RPC `write` raises a `RedirectWarning`; the behaviour is
-  confirmed on the other three.)
+  lock dates first; a move dated on or before an applicable lock is **not
+  attempted**: `failed`, reason `lock_date` (the message names which lock),
+  bucket `client_decision`. *Verified on 16/18/19:* posting a move dated on or
+  before `fiscalyear_lock_date` **silently shifts the accounting date forward**
+  instead of raising — exactly why the move is blocked rather than attempted.
+  (On 17 the shift could not be exercised because setting the lock over a plain
+  RPC `write` raises a `RedirectWarning`; the behaviour is confirmed on the
+  other three.) The **per-lock** behaviour was verified on 16-19 (see the
+  [findings](0001-verification-359-findings.md)): `fiscalyear_lock_date` and the
+  18+ `sale_lock_date` / `purchase_lock_date` **silently shift**;
+  `tax_lock_date` and `period_lock_date` posted a historical move at its
+  original date (no shift) for the adviser user a migration runs as;
+  `hard_lock_date` cannot even be set over RPC while draft entries exist. So the
+  pre-check blocks on the proven-shift locks — `fiscalyear_lock_date`,
+  `tax_lock_date` (kept as a conservative block, since it shifts a *tax-bearing*
+  move and the step cannot cheaply tell which moves carry tax), `hard_lock_date`
+  (irreversible), and the journal-gated `sale_`/`purchase_lock_date` — reading
+  only the fields that exist (`fields_get`) and inheriting a branch's
+  parent-company locks (17+); the strictest applicable one names the block.
+  `period_lock_date` is **deliberately not** pre-blocked: blocking it would
+  wrongly refuse a whole migration's pre-period moves, when the adviser user
+  posts past it with no shift. The net for it — and for any lock exception or
+  future field the pre-check cannot see — is a **date post-condition**: each
+  posted move's `date` is compared before and after, and a silent shift is
+  `failed`, reason `date_changed_on_post`.
 
 - **Lines.** `line_ids/id` is **required and deterministic**
   (`<move_xmlid>_l<n>`). Preflight rejects an `account.move` import that lacks
@@ -118,6 +136,7 @@ The move is the unit of reconciliation: `total` counts moves, not lines.
 | `sequence_date_mismatch` | load (16) / post (17–19) | `client_decision` | `failed` |
 | `already_posted` | post | — | `unaccounted` |
 | `name_changed_on_post` | post | — | `failed` |
+| `date_changed_on_post` | post | `client_decision` | `failed` |
 | `lock_date` | post | `client_decision` | `failed` |
 | `stale_lines` | post | `client_decision` | `failed` |
 

@@ -517,3 +517,39 @@ def test_mapping_and_with_model_conflict(tmp_path: Path) -> None:
     )
     with pytest.raises(FlowError, match="both `mapping.model` and `with.model`"):
         parse_flow_file(_write(tmp_path, flow))
+
+
+def test_post_command_is_valid_and_wired(tmp_path: Path) -> None:
+    """`run: post` parses, its options come from the real command, and it dispatches.
+
+    Guards #414 review item 9: `post` must be in VALID_COMMANDS and the flow
+    option validator must derive its known options from the registered `post`
+    command (so a `with:` typo is caught and a valid step dispatches).
+    """
+    from fluvo.__main__ import _command_option_specs, cli
+    from fluvo.lib.flow import VALID_COMMANDS
+
+    assert "post" in VALID_COMMANDS
+    assert "post" in cli.commands  # the dispatch target exists
+    known = {n: set(_command_option_specs(cli.commands[n])) for n in VALID_COMMANDS}
+    assert {"connection_file", "file"} <= known["post"]
+
+    good = """
+version: 1
+flows:
+  - name: cutover
+    steps:
+      - run: post
+        with: {connection_file: c.conf, file: moves.csv}
+"""
+    ff = parse_flow_file(_write(tmp_path, good), known_options=known)
+    assert ff.flows[0].steps[0].run == "post"
+
+    bad = """
+version: 1
+flows:
+  - name: f
+    steps: [{run: post, with: {bogus_flag: 1}}]
+"""
+    with pytest.raises(FlowError, match="unknown option 'bogus_flag'"):
+        parse_flow_file(_write(tmp_path, bad), known_options=known)

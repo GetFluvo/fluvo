@@ -16,7 +16,7 @@ Schema (v1)::
       - name: partners
         on_error: abort         # abort (default) | continue
         steps:
-          - run: import         # import | export | write | migrate
+          - run: import         # import | export | write | migrate | post
             id: create-partners # optional, unique within the flow
             with:               # the command's PARAMETER names — see note below
               connection_file: "{{ vars.conn }}"
@@ -45,7 +45,7 @@ from typing import Any, cast
 from .mapping import MappingSpec, parse_mapping
 
 SUPPORTED_VERSION = 1
-VALID_COMMANDS = ("import", "export", "write", "migrate")
+VALID_COMMANDS = ("import", "export", "write", "migrate", "post")
 VALID_ON_ERROR = ("abort", "continue")
 
 _VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")

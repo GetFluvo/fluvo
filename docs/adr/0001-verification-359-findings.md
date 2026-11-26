@@ -22,6 +22,43 @@ Exact messages (A2): 16 — *"The Date (12/31/2024) doesn't match the sequence n
 of the related Journal Entry (2023-900)…"*; 18/19 — *"The Date … isn't aligned with
 the existing sequence number…"*. (C): *"…account … is deprecated, you cannot post it."*
 
+## Per-lock verification (probe F, #414 review item 6)
+
+Each lock was set on its own, with a violating draft move on a **pristine
+journal** (so a prior test's shift could not turn a later post into a sequence
+mismatch), then posted. Result per `res.company` lock field and version:
+
+| Lock field | 16 | 17 | 18 | 19 |
+|---|---|---|---|---|
+| `fiscalyear_lock_date` | set-blocked¹ | set-blocked¹ | **silent shift** | **silent shift** |
+| `tax_lock_date` | no shift² | no shift² | no shift² | no shift² |
+| `period_lock_date` | no shift³ | no shift³ | (field gone) | (field gone) |
+| `hard_lock_date` | (field gone) | (field gone) | set-blocked⁴ | set-blocked⁴ |
+| `sale_lock_date` | (field gone) | (field gone) | **silent shift** | **silent shift** |
+| `purchase_lock_date` | (field gone) | (field gone) | **silent shift** | **silent shift** |
+
+A **silent shift** moved the move's date forward (e.g. `2024-06-15` → next open
+period) and posted it with *no* error — the hazard the pre-check exists to stop.
+
+¹ Setting `fiscalyear_lock_date` over a plain RPC `write` raises a
+`RedirectWarning` while unposted entries exist, so the shift could not be
+exercised on 16/17 through this path (confirmed on 18/19).
+² `tax_lock_date` posted the (tax-free) test entry at its **original date** on
+every version: the tax lock only bites a *tax-bearing* move. The step keeps it
+as a conservative block because it cannot cheaply tell which moves carry tax.
+³ `period_lock_date` posted at the **original date** for the adviser/admin user
+a migration runs as (advisers bypass the soft period lock). The step therefore
+does **not** pre-block on it — blocking would wrongly refuse a whole migration's
+pre-period moves — and leaves the rare restricted-user shift to the
+`date_changed_on_post` post-condition. Odoo 18 removed `period_lock_date`.
+⁴ `hard_lock_date` (18+) could not be set over RPC while draft entries exist
+(`RedirectWarning`), so a migration cannot turn it on mid-load; if already set,
+the pre-check still blocks moves behind it, and it is irreversible.
+
+**Design chosen (in ADR 0001):** pre-block on the proven-shift locks
+(`fiscalyear`, `tax`, `hard`, `sale`, `purchase`), skip `period_lock_date`, and
+net everything the pre-check cannot see with the date post-condition.
+
 ## What this confirms in ADR 0001
 
 - **Lock dates (was pending).** Confirmed: posting a move dated on/before the
