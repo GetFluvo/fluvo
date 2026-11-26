@@ -196,7 +196,21 @@ def tests(session: nox.Session) -> None:
     # Install the `flows` extra so the flow-runner tests (which need PyYAML)
     # run; PyYAML is no longer a core dependency.
     session.install("-e", ".[flows,images]")
-    session.run("pytest", *session.posargs)
+
+    pytest_args = list(session.posargs)
+    if sys.platform == "darwin" and not session.posargs:
+        # The macOS runners intermittently hang one `tests` leg (py3.12 or
+        # py3.13, it alternates) for ~15 min until the job is cancelled —
+        # pre-existing, infra/concurrency, and not reproducible on Linux. A
+        # per-test timeout turns that nameless cancellation into a normal
+        # failure on the specific test, with a dump of every thread's stack
+        # (`--timeout-method=thread` covers hangs inside the RPC thread pools),
+        # so the culprit can be named. pytest-timeout is a test-only dependency;
+        # nothing ships with it. The timeout is generous — the whole suite runs
+        # in well under a minute — so only a genuine hang trips it.
+        session.install("pytest-timeout")
+        pytest_args = ["--timeout=300", "--timeout-method=thread"]
+    session.run("pytest", *pytest_args)
 
 
 @nox.session(python=python_versions[0])
