@@ -140,11 +140,19 @@ def _try(call: Callable[[], Any]) -> dict[str, Any]:
         return {"raised": True, "error": _err(exc)}
 
 
+_LOCK_FIELDS = (
+    "fiscalyear_lock_date",
+    "tax_lock_date",
+    "period_lock_date",
+    "hard_lock_date",
+    "sale_lock_date",
+    "purchase_lock_date",
+)
+
+
 def _lock_fields(rpc: Any) -> list[str]:
-    present = rpc.get_model("res.company").fields_get(
-        ["fiscalyear_lock_date", "period_lock_date"], ["type"]
-    )
-    return [f for f in ("fiscalyear_lock_date", "period_lock_date") if f in present]
+    present = rpc.get_model("res.company").fields_get(list(_LOCK_FIELDS), ["type"])
+    return [f for f in _LOCK_FIELDS if f in present]
 
 
 def _recv_account(rpc: Any, move_id: int) -> Any:
@@ -343,6 +351,71 @@ def test_probe_account_move_post(rpc: Any) -> None:  # noqa: C901
         e["forced_recv_id"] = recv2
         return e
 
+    def _lock_move(lock_field: str, idx: int, partner: int) -> int:
+        """Create a draft move for the lock under test on a PRISTINE journal.
+
+        Each lock test gets its own journal so a prior test's posted (or silently
+        shifted) entry cannot bump the sequence and turn a later move into a
+        sequence/date mismatch instead of a clean lock observation.
+        """
+        if lock_field == "sale_lock_date":
+            mtype = "out_invoice"
+            journal = _mk_journal(rpc, f"PLS{idx}", f"Probe LockSale {idx}", "sale")
+        elif lock_field == "purchase_lock_date":
+            mtype = "in_invoice"
+            journal = _mk_journal(rpc, f"PLP{idx}", f"Probe LockPur {idx}", "purchase")
+        else:
+            j = _mk_journal(rpc, f"PLG{idx}", f"Probe LockGen {idx}", "general")
+            return _entry(rpc, j, bank, income, "2024-06-15", None)
+        return int(
+            rpc.get_model("account.move").create(
+                {
+                    "move_type": mtype,
+                    "partner_id": partner,
+                    "journal_id": journal,
+                    "date": "2024-06-15",
+                    "invoice_date": "2024-06-15",
+                    "invoice_line_ids": [
+                        (
+                            0,
+                            0,
+                            {
+                                "name": "x",
+                                "quantity": 1,
+                                "price_unit": 50.0,
+                                "account_id": income,
+                                "tax_ids": [(6, 0, [])],
+                            },
+                        )
+                    ],
+                }
+            )
+        )
+
+    def probe_f() -> dict[str, Any]:
+        # Per-lock isolation: set ONE lock at a time, post a violating move, and
+        # record whether Odoo silently shifted the date, raised, or bypassed the
+        # lock. This is what the post step's conservative pre-check rests on.
+        f: dict[str, Any] = {}
+        partner = rpc.get_model("res.partner").create({"name": "Probe LockF 359"})
+        for idx, lf in enumerate(_lock_fields(rpc)):
+            record: dict[str, Any] = {}
+            mid = _lock_move(lf, idx, partner)
+            record["set"] = _try(
+                lambda lf=lf: comp.write([company], {lf: "2024-12-31"})
+            )
+            if not record["set"]["raised"]:
+                before = _state(rpc, mid)
+                record["post"] = _post(rpc, [mid])
+                after = _state(rpc, mid)
+                record["date_before"] = before["date"]
+                record["date_after"] = after["date"]
+                record["shifted"] = str(before["date"]) != str(after["date"])
+                record["state_after"] = after["state"]
+            _try(lambda lf=lf: comp.write([company], {lf: False}))  # clear
+            f[lf] = record
+        return f
+
     findings: dict[str, Any] = {
         "version": version,
         "probes": {
@@ -351,6 +424,7 @@ def test_probe_account_move_post(rpc: Any) -> None:  # noqa: C901
             "C_batch_isolation": _safe(probe_c),
             "D_posted_immutable": _safe(probe_d),
             "E_invoice_fields_survive": _safe(probe_e),
+            "F_lock_per_field": _safe(probe_f),
         },
     }
 
