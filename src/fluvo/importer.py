@@ -1097,6 +1097,19 @@ def run_import(  # noqa: C901
     _render_translation_summary(translation_summaries)
     _render_company_summary(company_summaries)
 
+    # Rows the immutable guard (#358) refused before the load: a re-run onto a
+    # posted/cancelled move. They are counted as failures and written to the
+    # fail file; surface them so a re-run's "failures" are not read as data bugs.
+    _guarded = stats.get("immutable_guarded")
+    immutable_guarded: dict[str, int] = _guarded if isinstance(_guarded, dict) else {}
+    if immutable_guarded:
+        total_guarded = sum(immutable_guarded.values())
+        log.warning(
+            f"{total_guarded} row(s) targeted an already posted/cancelled move "
+            f"and were refused before any write (counted as failed; see the fail "
+            f"file): {dict(immutable_guarded)}. Nothing on those moves was changed."
+        )
+
     # Check for unaccounted records and warn the user
     unaccounted = stats.get("unaccounted_records", 0)
     if unaccounted > 0:

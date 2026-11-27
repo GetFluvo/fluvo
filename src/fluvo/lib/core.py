@@ -140,16 +140,35 @@ class ReconStats:
         total: Every row the run is accountable for.
         created: Rows written to the target.
         failed: Rows that could not be written and were recorded as failures.
+            This includes a re-run's rows aimed at an already posted or
+            cancelled ``account.move``: the load refuses them before any write
+            (#358/#359) and records them in the fail file, because Odoo itself
+            does not protect a posted move over RPC.
         unaccounted: Rows accounted for by an explicit reason other than
-            created or failed — duplicates, skipped, already-posted, cancelled.
+            created or failed — duplicates, records skipped as unchanged in
+            idempotent mode, or a move already posted on a post-step re-run.
             Never a silent remainder: the point of the bucket is that it is
             named and asserted, not inferred.
+        reasons: The named breakdown of ``unaccounted`` — e.g.
+            ``{"already_posted": 3}`` for moves a post-step re-run left alone
+            because they were already posted (#358). Whatever ``unaccounted``
+            holds beyond these named reasons is :attr:`unexplained`.
     """
 
     total: int = 0
     created: int = 0
     failed: int = 0
     unaccounted: int = 0
+    reasons: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def unexplained(self) -> int:
+        """The part of ``unaccounted`` not covered by a named reason.
+
+        Returns:
+            int: ``unaccounted`` minus the sum of :attr:`reasons`.
+        """
+        return self.unaccounted - sum(self.reasons.values())
 
     @property
     def reconciled(self) -> bool:

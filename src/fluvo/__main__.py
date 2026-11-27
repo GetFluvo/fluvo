@@ -31,6 +31,7 @@ from .lib.flow_runner import StepOutcome, StepResult
 
 if TYPE_CHECKING:
     from .auditfile.match import MatchResult
+    from .lib.core import RunResult
     from .lib.flow import Flow, FlowFile
     from .lib.mapping import MappingSpec
 from .lib.validation import display_validation_results, validate_csv_data
@@ -572,24 +573,44 @@ def _invoke_step_command(command: str, with_: dict[str, Any]) -> StepOutcome:
 
     fail_file: str | None = None
     fail_rows = 0
-    # The import source is the `filename` option (the --file flag's param name),
-    # which is the key a real flow step uses; reading "file" here missed it, so a
-    # partial import was never surfaced in a real flow (#402, which made #390
-    # inert outside the unit tests).
-    if command == "import" and with_.get("model") and with_.get("filename"):
-        try:
-            path = expected_fail_file(
-                with_.get("connection_file", ""), with_["model"], with_["filename"]
-            )
-            if os.path.exists(path):
-                with open(path, encoding="utf-8") as handle:
-                    rows = sum(1 for _ in handle) - 1
-                if rows > 0:
-                    fail_file, fail_rows = path, rows
-        except Exception as exc:  # pragma: no cover - reporting is best-effort
-            log.debug(f"Could not inspect fail file for step '{command}': {exc}")
+    # A partial step (command exited zero but left failed rows) must not read as
+    # `ok` in a flow (#390): find the step's fail file and count its rows, so a
+    # partial import OR post drives on_error and the run exit code. The import
+    # source is the `filename` option; the post source is the `file` option.
+    try:
+        path = _step_fail_file(command, with_)
+        if path and os.path.exists(path):
+            with open(path, encoding="utf-8") as handle:
+                rows = sum(1 for _ in handle) - 1
+            if rows > 0:
+                fail_file, fail_rows = path, rows
+    except Exception as exc:  # pragma: no cover - reporting is best-effort
+        log.debug(f"Could not inspect fail file for step '{command}': {exc}")
 
     return StepOutcome(ok=ok, fail_file=fail_file, fail_rows=fail_rows, error=error)
+
+
+def _step_fail_file(command: str, with_: dict[str, Any]) -> str | None:
+    """Return the fail-file path a step would write, or None if not applicable.
+
+    Args:
+        command: The step command (``import`` / ``post`` / ...).
+        with_: The step's resolved options.
+
+    Returns:
+        str | None: The expected fail-file path, or None when the command has no
+        fail file or the options needed to locate it are missing.
+    """
+    # `filename` is the --file flag's param name (reading "file" missed it, #402).
+    if command == "import" and with_.get("model") and with_.get("filename"):
+        return expected_fail_file(
+            with_.get("connection_file", ""), with_["model"], with_["filename"]
+        )
+    if command == "post" and with_.get("file"):
+        from .lib.actions.move_poster import post_fail_file_for
+
+        return post_fail_file_for(with_["file"])
+    return None
 
 
 def _render_flow_summary(results: list[StepResult], aborted: bool) -> None:
@@ -713,13 +734,15 @@ def run_project_flow(
     Raises:
         SystemExit: with code 1 if the file is invalid or any step failed.
     """
-    from .lib.flow import FlowError, parse_flow_file, select_flows
+    from .lib.flow import VALID_COMMANDS, FlowError, parse_flow_file, select_flows
     from .lib.flow_runner import any_failed, run_flows
     from .lib.internal.ui import _show_error_panel
 
-    commands = ("import", "export", "write", "migrate")
+    # Source the set from flow.VALID_COMMANDS so a new command (e.g. `post`,
+    # #358) cannot be added there yet forgotten here, leaving its `with:`
+    # parameters unvalidated.
     known_options = {
-        name: set(_command_option_specs(cli.commands[name])) for name in commands
+        name: set(_command_option_specs(cli.commands[name])) for name in VALID_COMMANDS
     }
     try:
         parsed = parse_flow_file(
@@ -1194,6 +1217,14 @@ def _auditfile_account_matches(
     default=None,
     help="Force the audit-file format (e.g. 'xaf') instead of auto-detecting.",
 )
+@click.option(
+    "--post",
+    is_flag=True,
+    default=False,
+    help="Also emit a post step in the generated flows.yml, so loading the "
+    "stage posts the journal entries too. Posting is one-way; the default "
+    "stays draft (load only).",
+)
 def auditfile_stage_cmd(
     file: str,
     out_dir: str,
@@ -1212,13 +1243,15 @@ def auditfile_stage_cmd(
     match_accounts: bool,
     allow_warnings: bool,
     fmt: str | None,
+    post: bool,
 ) -> None:
     """Compile an audit file into a loadable stage directory.
 
     Reads FILE, writes Odoo-shaped CSVs plus a generated flows.yml to --out, and
     runs preflight. Load the result with ``fluvo --flow-file <out>/flows.yml``.
     Nothing is *written* to Odoo; ``--match-accounts`` only *reads* the target
-    chart to reference accounts that already exist.
+    chart to reference accounts that already exist, and ``--post`` only changes
+    what the *generated* flow will do (the load stays draft unless asked).
     """
     from rich.console import Console
 
@@ -1249,6 +1282,7 @@ def auditfile_stage_cmd(
             default_payment_days=default_payment_days,
             open_sale_journal=open_sale_journal,
             open_purchase_journal=open_purchase_journal,
+            post=post,
         )
     except FluvoError as exc:
         _show_error_panel("Audit file", str(exc))
@@ -2358,6 +2392,94 @@ def write_cmd(connection_file: str, **kwargs: Any) -> None:
         kwargs["context"] = context
 
     run_write(**kwargs)
+
+
+# --- Post Command ---
+@cli.command(name="post")
+@click.option(
+    "--connection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the Odoo connection file.",
+)
+@click.option(
+    "--file",
+    "file",
+    required=True,
+    help="The source CSV the account.move records were imported from; its ids "
+    "select which moves to post.",
+)
+@click.option(
+    "--size", "batch_size", default=100, type=int, help="Moves posted per RPC call."
+)
+@click.option("-s", "--sep", "separator", default=";", help="CSV separator character.")
+@click.option("--encoding", default="utf-8", help="Encoding of the data file.")
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    default=False,
+    help="Report what would post and what is blocked, without writing.",
+)
+@click.option(
+    "--quiet", is_flag=True, default=False, help="Suppress phase/progress lines."
+)
+def post_cmd(
+    connection_file: str,
+    file: str,
+    batch_size: int,
+    separator: str,
+    encoding: str,
+    dry_run: bool,
+    quiet: bool,
+) -> None:
+    """Post imported draft journal entries (the explicit, one-way step).
+
+    Exit code follows ``fluvo import``: a run that could not start or posted
+    nothing (``FAILED``), or was cancelled, exits non-zero; a partial run (some
+    posted, some refused) exits 0 but writes a ``_post_fail.csv`` and prints a
+    PARTIAL summary. In a flow a partial run is never ``ok`` — its fail file
+    drives ``on_error`` and the run's exit code (#390), so an unposted move is
+    never hidden.
+    """
+    from .lib.actions.move_poster import run_post_moves
+    from .lib.core import RunStatus
+    from .lib.internal.reporter import ConsoleReporter
+
+    result = run_post_moves(
+        connection_file,
+        file,
+        batch_size=batch_size,
+        separator=separator,
+        encoding=encoding,
+        dry_run=dry_run,
+        reporter=ConsoleReporter(quiet=quiet),
+    )
+    _render_post_result(result)
+    if result.status in (RunStatus.FAILED, RunStatus.CANCELLED):
+        raise SystemExit(1)
+
+
+def _render_post_result(result: "RunResult") -> None:
+    """Print a one-line reconciliation summary of a post run.
+
+    Args:
+        result: The :class:`RunResult` from :func:`run_post_moves`.
+    """
+    from rich.console import Console
+
+    st = result.stats
+    console = Console(stderr=True)
+    reasons = ", ".join(f"{k}={v}" for k, v in sorted(st.reasons.items()))
+    console.print(
+        f"[bold]post[/bold] {result.status.value}: "
+        f"{st.created} posted, {st.failed} failed, {st.unaccounted} unaccounted "
+        f"of {st.total}" + (f" ({reasons})" if reasons else "")
+    )
+    for err in result.errors:
+        console.print(f"[yellow]{err.kind}[/yellow]: {err.message}")
+    if fail := result.artifacts.get("fail_file"):
+        console.print(f"[dim]fail file: {fail}[/dim]")
 
 
 # --- Export Command ---

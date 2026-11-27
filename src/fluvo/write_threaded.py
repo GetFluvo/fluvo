@@ -21,7 +21,8 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from .lib import conf_lib
+from .lib import conf_lib, immutable
+from .lib.core import FluvoError
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch  # FIX: Add missing import
 from .logging_config import log, suppress_console_handler
@@ -212,17 +213,20 @@ def write_data(
         log.error(f"Failed to connect to Odoo: {e}")
         return False
 
-    fail_file_writer, fail_file_handle = None, None
-    if fail_file:
-        try:
-            fail_file_handle = open(fail_file, "w", newline="", encoding="utf-8")
-            fail_file_writer = csv.writer(
-                fail_file_handle, delimiter=",", quoting=csv.QUOTE_ALL
-            )
-            fail_file_writer.writerow(["id", "_ERROR_REASON"])
-        except OSError as e:
-            log.error(f"Could not open fail file for writing: {fail_file}. Error: {e}")
-            return False
+    # Immutable-record guard (#413 review item 1). `write` is a second write
+    # path: a plain `write` to a posted move's fields mutates it (and un-posts
+    # it on 18/19) just as `load` would, so the same rule registry applies here.
+    try:
+        data, guarded_rows = _guard_write(connection, model, header, data)
+    except FluvoError as e:
+        log.error(f"Immutable-record check failed; nothing written. {e}")
+        return False
+
+    fail_file_writer, fail_file_handle = _open_write_fail_file(
+        fail_file, header, guarded_rows
+    )
+    if fail_file and fail_file_handle is None:
+        return False
 
     progress = Progress(
         SpinnerColumn(),
@@ -279,4 +283,90 @@ def write_data(
             if f.done() and not f.cancelled()
         )
 
-    return total_failed == 0
+    # Rows refused by the guard are failures too (written to the fail file
+    # above): a write that skipped posted moves must not report success.
+    _log_guarded(model, guarded_rows)
+    return total_failed == 0 and not guarded_rows
+
+
+def _open_write_fail_file(
+    fail_file: str, header: list[str], guarded_rows: list[tuple[list[Any], str]]
+) -> tuple[Any | None, Any | None]:
+    """Open the write fail file and write any guard-refused rows up front.
+
+    Args:
+        fail_file: The fail-file path (falsy to skip).
+        header: The source column names.
+        guarded_rows: ``(row, reason)`` pairs the guard refused.
+
+    Returns:
+        tuple[Any | None, Any | None]: ``(writer, handle)``; ``(None, None)``
+        when no fail file is wanted, and ``(None, None)`` on an open error so
+        the caller can abort.
+    """
+    if not fail_file:
+        return None, None
+    try:
+        handle = open(fail_file, "w", newline="", encoding="utf-8")
+        writer = csv.writer(handle, delimiter=",", quoting=csv.QUOTE_ALL)
+        writer.writerow(["id", "_ERROR_REASON"])
+        _write_guarded_rows(writer, header, guarded_rows)
+        return writer, handle
+    except OSError as e:
+        log.error(f"Could not open fail file for writing: {fail_file}. Error: {e}")
+        return None, None
+
+
+def _log_guarded(model: str, guarded_rows: list[tuple[list[Any], str]]) -> None:
+    """Warn about rows the immutable guard refused, grouped by reason."""
+    if not guarded_rows:
+        return
+    by_reason: dict[str, int] = {}
+    for _row, reason in guarded_rows:
+        by_reason[reason] = by_reason.get(reason, 0) + 1
+    log.warning(
+        f"{len(guarded_rows)} row(s) targeted an already posted/cancelled "
+        f"'{model}' and were refused before any write: {by_reason}."
+    )
+
+
+def _guard_write(
+    connection: Any, model: str, header: list[str], data: list[list[Any]]
+) -> tuple[list[list[Any]], list[tuple[list[Any], str]]]:
+    """Refuse writes onto posted/cancelled records before any write (#413).
+
+    The write path identifies records by database id in the ``id`` column, so
+    the guard is told the id column holds database ids.
+
+    Args:
+        connection: An Odoo connection.
+        model: The target model.
+        header: The source column names.
+        data: The source rows.
+
+    Returns:
+        tuple[list[list[Any]], list[tuple[list[Any], str]]]: ``(kept, guarded)``
+        — rows safe to write, and ``(row, reason)`` pairs refused (which raises
+        ``SourceReadError`` if target state cannot be read). A no-op
+        ``(data, [])`` for an unguarded model.
+    """
+    if not data or immutable.rule_for(model) is None:
+        return data, []
+    return immutable.guard_rows(connection, model, header, data, "id", id_is_dbid=True)
+
+
+def _write_guarded_rows(
+    writer: Any, header: list[str], guarded_rows: list[tuple[list[Any], str]]
+) -> None:
+    """Write guard-refused rows to the write fail file as ``id, reason``.
+
+    Args:
+        writer: The fail-file csv writer (header ``id,_ERROR_REASON``).
+        header: The source column names.
+        guarded_rows: ``(row, reason)`` pairs the guard refused.
+    """
+    if not guarded_rows or "id" not in header:
+        return
+    idx = header.index("id")
+    for row, reason in guarded_rows:
+        writer.writerow([row[idx] if idx < len(row) else "", reason])
