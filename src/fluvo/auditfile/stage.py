@@ -205,6 +205,7 @@ def _flows_yaml(
     steps: list[tuple[str, str, str, bool]],
     connection_file: str,
     company: str | None,
+    post: bool = False,
 ) -> str:
     """Render the generated ``flows.yml`` for the staged CSVs.
 
@@ -213,6 +214,9 @@ def _flows_yaml(
         connection_file: The connection file path to embed in every step.
         company: A company id or external id to target (``company_id`` on every
             step), or None to leave it to the import command's default handling.
+        post: When True, append a `post` step for each ``account.move`` file so
+            the generated flow also posts the loaded entries (#358). The default
+            stays draft: loading never posts unless this is asked for.
 
     Returns:
         str: The YAML document.
@@ -237,6 +241,22 @@ def _flows_yaml(
             lines.append(f"          company_id: {_yaml_quote(company)}")
         if is_o2m:
             lines.append("          o2m: true")
+    if post:
+        # Post the loaded entries, after every import. Each account.move file
+        # gets its own post step; they run in load order (opening entry, then
+        # open invoices) so the clearing account is only momentarily non-zero.
+        # A partial post is a reported state (its fail file aborts the flow) and
+        # a re-run converges (already-posted entries are left alone). Posting is
+        # one-way: this is why it is only emitted behind `stage --post`.
+        lines.append("      # --- posting (one-way; added by `stage --post`) ---")
+        for step_id, csv_path, model, _is_o2m in steps:
+            if model != "account.move":
+                continue
+            lines.append("      - run: post")
+            lines.append(f"        id: post_{step_id}")
+            lines.append("        with:")
+            lines.append(f"          connection_file: {_yaml_quote(connection_file)}")
+            lines.append(f"          file: {_yaml_quote(csv_path)}")
     return "\n".join(lines) + "\n"
 
 
@@ -268,6 +288,7 @@ def stage(
     default_payment_days: int = DEFAULT_PAYMENT_DAYS,
     open_sale_journal: str | None = None,
     open_purchase_journal: str | None = None,
+    post: bool = False,
 ) -> StageResult:
     """Transform a ledger and write a loadable stage directory.
 
@@ -298,6 +319,8 @@ def stage(
             invoices; a dedicated sale journal is staged when omitted.
         open_purchase_journal: In cutover, a source journal id for the bills; a
             dedicated purchase journal is staged when omitted.
+        post: When True, the generated ``flows.yml`` also posts the loaded
+            ``account.move`` entries (a one-way step); the default stays draft.
 
     Returns:
         StageResult: What was written and the preflight report.
@@ -382,7 +405,9 @@ def stage(
             for step_id, csv, model, is_o2m in _STEPS
             if not (step_id in _OPTIONAL_STEPS and empty.get(csv, False))
         ]
-        flows.write_text(_flows_yaml(steps, connection, company), encoding="utf-8")
+        flows.write_text(
+            _flows_yaml(steps, connection, company, post), encoding="utf-8"
+        )
         flows_path = str(flows.resolve())
         files["flows.yml"] = flows_path
 
