@@ -64,11 +64,60 @@ def test_main_shows_version(runner: CliRunner) -> None:
 
 
 def test_import_fails_without_required_options(runner: CliRunner) -> None:
-    """The import command should fail if required options are missing."""
+    """The import command fails if the required source file is missing."""
     result = runner.invoke(__main__.cli, ["import"])
     assert result.exit_code != 0
     assert "Missing option" in result.output
-    assert "--connection-file" in result.output
+    assert "--file" in result.output
+
+
+def test_import_requires_exactly_one_connection_source(runner: CliRunner) -> None:
+    """Neither --connection nor --connection-file is a usage error (#363)."""
+    result = runner.invoke(
+        __main__.cli, ["import", "--file", "x.csv", "--model", "res.partner"]
+    )
+    assert result.exit_code != 0
+    assert "exactly one of --connection" in result.output
+
+
+@patch("fluvo.__main__.run_import")
+def test_import_connection_resolves_via_registry(
+    mock_run: MagicMock, runner: CliRunner
+) -> None:
+    """--connection resolves an inline registry entry into the run config (#363)."""
+    with runner.isolated_filesystem():
+        with open("src.csv", "w") as f:
+            f.write("id\n1\n")
+        with open("reg.toml", "w") as f:
+            f.write(
+                "schema = 1\n\n"
+                "[connections.prod]\n"
+                'hostname = "erp.example.com"\n'
+                'database = "prod"\n'
+                'login = "mig@example.com"\n'
+                'password_env = "FLUVO_REG_TEST_PW"\n'
+            )
+        result = runner.invoke(
+            __main__.cli,
+            [
+                "import",
+                "--connection",
+                "prod",
+                "--registry",
+                "reg.toml",
+                "--file",
+                "src.csv",
+                "--model",
+                "res.partner",
+            ],
+            env={"FLUVO_REG_TEST_PW": "s3cret"},
+        )
+        assert result.exit_code == 0, result.output
+        config = mock_run.call_args.kwargs["config"]
+        assert isinstance(config, dict)
+        assert config["hostname"] == "erp.example.com"
+        assert config["password"] == "s3cret"  # noqa: S105 - resolved from env
+        assert config["_env_name"] == "prod"
 
 
 @patch("fluvo.__main__.run_import")
@@ -1649,7 +1698,11 @@ def test_dry_run_validation_success_with_protocol(
     mock_validate: MagicMock,
     mock_display: MagicMock,
 ) -> None:
-    """It validates via a protocol connection and parses the ignore list."""
+    """It validates via an inline/dict connection and parses the ignore list.
+
+    Protocol composition now happens in ``_effective_config``, so the dry-run
+    helper receives an already-resolved dict config (#363).
+    """
     from fluvo.__main__ import _run_dry_run_validation
 
     mock_conn = MagicMock()
@@ -1660,10 +1713,9 @@ def test_dry_run_validation_success_with_protocol(
     mock_validate.return_value = MagicMock()
 
     _run_dry_run_validation(
-        "conn.conf",
+        {"_config_file": "conn.conf", "protocol": "jsonrpc"},
         filename="data.csv",
         model="res.partner",
-        protocol="jsonrpc",
         ignore="a, b ,",
     )
 

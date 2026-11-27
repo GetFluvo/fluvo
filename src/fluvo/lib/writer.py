@@ -26,6 +26,10 @@ def _get_env_from_config(config: str | dict[str, Any] | None) -> str | None:
         return None
 
     if isinstance(config, dict):
+        # An inline registry connection names its own environment directly (#363).
+        env_name = config.get("_env_name")
+        if env_name:
+            return str(env_name)
         # Config dict may have _config_file key
         config_file = config.get("_config_file", "")
     else:

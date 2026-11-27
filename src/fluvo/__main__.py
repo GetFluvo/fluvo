@@ -6,7 +6,7 @@ import os
 import shlex
 from importlib.metadata import version as get_version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import click
 
@@ -80,7 +80,65 @@ def _parse_resolve_relation_specs(specs: tuple[str, ...]) -> list[dict[str, Any]
     return parsed
 
 
-def _run_dry_run_validation(connection_file: str, **kwargs: Any) -> None:
+def _effective_config(
+    connection: str | None,
+    connection_file: str | None,
+    registry: str | None,
+    protocol: str | None,
+) -> str | dict[str, Any]:
+    """Resolve the connection to a file path or an inline config dict (#363).
+
+    Exactly one of ``--connection`` (a registry key) or ``--connection-file``
+    must be given. A registry key is resolved against the discovered registry
+    file; ``--protocol`` is composed on top of whichever form results.
+
+    Args:
+        connection: The ``--connection`` registry key, if any.
+        connection_file: The ``--connection-file`` path, if any.
+        registry: The explicit ``--registry`` path, if any.
+        protocol: The ``--protocol`` override, if any.
+
+    Returns:
+        str | dict[str, Any]: A connection-file path, or an inline config dict,
+        ready for the existing connection helpers.
+
+    Raises:
+        click.UsageError: If not exactly one connection source is given, or a
+            ``--connection`` has no registry to resolve against, or the registry
+            entry is invalid.
+    """
+    from .lib import registry as registry_lib
+    from .lib.core import FluvoError
+
+    if bool(connection) == bool(connection_file):
+        raise click.UsageError(
+            "provide exactly one of --connection <key> or --connection-file <path>."
+        )
+
+    config: str | dict[str, Any]
+    if connection:
+        registry_path = registry_lib.discover_registry(registry)
+        if not registry_path:
+            raise click.UsageError(
+                "--connection was given but no registry was found; pass --registry, "
+                "set $FLUVO_REGISTRY, or add ./fluvo-connections.toml."
+            )
+        try:
+            config = registry_lib.resolve_connection(connection, registry_path)
+        except FluvoError as exc:
+            raise click.UsageError(str(exc)) from exc
+    else:
+        config = cast(str, connection_file)
+
+    if protocol:
+        if isinstance(config, dict):
+            config = {**config, "protocol": protocol}
+        else:
+            config = {"_config_file": config, "protocol": protocol}
+    return config
+
+
+def _run_dry_run_validation(config: str | dict[str, Any], **kwargs: Any) -> None:
     """Run dry-run validation mode without importing."""
     from .lib.conf_lib import get_connection_from_config, get_connection_from_dict
     from .lib.internal.ui import _show_error_panel
@@ -90,7 +148,6 @@ def _run_dry_run_validation(connection_file: str, **kwargs: Any) -> None:
     separator = kwargs.get("separator", ";")
     encoding = kwargs.get("encoding", "utf-8")
     ignore = kwargs.get("ignore")
-    protocol = kwargs.get("protocol")
 
     if not filename:
         _show_error_panel("Dry Run Error", "No file specified for validation.")
@@ -114,12 +171,12 @@ def _run_dry_run_validation(connection_file: str, **kwargs: Any) -> None:
     log.info(f"Starting dry-run validation for {model}...")
 
     try:
-        # Get connection
-        if protocol:
-            config: Any = {"_config_file": connection_file, "protocol": protocol}
+        # The config is already resolved (file path or inline dict) with any
+        # --protocol composed in by _effective_config.
+        if isinstance(config, dict):
             conn = get_connection_from_dict(config)
         else:
-            conn = get_connection_from_config(connection_file)
+            conn = get_connection_from_config(config)
 
         # Get model fields info
         model_obj = conn.get_model(model)
@@ -1579,9 +1636,23 @@ def vat_validate_cmd(
 @cli.command(name="import")
 @click.option(
     "--connection-file",
-    required=True,
+    required=False,
+    default=None,
     type=click.Path(exists=True, dir_okay=False),
-    help="Path to the Odoo connection file.",
+    help="Path to the Odoo connection file. Mutually exclusive with --connection.",
+)
+@click.option(
+    "--connection",
+    default=None,
+    help="Name of a connection defined in the registry (fluvo-connections.toml). "
+    "Mutually exclusive with --connection-file.",
+)
+@click.option(
+    "--registry",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the connection registry (TOML). Defaults to $FLUVO_REGISTRY "
+    "or ./fluvo-connections.toml.",
 )
 @click.option(
     "--protocol",
@@ -1902,26 +1973,27 @@ def vat_validate_cmd(
     "Format: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS. "
     "Example: --move-date 2026-01-01",
 )
-def import_cmd(connection_file: str, **kwargs: Any) -> None:  # noqa: C901
+def import_cmd(connection_file: str | None = None, **kwargs: Any) -> None:  # noqa: C901
     """Runs the data import process."""
+    # Resolve the connection: a registry key (--connection) or a file
+    # (--connection-file), with --protocol composed in (#363).
+    connection = kwargs.pop("connection", None)
+    registry = kwargs.pop("registry", None)
+    protocol = kwargs.pop("protocol", None)
+    config = _effective_config(connection, connection_file, registry, protocol)
+
     # Handle dry-run mode early
     dry_run = kwargs.pop("dry_run", False)
     if dry_run:
-        _run_dry_run_validation(connection_file, **kwargs)
+        _run_dry_run_validation(config, **kwargs)
         return
 
-    # Handle protocol option - create config dict if protocol specified
     # --no-cache disables the on-disk id-map cache process-wide for this run.
     cache.set_cache_enabled(not kwargs.pop("no_cache", False))
 
-    protocol = kwargs.pop("protocol", None)
     if protocol:
-        # Pass config as dict with protocol instead of file path
-        # conf_lib will merge this with file contents
-        kwargs["config"] = {"_config_file": connection_file, "protocol": protocol}
         log.info(f"Using {protocol} protocol for RPC communication")
-    else:
-        kwargs["config"] = connection_file
+    kwargs["config"] = config
 
     kwargs["context"] = _literal_option(kwargs.get("context"), "--context", dict) or {}
 
