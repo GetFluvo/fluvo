@@ -140,10 +140,14 @@ class ReconStats:
         total: Every row the run is accountable for.
         created: Rows written to the target.
         failed: Rows that could not be written and were recorded as failures.
+            This includes a re-run's rows aimed at an already posted or
+            cancelled ``account.move``: the load refuses them before any write
+            (#358/#359) and records them in the fail file, because Odoo itself
+            does not protect a posted move over RPC.
         unaccounted: Rows accounted for by an explicit reason other than
-            created or failed — duplicates, skipped, already-posted, cancelled.
-            Never a silent remainder: the point of the bucket is that it is
-            named and asserted, not inferred.
+            created or failed — duplicates, or records skipped as unchanged in
+            idempotent mode. Never a silent remainder: the point of the bucket
+            is that it is named and asserted, not inferred.
     """
 
     total: int = 0

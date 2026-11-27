@@ -50,6 +50,14 @@ _RULES: tuple[tuple[str, str], ...] = (
     # A person must choose: a posted move cannot be re-imported (see #358).
     (CLIENT_DECISION, r"posted"),
     (CLIENT_DECISION, r"cannot be modified|is immutable"),
+    # A move whose name's year disagrees with its date: Odoo rejects it (at
+    # create on 16, at post on 17-19). The canonical reason tag and Odoo's own
+    # wording both land here (#358/#359).
+    (
+        CLIENT_DECISION,
+        r"sequence_date_mismatch|match the sequence number|"
+        r"aligned with the existing sequence",
+    ),
     # Source value damaged before Fluvo saw it; Fluvo can propose a fix.
     (FLUVO_FIXABLE, r"scientific notation|\d[eE][+-]?\d"),
     (FLUVO_FIXABLE, r"invalid literal for int|could not convert"),
