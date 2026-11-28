@@ -308,9 +308,19 @@ _NON_CONTROL_NAME_MARKERS: Final = (
 #: Lowercased name substrings that disambiguate a *current* account as a
 #: liability or an asset. Applied only within the ``1xxx`` / ``2xxx`` current
 #: zone, so a stray keyword never flips a cash, fixed-asset, equity or
-#: profit-and-loss account. "af te dragen" / "loonheffing" are amounts owed (a
-#: liability); "te vorderen" is an amount receivable (an asset).
-_NAME_CURRENT_LIABILITY: Final = ("af te dragen", "loonheffing", "loonbelasting")
+#: profit-and-loss account. The liability keywords are amounts owed: taxes to
+#: remit ("af te dragen", "loonheffing", "loonbelasting"), other amounts "te
+#: betalen" (covers "nog te betalen"), payroll accruals ("vakantiegeld") and
+#: other accruals/reserves ("reservering"); "te vorderen" is an amount
+#: receivable (an asset).
+_NAME_CURRENT_LIABILITY: Final = (
+    "af te dragen",
+    "loonheffing",
+    "loonbelasting",
+    "te betalen",
+    "vakantiegeld",
+    "reservering",
+)
 _NAME_CURRENT_ASSET: Final = ("te vorderen",)
 
 

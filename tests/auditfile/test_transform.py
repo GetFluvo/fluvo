@@ -157,6 +157,21 @@ def test_classify_account_sign_and_name_resolve_current_zone() -> None:
         "expense",
         SRC_HEURISTIC,
     )
+    # Payroll / accrual liabilities sitting in the 1xxx/2xxx current zone.
+    for code, name in (
+        ("1830", "vakantiegeld"),
+        ("2100", "Nog te betalen bedragen"),
+        ("2110", "Reservering vakantiedagen"),
+    ):
+        assert classify_account(code, name, None, "balance", {}) == (
+            "liability_current",
+            SRC_HEURISTIC,
+        ), code
+    # But a payroll keyword never pulls a profit-and-loss account into the zone.
+    assert (
+        classify_account("4011", "Reservering vakantiegeld", None, "profit_loss", {})[0]
+        == "expense"
+    )
 
 
 def test_partner_dedup_and_alias(tmp_path: Path) -> None:
