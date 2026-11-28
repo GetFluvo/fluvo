@@ -1,4 +1,4 @@
-"""Synthetic XAF (3.2 / 4.0) fixture generator for the test suite.
+"""Synthetic XAF (3.1 / 3.2 / 4.0) fixture generator for the test suite.
 
 Everything here is **synthetic** — invented company, accounts, partners and
 amounts. No client data ever enters the repository. The generator streams the
@@ -22,8 +22,11 @@ from pathlib import Path
 from typing import TextIO
 from xml.sax.saxutils import escape
 
-#: Root namespaces per version (verified against the official XSDs).
+#: Root namespaces per version (verified against the official XSDs). 3.1 shares
+#: 3.2's element structure (the reader matches by local name), so the generator
+#: emits it like 3.2 under the 3.1 namespace.
 _NAMESPACE = {
+    "3.1": "http://www.auditfiles.nl/XAF/3.1",
     "3.2": "http://www.auditfiles.nl/XAF/3.2",
     "4.0": (
         "http://www.odb.belastingdienst.nl/Belastingdienst/BCPP/1.1/"
@@ -176,7 +179,7 @@ def _write_partners(handle: TextIO, version: str, kvk: str) -> int:
         _tag(handle, "city", "Amsterdam")
         _tag(handle, "country", "NL")
         handle.write("</streetAddress>")
-        if version == "3.2":
+        if version in ("3.1", "3.2"):
             # Distinct per partner, so staged res.partner.bank rows never clash
             # on the account-number uniqueness constraint when loaded.
             handle.write("<bankAccount>")
@@ -218,7 +221,7 @@ def _write_opening(handle: TextIO, version: str) -> tuple[int, int]:
         tuple[int, int]: ``(gl_lines, subledger_lines)`` written.
     """
     handle.write("<openingBalance>")
-    if version == "3.2":
+    if version in ("3.1", "3.2"):
         _tag(handle, "opBalDate", "2024-01-01")
     # A realistic, balanced opening: bank + a receivable control balance against
     # equity. The 1300 line (nr 2) is the control account the 3.2 subledger item
@@ -239,7 +242,7 @@ def _write_opening(handle: TextIO, version: str) -> tuple[int, int]:
         _tag(handle, "amntTp", tp)
         handle.write("</obLine>")
     sub_lines = 0
-    if version == "3.2":
+    if version in ("3.1", "3.2"):
         handle.write("<obSubledgers><obSubledger>")
         _tag(handle, "sbType", "CU")
         # The receivable control balance (1300, obLine nr 2) broken out per open
@@ -357,7 +360,7 @@ def generate_xaf(
 
     Args:
         path: Where to write the file.
-        version: The XAF version to emit, ``"3.2"`` or ``"4.0"``.
+        version: The XAF version to emit, ``"3.1"``, ``"3.2"`` or ``"4.0"``.
         n_accounts: How many ledger accounts to write (at least the core set).
         n_journals: How many journals to write.
         tx_per_journal: Transactions per journal (each is two balancing lines).

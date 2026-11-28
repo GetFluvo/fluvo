@@ -12,7 +12,7 @@ from fluvo.lib.core import InputError, SourceReadError
 
 from .xaf_fixtures import generate_xaf
 
-VERSIONS = ("3.2", "4.0")
+VERSIONS = ("3.1", "3.2", "4.0")
 
 
 @pytest.mark.parametrize("version", VERSIONS)
@@ -355,7 +355,7 @@ def test_unsupported_xaf_version_rejected(tmp_path: Path) -> None:
     path = tmp_path / "old.xaf"
     path.write_text(
         '<?xml version="1.0"?>'
-        '<auditfile xmlns="http://www.auditfiles.nl/XAF/3.1"><header/>'
+        '<auditfile xmlns="http://www.auditfiles.nl/XAF/3.0"><header/>'
         "<company><companyName>X</companyName></company></auditfile>",
         encoding="utf-8",
     )
@@ -363,6 +363,18 @@ def test_unsupported_xaf_version_rejected(tmp_path: Path) -> None:
     assert xaf.READER.detect(str(path)) is True
     with pytest.raises(SourceReadError, match="unsupported XAF version"):
         xaf.READER.read(str(path))
+
+
+def test_xaf_3_1_is_accepted(tmp_path: Path) -> None:
+    """XAF 3.1 shares 3.2's structure and is read, not refused."""
+    path = tmp_path / "v31.xaf"
+    spec = generate_xaf(path, version="3.1")
+    ledger = read_auditfile(str(path))
+    assert ledger.header.get_column("source_version").item(0) == "3.1"
+    assert ledger.lines.height == spec.n_lines
+    debit = float(ledger.lines.get_column("debit").sum())
+    credit = float(ledger.lines.get_column("credit").sum())
+    assert debit == pytest.approx(credit)
 
 
 def test_control_totals_captured(tmp_path: Path) -> None:
