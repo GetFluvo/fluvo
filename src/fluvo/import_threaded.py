@@ -118,17 +118,21 @@ def _warn_empty_ids(
     header: list[str],
     data: list[list[Any]],
     start_row: int = 0,
+    o2m: bool = False,
 ) -> int:
-    """Warn about rows with empty 'id' values.
+    """Warn about rows with empty 'id' values (unless they are o2m line rows).
 
-    This function checks each row for empty 'id' values and logs warnings.
-    Records with empty IDs may be created without XML IDs, making them
-    unreferenceable by subsequent imports.
+    An empty 'id' normally means a record will be created without an XML id and
+    cannot be referenced — worth a warning. In ``--o2m`` mode, though, a row with
+    an empty 'id' is a continuation line of the preceding parent record, not a
+    record of its own, so it is expected and not a problem: report the record vs
+    line-row split at info level instead of warning per row.
 
     Args:
         header: The CSV header row.
         data: The CSV data rows.
         start_row: The starting row number for logging (used in streaming mode).
+        o2m: Whether the import is a one-to-many load (empty-'id' rows are lines).
 
     Returns:
         The count of rows with empty id values.
@@ -144,18 +148,26 @@ def _warn_empty_ids(
             id_value = row[id_index]
             # Check for empty, None, or whitespace-only values
             if id_value is None or (isinstance(id_value, str) and not id_value.strip()):
-                actual_row = start_row + row_idx + 2  # +2 for header and 1-based
                 empty_count += 1
-                log.warning(
-                    f"Row {actual_row}: Empty 'id' value detected. "
-                    f"Record will be created without an XML ID."
-                )
+                if not o2m:
+                    actual_row = start_row + row_idx + 2  # +2 for header and 1-based
+                    log.warning(
+                        f"Row {actual_row}: Empty 'id' value detected. "
+                        f"Record will be created without an XML ID."
+                    )
 
     if empty_count > 0:
-        log.warning(
-            f"Found {empty_count} row(s) with empty 'id' values. "
-            f"These records will not have XML IDs and cannot be referenced."
-        )
+        if o2m:
+            log.info(
+                f"{len(data) - empty_count} record(s), {empty_count} line row(s): "
+                f"in --o2m mode the empty-'id' rows are continuation lines of their "
+                f"parent record, not records of their own."
+            )
+        else:
+            log.warning(
+                f"Found {empty_count} row(s) with empty 'id' values. "
+                f"These records will not have XML IDs and cannot be referenced."
+            )
 
     return empty_count
 
@@ -3474,6 +3486,11 @@ def import_data(  # noqa: C901
             "no deferred fields, and no force_create."
         )
 
+    # In o2m mode the empty-'id' continuation rows are line rows of a parent, not
+    # records; this counts them so the reconciliation below does not read them as
+    # unaccounted-for records. Zero outside o2m (and in streaming, which is never
+    # o2m).
+    o2m_line_rows = 0
     if can_stream:
         # Use streaming mode - don't load all data into memory
         log.info("Using streaming mode for memory-efficient import.")
@@ -3487,8 +3504,8 @@ def import_data(  # noqa: C901
         if not header:
             return False, {}
 
-        # Warn about empty id values
-        _warn_empty_ids(header, all_data)
+        # Warn about empty id values (in o2m these are expected line rows)
+        o2m_line_rows = _warn_empty_ids(header, all_data, o2m=o2m)
 
         # --- ORM-minimizing: pre-resolve relations to xmlid/db-id in Polars ---
         # Joining natural keys against a cached id-map here means Odoo's load()
@@ -3929,13 +3946,17 @@ def import_data(  # noqa: C901
         stats["immutable_guarded"] = reasons
 
     # --- Reconciliation Check ---
-    # Verify that created + failed == total (accounting for duplicates)
+    # Verify that created + failed == total (accounting for duplicates). In o2m
+    # mode the continuation (line) rows are not records — load() returns one id
+    # per parent — so they are excluded from the record total here rather than
+    # counted as unaccounted-for.
+    expected_records = record_count - o2m_line_rows
     accounted_records = len(id_map) + failed_records
-    if record_count > 0 and accounted_records < record_count:
-        unaccounted = record_count - accounted_records
+    if expected_records > 0 and accounted_records < expected_records:
+        unaccounted = expected_records - accounted_records
         log.warning(
             f"Record reconciliation discrepancy detected: "
-            f"{record_count} total records, {len(id_map)} created, "
+            f"{expected_records} total records, {len(id_map)} created, "
             f"{failed_records} failed = {accounted_records} accounted. "
             f"{unaccounted} records unaccounted for. "
             f"This may indicate records with duplicate IDs (expected) or "

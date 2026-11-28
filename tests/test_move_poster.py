@@ -273,6 +273,33 @@ def test_post_fail_message_extracts_odoo_message(tmp_path: Path) -> None:
     assert "Traceback" not in message and "'data'" not in message
 
 
+def test_posting_progress_omits_unknown_counters(tmp_path: Path) -> None:
+    """Mid-post progress carries no created/failed counters (not known yet)."""
+
+    class _Rec:
+        def __init__(self) -> None:
+            self.progress: list[tuple[int, int, Any]] = []
+
+        def on_phase(self, name: str) -> None:
+            pass
+
+        def on_progress(self, done: int, total: int, stats: Any = None) -> None:
+            self.progress.append((done, total, stats))
+
+        def on_message(self, level: Any, text: str) -> None:
+            pass
+
+    db = _DB()
+    db.add_move("t.d1", state="draft", name="A")
+    db.add_move("t.d2", state="draft", name="B")
+    f = _src(tmp_path, "id;x\nt.d1;1\nt.d2;1\n")
+    rec = _Rec()
+    run_post_moves("c", f, reporter=rec, connect=lambda _c: _Conn(db))
+    assert rec.progress  # progress was reported
+    assert all(stats is None for _done, _total, stats in rec.progress)
+>>>>>>> 3b936fb (fix(import): o2m continuation rows are lines, not unaccounted records)
+
+
 def test_batch_fallback_isolates_one_bad_move(tmp_path: Path) -> None:
     """One unpostable move in a batch does not block the good ones."""
     db = _DB()

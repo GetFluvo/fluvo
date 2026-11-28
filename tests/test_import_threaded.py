@@ -2111,6 +2111,38 @@ class TestWarnEmptyIds:
 
         assert empty_count == 2
 
+    def test_o2m_line_rows_do_not_warn(self, caplog: Any) -> None:
+        """In o2m mode empty-'id' rows are line rows: info summary, no warnings."""
+        import logging
+
+        header = ["id", "name", "line_ids/account_id"]
+        data = [
+            ["move_1", "Entry", "1300"],  # parent
+            ["", "", "8000"],  # continuation line (empty id)
+            ["", "", "1300"],  # continuation line (empty id)
+        ]
+        with caplog.at_level(logging.INFO, logger="fluvo"):
+            empty_count = _warn_empty_ids(header, data, o2m=True)
+
+        assert empty_count == 2
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+        info = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+        assert any("1 record(s), 2 line row(s)" in m for m in info)
+
+    def test_non_o2m_empty_ids_still_warn(self, caplog: Any) -> None:
+        """Outside o2m an empty 'id' is still a per-row and summary warning."""
+        import logging
+
+        header = ["id", "name"]
+        data = [["", "Alice"]]
+        with caplog.at_level(logging.WARNING, logger="fluvo"):
+            _warn_empty_ids(header, data, o2m=False)
+
+        warnings = [
+            r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING
+        ]
+        assert any("Empty 'id' value detected" in m for m in warnings)
+
 
 class TestSkipExisting:
     """Tests for the skip_existing functionality."""
