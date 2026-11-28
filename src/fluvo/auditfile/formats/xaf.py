@@ -1,8 +1,8 @@
-"""Streaming reader for the Dutch XAF audit file (versions 3.2 and 4.0).
+"""Streaming reader for the Dutch XAF audit file (versions 3.1, 3.2 and 4.0).
 
 XAF (*XML Auditfile Financieel*) is the Dutch tax authority's financial audit
 file and the direct ancestor of the OECD SAF-T standard. This reader turns a
-3.2 or 4.0 file into a :class:`~fluvo.auditfile.canonical.CanonicalLedger`.
+3.1, 3.2 or 4.0 file into a :class:`~fluvo.auditfile.canonical.CanonicalLedger`.
 
 **Memory safety.** Active-company files routinely exceed 100 MB, so the reader
 streams with :func:`lxml.etree.iterparse`, asks it (via the ``tag`` filter) to
@@ -12,15 +12,28 @@ flushed to compact columnar frames in chunks, so Python never holds the whole
 file as objects. Peak memory is a chunk plus the final frames, not the file.
 
 **Version detection.** The schema version comes from the root element's
-namespace, verified against the official Belastingdienst XSDs:
+namespace:
 
+* 3.1 — ``http://www.auditfiles.nl/XAF/3.1``.
 * 3.2 — ``http://www.auditfiles.nl/XAF/3.2`` (note the plural *auditfiles*).
 * 4.0 — ``http://www.odb.belastingdienst.nl/Belastingdienst/BCPP/1.1/structures/XmlauditfileXAF_4.0``.
 
 Element names are matched by *local* name (namespace stripped), so one code path
-serves both versions; the genuine 3.2/4.0 differences (``leadCode`` vs
+serves every version. The 3.2 and 4.0 handling is verified against the official
+Belastingdienst XSDs; the genuine 3.2/4.0 differences (``leadCode`` vs
 ``RGScode``, amounts that moved off ``transaction`` onto ``trLine``, the 3.2-only
 opening-balance subledger) are handled explicitly below.
+
+**3.1 is sample-verified, not XSD-verified.** The official ``auditfiles.nl``
+XSDs are no longer reachable, so 3.1 support rests on the real public Twinfield
+and osFinancials samples: both parse balanced with no anomalies and stage
+end-to-end. Comparing their element set against a real 3.2 file, 3.1 uses the
+same transaction/line/party/journal/opening vocabulary; the only 3.1-only
+elements seen are ``costID``, ``projID``, ``numberExtension``, ``periodDesc``,
+``sourceID`` and ``softwareVersion`` (all ignored by the reader, which skips
+unknown elements), plus ``recRef`` (read as a reconciliation key) and the
+``currency``/``curCode`` wrapper (read as the line currency). A 3.1 file that
+leans on an element these two samples do not exercise may need revisiting.
 
 Several points where a widely-circulated draft spec is wrong, confirmed against
 the XSDs: the amounts live on ``trLine`` children, never reliably on the
@@ -55,6 +68,7 @@ from ..canonical import (
 )
 
 #: Namespace fragments that identify an XAF file and its version.
+_NS_31 = "auditfiles.nl/XAF/3.1"
 _NS_32 = "auditfiles.nl/XAF/3.2"
 _NS_40 = "XmlauditfileXAF_4.0"
 
@@ -151,21 +165,22 @@ def _is_auditfile_root(tag: object) -> bool:
 def _version_of(tag: object) -> str | None:
     """Map a root-element tag to a *supported* XAF version, or None.
 
-    Only the two versions this reader is verified against are recognised. An
-    ``auditfile`` root in any other namespace (3.1, 3.0, 2.0, or a future
-    revision) returns None so the reader can refuse it explicitly rather than
-    mis-parse it as 4.0.
+    Only the versions this reader is verified against are recognised. An
+    ``auditfile`` root in any other namespace (3.0, 2.0, or a future revision)
+    returns None so the reader can refuse it explicitly rather than mis-parse it.
 
     Args:
         tag: The root element's tag.
 
     Returns:
-        str | None: ``"3.2"`` or ``"4.0"``; None when the element is not an XAF
-        root or is an unsupported XAF version.
+        str | None: ``"3.1"``, ``"3.2"`` or ``"4.0"``; None when the element is
+        not an XAF root or is an unsupported XAF version.
     """
     if not _is_auditfile_root(tag):
         return None
     ns = _namespace(tag)
+    if _NS_31 in ns:
+        return "3.1"
     if _NS_32 in ns:
         return "3.2"
     if _NS_40 in ns:
