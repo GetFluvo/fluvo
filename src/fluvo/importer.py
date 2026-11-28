@@ -1079,9 +1079,13 @@ def run_import(  # noqa: C901
     # --adaptive-throttle) tune a non-constraint on server-bound heavy models, so
     # the real figure is where the time actually goes.
     rows_per_s = (total_processed / elapsed) if elapsed > 0 else 0.0
+    # In o2m mode `total_records` counts parent records; the continuation line
+    # rows are reported alongside so the figure stays a records story.
+    line_rows = stats.get("line_rows", 0)
+    line_suffix = f" ({line_rows} line row(s))" if line_rows else ""
     log.info(
-        f"{total_processed} records processed for '{model}' in {elapsed:.2f}s "
-        f"({rows_per_s:.1f} rows/s)."
+        f"{total_processed} records{line_suffix} processed for '{model}' in "
+        f"{elapsed:.2f}s ({rows_per_s:.1f} rows/s)."
     )
 
     # Make the per-record binary-search fallback visible: a few unresolvable

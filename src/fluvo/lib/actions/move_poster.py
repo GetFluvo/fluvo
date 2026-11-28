@@ -509,7 +509,10 @@ def run_post_moves(  # noqa: C901
         context = _post_context(records, chunk)
         _post_batch(model_obj, [records[x]["id"] for x in chunk], errors_by_id, context)
         attempted.extend(chunk)
-        reporter.on_progress(len(attempted), len(drafts), stats)
+        # No created/failed counters here: a post's outcome is only known once the
+        # moves are re-read afterwards (see _classify_after_post), so showing them
+        # mid-loop would print a stale "0 created, 0 failed". Report progress only.
+        reporter.on_progress(len(attempted), len(drafts))
 
     # Judge the outcome by what Odoo now says, not by what the calls returned.
     if attempted:
