@@ -59,6 +59,7 @@ from ..immutable import (
     normalize_xmlid,
     resolve_records,
 )
+from ..odoo_errors import format_odoo_error
 
 MODEL = "account.move"
 
@@ -349,14 +350,14 @@ def _post_batch(
         return
     except Exception as e:
         if len(ids) == 1:
-            errors[ids[0]] = str(e)
+            errors[ids[0]] = format_odoo_error(e)
             return
-        log.debug(f"Batch post failed ({e}); retrying record by record.")
+        log.debug(f"Batch post failed ({format_odoo_error(e)}); retrying one by one.")
     for move_id in ids:
         try:
             _call_post(model_obj, [move_id], context)
         except Exception as e:
-            errors[move_id] = str(e)
+            errors[move_id] = format_odoo_error(e)
 
 
 def _post_context(
