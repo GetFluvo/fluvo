@@ -50,6 +50,9 @@ guess a fix:
   carries none); set ``--default-payment-days``.
 * **reversed_open_item** (warning) — a reversed-sign open item (credit note /
   unallocated payment) staged as a refund; review it.
+* **partnerless_open_item** (warning) — in cutover, an open amount on a control
+  account carries no partner, so it cannot be a postable invoice; its balance is
+  carried on the control account instead. Review it.
 * **ambiguous_partner_control** (warning) — a partner's open items span more
   than one control account; the staged property picks one.
 * **open_item_tie_out** (warning) — in cutover, a control account's opening
@@ -709,6 +712,34 @@ def _check_reversed_open_items(result: TransformResult) -> list[Finding]:
     ]
 
 
+def _check_partnerless_open_items(result: TransformResult) -> list[Finding]:
+    """Flag open amounts on a control account that carry no partner.
+
+    An open item without a partner cannot be staged as a postable invoice, so
+    its balance is carried on the control account in the opening move instead.
+    Name the amounts for review (a true control account should not hold a
+    partner-less open balance).
+
+    Args:
+        result: The transform result.
+
+    Returns:
+        list[Finding]: A single warning finding, or empty.
+    """
+    if result.mode != MODE_CUTOVER or not result.partnerless_open_items:
+        return []
+    return [
+        _finding(
+            "partnerless_open_item",
+            WARNING,
+            "{n} open amount(s) on a control account carry no partner; they "
+            "cannot be postable invoices and were carried on the control "
+            "account instead — review.",
+            list(result.partnerless_open_items),
+        )
+    ]
+
+
 def _check_ambiguous_partner_controls(result: TransformResult) -> list[Finding]:
     """Flag partners whose open items span more than one control account.
 
@@ -914,6 +945,7 @@ def run_preflight(ledger: CanonicalLedger, result: TransformResult) -> Preflight
     findings += _check_sequence_disambiguated(ledger)
     findings += _check_due_dates_derived(result)
     findings += _check_reversed_open_items(result)
+    findings += _check_partnerless_open_items(result)
     findings += _check_ambiguous_partner_controls(result)
     findings += _check_open_item_tie_out(ledger, result)
     findings.sort(key=lambda f: 0 if f.severity == ERROR else 1)

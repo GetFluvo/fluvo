@@ -241,11 +241,20 @@ def _norm_vat(value: str | None) -> str | None:
     return cleaned or None
 
 
-def _numbering_type(code: str) -> str | None:  # noqa: C901 - a flat lookup chain
+def _numbering_type(code: str, balance_sign: str = "") -> str | None:  # noqa: C901
     """Propose an Odoo account type from the Dutch grootboek numbering.
+
+    The control types (receivable/payable) are deliberately *not* handed out by
+    number range alone: a ``13xx`` / ``16xx`` code is not enough, since bad-debt
+    provisions, clearing accounts and the like share those ranges. Control typing
+    is decided by :func:`classify_account` from the file's own evidence instead.
+    Within the ambiguous current-asset / current-liability zone (``1xxx`` /
+    ``2xxx``) the closing-balance sign, when known, decides asset vs liability.
 
     Args:
         code: The account code (``accID``).
+        balance_sign: ``"debit"``, ``"credit"`` or ``""`` — the sign of the
+            account's closing balance, used to resolve the current zone.
 
     Returns:
         str | None: A proposed account type, or None when the code gives no
@@ -255,10 +264,6 @@ def _numbering_type(code: str) -> str | None:  # noqa: C901 - a flat lookup chai
     if not code:
         return None
     two = code[:2]
-    if two == "13":
-        return "asset_receivable"
-    if two == "16":
-        return "liability_payable"
     if two in ("10", "11", "12"):
         return "asset_cash"
     if two in ("05", "06", "07", "08", "09"):
@@ -267,9 +272,9 @@ def _numbering_type(code: str) -> str | None:  # noqa: C901 - a flat lookup chai
     if first == "0":
         return "asset_fixed"
     if first == "1":
-        return "asset_current"
+        return "liability_current" if balance_sign == "credit" else "asset_current"
     if first == "2":
-        return "liability_current"
+        return "asset_current" if balance_sign == "debit" else "liability_current"
     if first == "3":
         return "asset_current"
     if first in ("4", "5", "6", "7"):
@@ -279,6 +284,84 @@ def _numbering_type(code: str) -> str | None:  # noqa: C901 - a flat lookup chai
     if first == "9":
         return "income_other"
     return None
+
+
+#: Lowercased name substrings that mark an account as *not* a trade
+#: receivable/payable control, even when its code range, a word in the name
+#: (e.g. "debiteuren" inside "voorziening oninbare debiteuren") or a partner line
+#: on it would suggest one. Two groups: provisions/clearing/cross-entry
+#: accounts, and tax/statutory accounts (a VAT or payroll-tax account carries the
+#: tax authority as a "partner", which must not make it a control). These
+#: resolve to a plain balance-sheet type by numbering and sign instead.
+_NON_CONTROL_NAME_MARKERS: Final = (
+    "voorziening",
+    "tussenrekening",
+    "kruispost",
+    "btw",
+    "omzetbelasting",
+    "loonheffing",
+    "loonbelasting",
+    "af te dragen",
+    "te vorderen",
+)
+
+#: Lowercased name substrings that disambiguate a *current* account as a
+#: liability or an asset. Applied only within the ``1xxx`` / ``2xxx`` current
+#: zone, so a stray keyword never flips a cash, fixed-asset, equity or
+#: profit-and-loss account. The liability keywords are amounts owed: taxes to
+#: remit ("af te dragen", "loonheffing", "loonbelasting"), other amounts "te
+#: betalen" (covers "nog te betalen"), payroll accruals ("vakantiegeld") and
+#: other accruals/reserves ("reservering"); "te vorderen" is an amount
+#: receivable (an asset).
+_NAME_CURRENT_LIABILITY: Final = (
+    "af te dragen",
+    "loonheffing",
+    "loonbelasting",
+    "te betalen",
+    "vakantiegeld",
+    "reservering",
+)
+_NAME_CURRENT_ASSET: Final = ("te vorderen",)
+
+
+def _has_marker(name_l: str, markers: tuple[str, ...]) -> bool:
+    """Whether ``name_l`` contains any of ``markers``.
+
+    Args:
+        name_l: A lowercased account name.
+        markers: Lowercased substrings to look for.
+
+    Returns:
+        bool: True when at least one marker is a substring of the name.
+    """
+    return any(m in name_l for m in markers)
+
+
+def _control_type(account_id: str, name_l: str, balance_sign: str) -> str:
+    """Pick receivable vs payable for an account known to be a control account.
+
+    Args:
+        account_id: The source account code.
+        name_l: The lowercased account name.
+        balance_sign: ``"debit"``, ``"credit"`` or ``""``.
+
+    Returns:
+        str: ``"asset_receivable"`` or ``"liability_payable"``. Direction is
+        read from the name (debiteuren/crediteuren), else the Dutch 13xx/16xx
+        ranges, else the closing-balance sign, defaulting to receivable.
+    """
+    if "debiteur" in name_l:
+        return "asset_receivable"
+    if "crediteur" in name_l:
+        return "liability_payable"
+    two = account_id[:2]
+    if two == "13":
+        return "asset_receivable"
+    if two == "16":
+        return "liability_payable"
+    if balance_sign == "credit":
+        return "liability_payable"
+    return "asset_receivable"
 
 
 @dataclass(frozen=True)
@@ -325,20 +408,33 @@ class AccountDecision:
 
 def classify_account(
     account_id: str,
+    name: str,
     lead_code: str | None,
     kind: str,
     overrides: dict[str, str],
+    *,
+    has_partner_lines: bool = False,
+    balance_sign: str = "",
 ) -> tuple[str, str]:
     """Decide an account's Odoo type via the chart-mapper chain.
 
-    The chain, most authoritative first: a user override, then the curated RGS
-    table (4.0), then the numbering heuristic, then a kind-based fallback.
+    The chain, most authoritative first: a user override; the curated RGS table
+    (4.0); the file's own evidence — a receivable/payable control type only when
+    the account carries partner (custSupID) lines or its name says
+    debiteuren/crediteuren, and never when the name marks it a provision,
+    clearing or cross-entry account; then the numbering heuristic refined by the
+    closing-balance sign and Dutch name keywords; then a kind-based fallback.
 
     Args:
         account_id: The source account code.
+        name: The account description (for the Dutch name keywords).
         lead_code: The RGS reference code (4.0 only), if any.
         kind: The canonical account kind (balance / profit_loss / unknown).
         overrides: A user ``account_id`` → ``account_type`` override map.
+        has_partner_lines: Whether any line on the account carries a partner
+            (custSupID) — the file's own evidence of a control account.
+        balance_sign: ``"debit"``, ``"credit"`` or ``""`` — the account's
+            closing-balance sign.
 
     Returns:
         tuple[str, str]: ``(account_type, source)``.
@@ -347,10 +443,80 @@ def classify_account(
         return overrides[account_id], SRC_OVERRIDE
     if lead_code and lead_code in _RGS_TYPE:
         return _RGS_TYPE[lead_code], SRC_RGS
-    proposed = _numbering_type(account_id)
+    name_l = name.lower()
+    if not _has_marker(name_l, _NON_CONTROL_NAME_MARKERS):
+        is_control_name = "debiteur" in name_l or "crediteur" in name_l
+        # A trade control account is either named debiteuren/crediteuren, or sits
+        # in the Dutch 13xx/16xx control range *and* actually carries partner
+        # (custSupID) lines. Partner lines alone are not enough: some formats tag
+        # every line of a customer/supplier transaction with the partner, so a
+        # revenue or asset line would otherwise be mistaken for a control.
+        in_control_range = account_id[:2] in ("13", "16")
+        if is_control_name or (in_control_range and has_partner_lines):
+            return _control_type(account_id, name_l, balance_sign), SRC_HEURISTIC
+    proposed = _numbering_type(account_id, balance_sign)
+    if proposed in ("asset_current", "liability_current"):
+        if _has_marker(name_l, _NAME_CURRENT_LIABILITY):
+            proposed = "liability_current"
+        elif _has_marker(name_l, _NAME_CURRENT_ASSET):
+            proposed = "asset_current"
     if proposed is not None:
         return proposed, SRC_HEURISTIC
     return ("asset_current" if kind == ACCOUNT_BALANCE else "expense"), SRC_FALLBACK
+
+
+def _partner_bearing_accounts(ledger: CanonicalLedger) -> set[str]:
+    """Return the set of account ids that carry any partner (custSupID) line.
+
+    The file's own evidence of a control account: a transaction or opening line
+    on the account names a customer/supplier.
+
+    Args:
+        ledger: The canonical ledger.
+
+    Returns:
+        set[str]: Account ids with at least one partner-bearing line.
+    """
+    accts: set[str] = set()
+    for frame in (ledger.lines, ledger.opening_lines):
+        if frame.height == 0:
+            continue
+        sub = frame.filter(pl.col("source_partner_id").is_not_null())
+        accts.update(
+            str(a) for a in sub.get_column("account_id").to_list() if a is not None
+        )
+    return accts
+
+
+def _closing_net_by_account(ledger: CanonicalLedger) -> dict[str, float]:
+    """Return each account's closing net (opening balance plus the year's lines).
+
+    Args:
+        ledger: The canonical ledger.
+
+    Returns:
+        dict[str, float]: Account id → signed ``debit - credit`` at period end.
+    """
+    closing = dict(_net_by_account(ledger.opening_lines))
+    for account_id, net in _net_by_account(ledger.lines).items():
+        closing[account_id] = closing.get(account_id, 0.0) + net
+    return closing
+
+
+def _balance_sign(net: float) -> str:
+    """Classify a signed net as a debit/credit balance within tolerance.
+
+    Args:
+        net: A signed ``debit - credit`` amount.
+
+    Returns:
+        str: ``"debit"``, ``"credit"`` or ``""`` when within tolerance of zero.
+    """
+    if net > _ZERO_TOLERANCE:
+        return "debit"
+    if net < -_ZERO_TOLERANCE:
+        return "credit"
+    return ""
 
 
 def _decide_accounts(
@@ -370,19 +536,28 @@ def _decide_accounts(
         list[AccountDecision]: One decision per account, sorted by code.
     """
     reconcile_overrides = reconcile_overrides or {}
+    partner_accounts = _partner_bearing_accounts(ledger)
+    closing = _closing_net_by_account(ledger)
     rows = ledger.accounts.sort("account_id").to_dicts()
     decisions: list[AccountDecision] = []
     for row in rows:
         account_id = str(row["account_id"])
+        name = str(row.get("description") or account_id)
         kind = str(row.get("kind") or "")
         account_type, source = classify_account(
-            account_id, row.get("lead_code"), kind, overrides
+            account_id,
+            name,
+            row.get("lead_code"),
+            kind,
+            overrides,
+            has_partner_lines=account_id in partner_accounts,
+            balance_sign=_balance_sign(closing.get(account_id, 0.0)),
         )
         decisions.append(
             AccountDecision(
                 account_id=account_id,
                 code=account_id,
-                name=str(row.get("description") or account_id),
+                name=name,
                 account_type=account_type,
                 reconcile=reconcile_overrides.get(
                     account_id, account_type in _RECONCILE_TYPES
@@ -443,6 +618,10 @@ class TransformResult:
             one control account of a kind — preflight flags these.
         derived_due_dates: How many invoice due dates were derived (the file
             carries none), for a preflight warning.
+        partnerless_open_items: ``account_id:ref`` keys of open amounts on a
+            control account that carry no partner; they are carried on the
+            control account rather than staged as invoices, and preflight flags
+            them.
     """
 
     partners: pl.DataFrame
@@ -482,6 +661,7 @@ class TransformResult:
     refund_items: tuple[str, ...] = field(default_factory=tuple)
     ambiguous_partners: tuple[str, ...] = field(default_factory=tuple)
     derived_due_dates: int = 0
+    partnerless_open_items: tuple[str, ...] = field(default_factory=tuple)
 
 
 # --- partners ---------------------------------------------------------------
@@ -1142,6 +1322,11 @@ def _open_items(ledger: CanonicalLedger, reconcile_accounts: set[str]) -> pl.Dat
     else the document reference — so a payment nets against its invoice and a
     fully-paid invoice drops out rather than leaving a phantom pair.
 
+    Only partner-bearing lines are open items: an open item without a partner
+    cannot become a postable invoice, so its balance is carried on the control
+    account instead (see :func:`_partnerless_control_items` and
+    :func:`_cutover_specs`).
+
     Args:
         ledger: The canonical ledger.
         reconcile_accounts: Source account ids typed receivable/payable.
@@ -1165,9 +1350,9 @@ def _open_items(ledger: CanonicalLedger, reconcile_accounts: set[str]) -> pl.Dat
     sub = ledger.opening_lines.filter(
         pl.col("source_partner_id").is_not_null() & pl.col("account_id").is_in(accounts)
     ).with_columns(pl.col("date").alias("item_date"))
-    year = ledger.lines.filter(pl.col("account_id").is_in(accounts)).with_columns(
-        pl.col("effective_date").alias("item_date")
-    )
+    year = ledger.lines.filter(
+        pl.col("account_id").is_in(accounts) & pl.col("source_partner_id").is_not_null()
+    ).with_columns(pl.col("effective_date").alias("item_date"))
     cols = [*_OPEN_ITEM_COLS, "item_date"]
     sources = [f.select(cols) for f in (sub, year) if f.height]
     if not sources:
@@ -1206,6 +1391,43 @@ def _open_items(ledger: CanonicalLedger, reconcile_accounts: set[str]) -> pl.Dat
             ]
         )
         .sort(["account_id", "source_partner_id", "doc_ref"])
+    )
+
+
+def _partnerless_control_items(
+    ledger: CanonicalLedger, reconcile_accounts: set[str]
+) -> pl.DataFrame:
+    """Net the partner-less transaction lines on each control account.
+
+    These are the amounts :func:`_open_items` leaves out because they carry no
+    partner and so cannot be staged as a postable invoice. They are netted by
+    account and matching reference, non-zero only, so cutover can carry them on
+    the control account and preflight can name them.
+
+    Args:
+        ledger: The canonical ledger.
+        reconcile_accounts: Source account ids typed receivable/payable.
+
+    Returns:
+        pl.DataFrame: ``account_id``, ``ref`` and signed ``net`` per residual,
+        sorted deterministically. Empty when there are none.
+    """
+    schema = {"account_id": pl.String, "ref": pl.String, "net": pl.Float64}
+    if not reconcile_accounts:
+        return pl.DataFrame(schema=schema)
+    lines = ledger.lines.filter(
+        pl.col("account_id").is_in(list(reconcile_accounts))
+        & pl.col("source_partner_id").is_null()
+    )
+    if lines.height == 0:
+        return pl.DataFrame(schema=schema)
+    return (
+        lines.with_columns(_effective_ref().alias("ref"))
+        .group_by(["account_id", "ref"])
+        .agg((pl.col("debit").sum() - pl.col("credit").sum()).alias("net"))
+        .filter(pl.col("net").abs() > _ZERO_TOLERANCE)
+        .select(["account_id", "ref", "net"])
+        .sort(["account_id", "ref"])
     )
 
 
@@ -1281,6 +1503,11 @@ def _cutover_specs(  # noqa: C901 - a flat per-account classification chain
     sub_opening = ledger.opening_lines.filter(pl.col("source_partner_id").is_not_null())
     opening_gl = _net_by_account(gl_opening)
     subledger = _net_by_account(sub_opening)
+    # Year lines on a control account that carry no partner are not open-item
+    # invoices (see _open_items); their net is carried on the control account.
+    partnerless = _net_by_account(
+        ledger.lines.filter(pl.col("source_partner_id").is_null())
+    )
 
     specs: list[tuple[str, str, str, str]] = []
     pl_net = 0.0
@@ -1310,9 +1537,14 @@ def _cutover_specs(  # noqa: C901 - a flat per-account classification chain
     if abs(clearing_net) > _ZERO_TOLERANCE:
         specs.append(_spec(clearing_account, "", clearing_net))
     # A lumped remainder on each control account for opening not itemised by a
-    # subledger (e.g. 4.0, which has no subledger at all).
+    # subledger (e.g. 4.0, which has no subledger at all), plus the net of any
+    # partner-less year lines, which are not staged as open-item invoices.
     for account_id in sorted(reconcile_accounts):
-        remainder = opening_gl.get(account_id, 0.0) - subledger.get(account_id, 0.0)
+        remainder = (
+            opening_gl.get(account_id, 0.0)
+            - subledger.get(account_id, 0.0)
+            + partnerless.get(account_id, 0.0)
+        )
         if abs(remainder) > _ZERO_TOLERANCE:
             specs.append(_spec(account_id, "", remainder))
     return specs
@@ -1649,6 +1881,10 @@ def transform(
     accounts = _accounts_frame(decisions, prefix, matches)
     account_map = _account_map_frame(decisions, matches)
     open_items = _open_items(ledger, reconcile_accounts)
+    partnerless = _partnerless_control_items(ledger, reconcile_accounts)
+    partnerless_keys = tuple(
+        f"{r['account_id']}:{r['ref']}" for r in partnerless.to_dicts()
+    )
 
     open_invoices = _empty_open_invoices()
     clearing_id = clearing_account or _CLEARING_DEFAULT_CODE
@@ -1757,6 +1993,7 @@ def transform(
         refund_items=refund_items,
         ambiguous_partners=ambiguous,
         derived_due_dates=derived_due,
+        partnerless_open_items=partnerless_keys,
     )
 
 

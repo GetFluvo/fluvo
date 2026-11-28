@@ -76,22 +76,101 @@ def test_norm_kvk_and_vat() -> None:
 
 
 def test_classify_account_chain() -> None:
-    """The mapper chain honours override > RGS > heuristic > fallback."""
-    assert classify_account("1300", None, "balance", {"1300": "asset_cash"}) == (
+    """The mapper chain honours override > RGS > evidence > numbering > fallback."""
+    assert classify_account(
+        "1300", "Debiteuren", None, "balance", {"1300": "asset_cash"}
+    ) == (
         "asset_cash",
         SRC_OVERRIDE,
     )
-    assert classify_account("1300", "BVorHanDeb", "balance", {}) == (
+    assert classify_account("1300", "Debiteuren", "BVorHanDeb", "balance", {}) == (
         "asset_receivable",
         SRC_RGS,
     )
-    assert classify_account("1300", None, "balance", {}) == (
+    # A receivable control name alone makes it a control account (no RGS here).
+    assert classify_account("1300", "Debiteuren", None, "balance", {}) == (
         "asset_receivable",
         SRC_HEURISTIC,
     )
-    assert classify_account("ZZZ", None, "balance", {}) == (
+    # The same code with no control name and no partner lines is NOT a control
+    # account: 13xx by number alone falls to the current zone.
+    assert classify_account("1300", "Onderhanden werk", None, "balance", {}) == (
+        "asset_current",
+        SRC_HEURISTIC,
+    )
+    assert classify_account("ZZZ", "Mystery", None, "balance", {}) == (
         "asset_current",
         SRC_FALLBACK,
+    )
+
+
+def test_classify_account_control_by_range_and_partner_evidence() -> None:
+    """A 13xx/16xx account with partner lines is a control account."""
+    assert classify_account(
+        "1310", "Vorderingen handel", None, "balance", {}, has_partner_lines=True
+    ) == ("asset_receivable", SRC_HEURISTIC)
+    assert classify_account(
+        "1650", "Te betalen posten", None, "balance", {}, has_partner_lines=True
+    ) == ("liability_payable", SRC_HEURISTIC)
+    # Partner lines alone, outside the control range and with no control name,
+    # do NOT make an account a control (some formats tag every line's partner).
+    assert classify_account(
+        "8000", "Omzet", None, "profit_loss", {}, has_partner_lines=True
+    ) == ("income", SRC_HEURISTIC)
+    assert classify_account(
+        "0300", "Gebouwen", None, "balance", {}, has_partner_lines=True
+    ) == ("asset_fixed", SRC_HEURISTIC)
+
+
+def test_classify_account_provision_is_not_a_control() -> None:
+    """A provision/clearing name is never receivable/payable, even in 13xx/16xx."""
+    assert classify_account(
+        "1310", "Voorziening oninbare debiteuren", None, "balance", {}
+    )[0] in ("asset_current", "liability_current")
+    assert classify_account("1670", "Tussenrekening assurantiën", None, "balance", {})[
+        0
+    ] in ("asset_current", "liability_current")
+    assert classify_account(
+        "1670",
+        "Tussenrekening assurantiën",
+        None,
+        "balance",
+        {},
+        has_partner_lines=True,
+    )[0] in ("asset_current", "liability_current")
+
+
+def test_classify_account_sign_and_name_resolve_current_zone() -> None:
+    """Closing-balance sign and Dutch keywords disambiguate the current zone."""
+    assert classify_account(
+        "1510", "Af te dragen BTW laag", None, "balance", {}, balance_sign="credit"
+    ) == ("liability_current", SRC_HEURISTIC)
+    assert classify_account("1510", "Af te dragen BTW laag", None, "balance", {}) == (
+        "liability_current",
+        SRC_HEURISTIC,
+    )
+    assert classify_account("1520", "Te vorderen BTW", None, "balance", {}) == (
+        "asset_current",
+        SRC_HEURISTIC,
+    )
+    assert classify_account("4010", "Vakantiegeld", None, "profit_loss", {}) == (
+        "expense",
+        SRC_HEURISTIC,
+    )
+    # Payroll / accrual liabilities sitting in the 1xxx/2xxx current zone.
+    for code, name in (
+        ("1830", "vakantiegeld"),
+        ("2100", "Nog te betalen bedragen"),
+        ("2110", "Reservering vakantiedagen"),
+    ):
+        assert classify_account(code, name, None, "balance", {}) == (
+            "liability_current",
+            SRC_HEURISTIC,
+        ), code
+    # But a payroll keyword never pulls a profit-and-loss account into the zone.
+    assert (
+        classify_account("4011", "Reservering vakantiegeld", None, "profit_loss", {})[0]
+        == "expense"
     )
 
 
@@ -257,6 +336,47 @@ def test_cutover_nets_payment_against_invoice(tmp_path: Path) -> None:
     assert "INV2" in refs  # unpaid invoice is open
     assert "INV1" not in refs  # invoice + its payment net to zero
     assert "BANK-7" not in refs  # no phantom open item for the payment
+    debit, credit = _move_balance(result)
+    assert debit == pytest.approx(credit)
+
+
+_PARTNERLESS_BODY = (
+    "<generalLedger>"
+    "<ledgerAccount><accID>1300</accID><accDesc>Debiteuren</accDesc><accTp>B</accTp>"
+    "</ledgerAccount>"
+    "<ledgerAccount><accID>8000</accID><accDesc>Omzet</accDesc><accTp>P</accTp>"
+    "</ledgerAccount></generalLedger>"
+    "<customersSuppliers><customerSupplier><custSupID>C1</custSupID>"
+    "<custSupTp>C</custSupTp><custSupName>Klant</custSupName></customerSupplier>"
+    "</customersSuppliers>"
+    "<transactions>"
+    "<journal><jrnID>VK</jrnID><jrnTp>S</jrnTp>"
+    "<transaction><nr>1</nr><trDt>2025-02-01</trDt>"
+    "<trLine><nr>1</nr><accID>1300</accID><amnt>100.00</amnt><amntTp>D</amntTp>"
+    "<invRef>INV1</invRef><custSupID>C1</custSupID></trLine>"
+    "<trLine><nr>2</nr><accID>8000</accID><amnt>100.00</amnt><amntTp>C</amntTp>"
+    "</trLine></transaction></journal>"
+    "<journal><jrnID>MEMO</jrnID><jrnTp>M</jrnTp>"
+    "<transaction><nr>9</nr><trDt>2025-06-01</trDt>"
+    "<trLine><nr>1</nr><accID>1300</accID><amnt>30.00</amnt><amntTp>C</amntTp>"
+    "<docRef>COR-1</docRef></trLine>"
+    "<trLine><nr>2</nr><accID>8000</accID><amnt>30.00</amnt><amntTp>D</amntTp>"
+    "</trLine></transaction></journal></transactions>"
+)
+
+
+def test_partnerless_open_item_is_carried_not_invoiced(tmp_path: Path) -> None:
+    """A partner-less control amount stays on the account, not an invoice."""
+    result = transform(_read_xaf(tmp_path, _PARTNERLESS_BODY), mode=MODE_CUTOVER)
+    # Only the partner-bearing invoice becomes an open item / open invoice.
+    assert set(result.open_items.get_column("doc_ref").to_list()) == {"INV1"}
+    assert result.open_invoices.height == 1
+    assert all(p for p in result.open_invoices.get_column("partner_id/id").to_list())
+    # The partner-less residual is reported for preflight...
+    assert result.partnerless_open_items == ("1300:COR-1",)
+    # ...carried on the control account in the opening move (net -30)...
+    assert _move_net(result, "xaf.account_1300") == pytest.approx(-30.0)
+    # ...and the whole cutover still balances.
     debit, credit = _move_balance(result)
     assert debit == pytest.approx(credit)
 

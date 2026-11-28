@@ -262,6 +262,61 @@ def test_open_item_tie_out_passes_when_consistent(tmp_path: Path) -> None:
     assert "open_item_tie_out" not in _codes(report)
 
 
+def test_partnerless_open_item_is_flagged() -> None:
+    """Cutover flags a control-account amount that carries no partner."""
+    ledger = _ledger(
+        accounts=[
+            {"account_id": "1300", "kind": "balance", "lead_code": "BVorHanDeb"},
+            {"account_id": "8000", "kind": "profit_loss"},
+        ],
+        partners=[{"source_id": "C1", "role": "customer", "name": "Klant"}],
+        journals=[
+            {"journal_id": "VK", "kind": "sale"},
+            {"journal_id": "MEMO", "kind": "general"},
+        ],
+        moves=[
+            {"move_key": "VK/1", "journal_id": "VK", "number": "1"},
+            {"move_key": "MEMO/9", "journal_id": "MEMO", "number": "9"},
+        ],
+        lines=[
+            {
+                "move_key": "VK/1",
+                "line_number": 1,
+                "account_id": "1300",
+                "debit": 100.0,
+                "source_partner_id": "C1",
+                "invoice_ref": "INV1",
+            },
+            {
+                "move_key": "VK/1",
+                "line_number": 2,
+                "account_id": "8000",
+                "credit": 100.0,
+            },
+            {
+                "move_key": "MEMO/9",
+                "line_number": 1,
+                "account_id": "1300",
+                "credit": 30.0,
+                "doc_ref": "COR-1",
+            },
+            {
+                "move_key": "MEMO/9",
+                "line_number": 2,
+                "account_id": "8000",
+                "debit": 30.0,
+            },
+        ],
+    )
+    report = run_preflight(ledger, transform(ledger, mode=MODE_CUTOVER))
+    assert "partnerless_open_item" in _codes(report)
+    assert all(
+        f.severity == WARNING
+        for f in report.findings
+        if f.code == "partnerless_open_item"
+    )
+
+
 def test_staged_move_balance_is_checked() -> None:
     """An unbalanced source move is flagged on the staged output too."""
     ledger = _ledger(
@@ -440,7 +495,11 @@ def test_matched_control_mismatch_is_error() -> None:
     """A receivable matched onto a non-reconcilable target blocks."""
     from fluvo.auditfile.match import AccountMatch
 
-    ledger = _ledger(accounts=[{"account_id": "1300", "kind": "balance"}])
+    ledger = _ledger(
+        accounts=[
+            {"account_id": "1300", "description": "Debiteuren", "kind": "balance"}
+        ]
+    )
     meta = {"1300": AccountMatch("1300", "l10n.x", "X", "asset_current", False)}
     result = transform(ledger, account_matches={"1300": "l10n.x"}, match_meta=meta)
     report = run_preflight(ledger, result)
