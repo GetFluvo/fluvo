@@ -12,19 +12,28 @@ flushed to compact columnar frames in chunks, so Python never holds the whole
 file as objects. Peak memory is a chunk plus the final frames, not the file.
 
 **Version detection.** The schema version comes from the root element's
-namespace, verified against the official Belastingdienst XSDs:
+namespace:
 
 * 3.1 — ``http://www.auditfiles.nl/XAF/3.1``.
 * 3.2 — ``http://www.auditfiles.nl/XAF/3.2`` (note the plural *auditfiles*).
 * 4.0 — ``http://www.odb.belastingdienst.nl/Belastingdienst/BCPP/1.1/structures/XmlauditfileXAF_4.0``.
 
 Element names are matched by *local* name (namespace stripped), so one code path
-serves every version. 3.1 and 3.2 share the same element structure (verified
-against the real Twinfield and osFinancials 3.1 samples: both parse balanced
-with no anomalies), so 3.1 is simply recognised; the genuine 3.2/4.0 differences
-(``leadCode`` vs ``RGScode``, amounts that moved off ``transaction`` onto
-``trLine``, the 3.2-only opening-balance subledger) are handled explicitly
-below.
+serves every version. The 3.2 and 4.0 handling is verified against the official
+Belastingdienst XSDs; the genuine 3.2/4.0 differences (``leadCode`` vs
+``RGScode``, amounts that moved off ``transaction`` onto ``trLine``, the 3.2-only
+opening-balance subledger) are handled explicitly below.
+
+**3.1 is sample-verified, not XSD-verified.** The official ``auditfiles.nl``
+XSDs are no longer reachable, so 3.1 support rests on the real public Twinfield
+and osFinancials samples: both parse balanced with no anomalies and stage
+end-to-end. Comparing their element set against a real 3.2 file, 3.1 uses the
+same transaction/line/party/journal/opening vocabulary; the only 3.1-only
+elements seen are ``costID``, ``projID``, ``numberExtension``, ``periodDesc``,
+``sourceID`` and ``softwareVersion`` (all ignored by the reader, which skips
+unknown elements), plus ``recRef`` (read as a reconciliation key) and the
+``currency``/``curCode`` wrapper (read as the line currency). A 3.1 file that
+leans on an element these two samples do not exercise may need revisiting.
 
 Several points where a widely-circulated draft spec is wrong, confirmed against
 the XSDs: the amounts live on ``trLine`` children, never reliably on the
