@@ -297,7 +297,6 @@ def test_posting_progress_omits_unknown_counters(tmp_path: Path) -> None:
     run_post_moves("c", f, reporter=rec, connect=lambda _c: _Conn(db))
     assert rec.progress  # progress was reported
     assert all(stats is None for _done, _total, stats in rec.progress)
->>>>>>> 3b936fb (fix(import): o2m continuation rows are lines, not unaccounted records)
 
 
 def test_batch_fallback_isolates_one_bad_move(tmp_path: Path) -> None:

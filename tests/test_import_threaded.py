@@ -9,6 +9,7 @@ from rich.progress import Progress
 
 from fluvo.import_threaded import (
     _count_csv_rows,
+    _count_parent_rows,
     _create_batch_individually,
     _create_batches,
     _execute_load_batch,
@@ -21,6 +22,7 @@ from fluvo.import_threaded import (
     _orchestrate_pass_2,
     _prepare_pass_2_data,
     _read_data_file,
+    _record_counts,
     _setup_fail_file,
     _stream_csv_batches,
     _warn_empty_ids,
@@ -2142,6 +2144,77 @@ class TestWarnEmptyIds:
             r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING
         ]
         assert any("Empty 'id' value detected" in m for m in warnings)
+
+
+class TestRecordCounts:
+    """Tests for _record_counts / _count_parent_rows (o2m reconciliation unit)."""
+
+    def test_count_parent_rows_ignores_empty_ids_and_reason_column(self) -> None:
+        """Only non-empty 'id' rows count; a trailing reason column is ignored."""
+        rows = [
+            ["p1", "a", "some error"],  # parent + reason
+            ["", "b", "some error"],  # line row + reason
+            ["   ", "c"],  # whitespace id
+        ]
+        assert _count_parent_rows(rows, 0) == 1
+
+    def test_non_o2m_counts_rows(self) -> None:
+        """Outside o2m, totals and failures are plain row counts."""
+        total, failed, line_rows = _record_counts(
+            o2m=False,
+            header=["id", "x"],
+            record_count=5,
+            o2m_line_rows=0,
+            failed_lines=[["a", "x", "err"], ["b", "x", "err"]],
+            guarded_rows=[],
+        )
+        assert (total, failed, line_rows) == (5, 2, 0)
+
+    def test_o2m_failed_group_does_not_hide_dropped_parent(self) -> None:
+        """10 parents / 20 line rows; one 3-row group fails, 2 parents dropped.
+
+        Failures must be counted as parent records (1), not rows (3), so the two
+        silently dropped parents still surface as unaccounted.
+        """
+        # One failed group: parent + two continuation line rows (plus a reason).
+        failed_lines = [
+            ["p9", "x", "boom"],
+            ["", "x", "boom"],
+            ["", "x", "boom"],
+        ]
+        total, failed, line_rows = _record_counts(
+            o2m=True,
+            header=["id", "x"],
+            record_count=30,  # 10 parents + 20 line rows
+            o2m_line_rows=20,
+            failed_lines=failed_lines,
+            guarded_rows=[],
+        )
+        assert (total, failed, line_rows) == (10, 1, 20)
+        accounted = 7 + failed
+        assert total - accounted == 2  # the two dropped parents are visible
+
+    def test_o2m_guarded_rerun_counts_parents_not_rows(self) -> None:
+        """A guarded re-run of 57 moves / 110 line rows reports 57 failed, not 167."""
+        guarded_rows: list[tuple[list[Any], str]] = []
+        for i in range(57):
+            guarded_rows.append(([f"m{i}", "x"], "posted_immutable"))
+            guarded_rows.append((["", "x"], "posted_immutable"))  # line row 1
+        # Pad the line rows up to 110 total (57 moves have >=1 line each here).
+        for _ in range(110 - 57):
+            guarded_rows.append((["", "x"], "posted_immutable"))
+        total, failed, line_rows = _record_counts(
+            o2m=True,
+            header=["id", "x"],
+            record_count=167,
+            o2m_line_rows=110,
+            failed_lines=[],
+            guarded_rows=guarded_rows,
+        )
+        assert total == 57
+        assert failed == 57  # parents, not the 167 rows
+        assert line_rows == 110
+        assert 0 + failed == total  # reconciles: nothing unaccounted
 
 
 class TestSkipExisting:

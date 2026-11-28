@@ -172,6 +172,65 @@ def _warn_empty_ids(
     return empty_count
 
 
+def _count_parent_rows(rows: list[list[Any]], id_index: int) -> int:
+    """Count rows carrying a non-empty 'id' (parent records, not o2m line rows).
+
+    Args:
+        rows: Rows to inspect (each at least ``id_index + 1`` wide; a trailing
+            reason column, as in a fail-file row, is ignored).
+        id_index: The position of the 'id' column.
+
+    Returns:
+        int: How many rows have a non-empty 'id' cell.
+    """
+    count = 0
+    for row in rows:
+        if id_index < len(row):
+            value = row[id_index]
+            if value is not None and str(value).strip():
+                count += 1
+    return count
+
+
+def _record_counts(
+    *,
+    o2m: bool,
+    header: list[str] | None,
+    record_count: int,
+    o2m_line_rows: int,
+    failed_lines: list[list[Any]],
+    guarded_rows: list[tuple[list[Any], str]],
+) -> tuple[int, int, int]:
+    """Reconcile the run's totals in one unit so nothing can be hidden.
+
+    Outside o2m every row is a record. In o2m mode a record is a parent row
+    (plus its continuation line rows) and ``load()`` returns one id per parent,
+    so created, failed and total are all counted as **parent records** and the
+    line rows are reported separately. Counting failures as rows while the total
+    counts parents would let a failed group's line rows (and guarded continuation
+    rows) inflate ``failed`` and mask a silently dropped parent.
+
+    Args:
+        o2m: Whether this was a one-to-many load.
+        header: The CSV header (needed to find the 'id' column in o2m mode).
+        record_count: Total data rows read.
+        o2m_line_rows: Continuation (empty-'id') rows, counted in o2m mode.
+        failed_lines: Rows that failed the load (each with a trailing reason).
+        guarded_rows: Rows the immutable guard refused, as ``(row, reason)``.
+
+    Returns:
+        tuple[int, int, int]: ``(total_records, failed_records, line_rows)`` in a
+        single unit (parent records in o2m mode), with ``line_rows`` separate.
+    """
+    if o2m and header and "id" in header:
+        id_index = header.index("id")
+        failed = _count_parent_rows(failed_lines, id_index) + _count_parent_rows(
+            [row for row, _reason in guarded_rows], id_index
+        )
+        return record_count - o2m_line_rows, failed, o2m_line_rows
+    return record_count, len(failed_lines) + len(guarded_rows), 0
+
+
 # Default maximum batch size in bytes (5MB)
 DEFAULT_MAX_BATCH_BYTES = 5 * 1024 * 1024
 
@@ -3927,18 +3986,28 @@ def import_data(  # noqa: C901
 
     overall_success = pass_1_successful and pass_2_successful
 
-    # Get failed records count from pass_1_results, plus the rows the immutable
-    # guard (#358) refused before the load (already written to the fail file).
-    failed_records = len(pass_1_results.get("failed_lines", [])) + len(guarded_rows)
+    # Count created/failed/total in one unit (parent records in o2m mode) and the
+    # continuation line rows separately, plus the rows the immutable guard (#358)
+    # refused before the load (already written to the fail file).
+    total_records, failed_records, line_rows = _record_counts(
+        o2m=o2m,
+        header=header,
+        record_count=record_count,
+        o2m_line_rows=o2m_line_rows,
+        failed_lines=pass_1_results.get("failed_lines", []),
+        guarded_rows=guarded_rows,
+    )
 
     stats = {
-        "total_records": record_count,
+        "total_records": total_records,
         "created_records": len(id_map),
         "failed_records": failed_records,
         "updated_relations": updates_made,
         "id_map": id_map,
         "fallback_records": pass_1_results.get("fallback_records", 0),
     }
+    if line_rows:
+        stats["line_rows"] = line_rows
     if guarded_rows:
         reasons: dict[str, int] = {}
         for _row, reason in guarded_rows:
@@ -3946,17 +4015,17 @@ def import_data(  # noqa: C901
         stats["immutable_guarded"] = reasons
 
     # --- Reconciliation Check ---
-    # Verify that created + failed == total (accounting for duplicates). In o2m
-    # mode the continuation (line) rows are not records — load() returns one id
-    # per parent — so they are excluded from the record total here rather than
-    # counted as unaccounted-for.
-    expected_records = record_count - o2m_line_rows
+    # Verify that created + failed == total, all in the same unit (parent records
+    # in o2m mode, where the continuation line rows are reported separately), so a
+    # silently dropped record cannot be hidden by line rows inflating the failure
+    # count.
     accounted_records = len(id_map) + failed_records
-    if expected_records > 0 and accounted_records < expected_records:
-        unaccounted = expected_records - accounted_records
+    if total_records > 0 and accounted_records < total_records:
+        unaccounted = total_records - accounted_records
+        line_note = f" ({line_rows} line row(s))" if line_rows else ""
         log.warning(
             f"Record reconciliation discrepancy detected: "
-            f"{expected_records} total records, {len(id_map)} created, "
+            f"{total_records} total records{line_note}, {len(id_map)} created, "
             f"{failed_records} failed = {accounted_records} accounted. "
             f"{unaccounted} records unaccounted for. "
             f"This may indicate records with duplicate IDs (expected) or "
