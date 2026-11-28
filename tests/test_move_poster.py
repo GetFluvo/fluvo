@@ -249,6 +249,30 @@ def test_sequence_date_mismatch_is_classified(tmp_path: Path) -> None:
     assert _read_fail(res)["t.d1"][0] == SEQUENCE_DATE_MISMATCH
 
 
+def test_post_fail_message_extracts_odoo_message(tmp_path: Path) -> None:
+    """A raw JSON-RPC fault is reduced to Odoo's own message in the fail file."""
+    db = _DB()
+    mid = db.add_move("t.d1", state="draft", name="A")
+    db.refuse[mid] = str(
+        {
+            "code": 200,
+            "message": "Odoo Server Error",
+            "data": {
+                "name": "odoo.exceptions.UserError",
+                "message": "You cannot post an entry that is unbalanced.",
+                "arguments": ["You cannot post an entry that is unbalanced."],
+                "debug": "Traceback (most recent call last): ...",
+            },
+        }
+    )
+    f = _src(tmp_path, "id;x\nt.d1;1\n")
+    res = run_post_moves("c", f, connect=lambda _c: _Conn(db))
+    assert res.status is RunStatus.FAILED
+    _reason, message = _read_fail(res)["t.d1"]
+    assert message == "You cannot post an entry that is unbalanced."
+    assert "Traceback" not in message and "'data'" not in message
+
+
 def test_batch_fallback_isolates_one_bad_move(tmp_path: Path) -> None:
     """One unpostable move in a batch does not block the good ones."""
     db = _DB()

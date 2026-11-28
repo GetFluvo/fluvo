@@ -33,6 +33,7 @@ from .lib import throttle as throttle_lib
 from .lib.core import FluvoError
 from .lib.internal.rpc_thread import RpcThread
 from .lib.internal.tools import batch, to_xmlid
+from .lib.odoo_errors import format_odoo_error
 from .logging_config import log, suppress_console_handler
 
 try:
@@ -43,20 +44,18 @@ except OverflowError:
 
 # --- Helper Functions ---
 def _format_odoo_error(error: Any) -> str:
-    """Tries to extract the meaningful message from an Odoo RPC error."""
-    if not isinstance(error, str):
-        error = str(error)
-    try:
-        error_dict = ast.literal_eval(error)
-        if (
-            isinstance(error_dict, dict)
-            and "data" in error_dict
-            and "message" in error_dict["data"]
-        ):
-            return str(error_dict["data"]["message"])
-    except (ValueError, SyntaxError):
-        pass
-    return str(error).strip().replace("\n", " ")
+    """Tries to extract the meaningful message from an Odoo RPC error.
+
+    Thin wrapper over :func:`fluvo.lib.odoo_errors.format_odoo_error`, the single
+    extractor the load path and the post step share.
+
+    Args:
+        error: The exception, fault dict, or error string.
+
+    Returns:
+        str: The cleaned, human-readable message.
+    """
+    return format_odoo_error(error)
 
 
 def _extract_per_row_errors(messages: list[dict[str, Any]]) -> dict[int, str]:
