@@ -334,6 +334,44 @@ def _control_total_mismatch_ledger() -> CanonicalLedger:
     )
 
 
+def _tx_count_mismatch_ledger(software: str) -> CanonicalLedger:
+    """A ledger whose declared transaction-line count is wrong for its parse."""
+    return _ledger(
+        accounts=[{"account_id": "1300", "kind": "balance"}],
+        journals=[{"journal_id": "S", "kind": "sale"}],
+        moves=[{"move_key": "S/1", "journal_id": "S", "number": "1"}],
+        lines=[
+            {"move_key": "S/1", "line_number": 1, "account_id": "1300", "debit": 100.0},
+            {
+                "move_key": "S/1",
+                "line_number": 2,
+                "account_id": "1300",
+                "credit": 100.0,
+            },
+        ],
+        # The file declares one transaction, but the parse finds two lines.
+        header_extra={"software": software, "declared_tx_count": 1},
+    )
+
+
+def test_banana_tx_count_mismatch_names_the_dialect_but_still_blocks() -> None:
+    """Banana's linesCount quirk is named in the message, but it still errors."""
+    report = _report(_tx_count_mismatch_ledger("Banana Accounting"))
+    finding = next(f for f in report.findings if f.code == "control_total_mismatch")
+    assert finding.severity == ERROR
+    assert "Banana" in finding.message
+    # Still blocks by default — it is not auto-allowed.
+    assert report.is_blocking(allow_warnings=True) is True
+
+
+def test_non_banana_tx_count_mismatch_has_no_dialect_note() -> None:
+    """A non-Banana producer gets the mismatch error without the Banana note."""
+    report = _report(_tx_count_mismatch_ledger("Some Other Package"))
+    finding = next(f for f in report.findings if f.code == "control_total_mismatch")
+    assert finding.severity == ERROR
+    assert "Banana" not in finding.message
+
+
 def test_control_total_mismatch_is_error() -> None:
     """A declared total not matching the parse is an error, not a warning.
 

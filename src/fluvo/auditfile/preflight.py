@@ -30,7 +30,9 @@ guess a fix:
   the base amount is staged.
 * **control_total_mismatch** (error) — the file's declared control totals do
   not match what was parsed, so the parse may be incomplete or mis-parsed;
-  override explicitly with ``--allow-control-total-mismatch``.
+  override explicitly with ``--allow-control-total-mismatch``. When the producer
+  is recognised (Banana Accounting writes the transaction ``linesCount`` as a
+  count of transactions, not lines), the message says so — but still blocks.
 * **match_collision** (error) — a source account's code already exists in the
   target but could not be matched (ambiguous / no external id); re-creating it
   would fail on the unique code.
@@ -516,6 +518,7 @@ def _check_control_totals(ledger: CanonicalLedger) -> list[Finding]:
         list[Finding]: A single warning finding, or empty.
     """
     header = ledger.header.to_dicts()[0]
+    software = str(header.get("software") or "")
     gl = ledger.opening_lines.filter(pl.col("source_partner_id").is_null())
     lines = ledger.lines
     checks = (
@@ -527,24 +530,34 @@ def _check_control_totals(ledger: CanonicalLedger) -> list[Finding]:
         ("transaction credit", "declared_tx_credit", _sum(lines, "credit")),
     )
     mismatches: list[str] = []
+    tx_count_mismatch = False
     for label, key, actual in checks:
         declared = header.get(key)
         if declared is None:
             continue
         if abs(float(declared) - actual) > BALANCE_TOLERANCE:
             mismatches.append(f"{label}: file {float(declared):g} vs parsed {actual:g}")
+            if label == "transaction lines":
+                tx_count_mismatch = True
     if not mismatches:
         return []
-    return [
-        _finding(
-            "control_total_mismatch",
-            ERROR,
-            "{n} declared control total(s) do not match the parse; the file may "
-            "be incomplete or mis-parsed. Fix the file, or pass "
-            "--allow-control-total-mismatch to proceed anyway.",
-            mismatches,
+    message = (
+        "{n} declared control total(s) do not match the parse; the file may "
+        "be incomplete or mis-parsed. Fix the file, or pass "
+        "--allow-control-total-mismatch to proceed anyway."
+    )
+    # Banana Accounting writes the transaction block's linesCount as the number
+    # of transactions, not of lines, so a transaction-line count mismatch is a
+    # known quirk of its export. Name it (but do not auto-allow — the amounts
+    # still have to be checked).
+    if tx_count_mismatch and "banana" in software.lower():
+        message += (
+            " Note: this file was produced by Banana Accounting, which writes the "
+            "transaction block's linesCount as the number of transactions, not of "
+            "lines, so a transaction-line count mismatch is expected from it. "
+            "Confirm the amounts tie out, then pass --allow-control-total-mismatch."
         )
-    ]
+    return [_finding("control_total_mismatch", ERROR, message, mismatches)]
 
 
 def _sum(frame: pl.DataFrame, column: str) -> float:
